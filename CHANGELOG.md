@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0 (2026-09-29)
+
 - **Machine > Dev servers**: the port ledger in the panel. Local services
   (running first, Start or Stop when pm2 runs them, a link when live), your
   pinned ports, and one-offs with Reap for the expired ones; Reap asks first
@@ -10,14 +12,10 @@
 - **Machine > Local models**: what Ollama holds in memory, with size, time
   left and Unload; the warm companion (Load / Unload, same as `warm on/off`);
   memory pressure; a mem-guard switch; and running mlx jobs.
-- The Warden transcript icon starts the session hub itself when it is off,
-  instead of sending you to switch it on. Button failures read as a sentence:
-  "Couldn't open the warden's transcript: …".
+- Row buttons that fail say so in a sentence: "Couldn't stop Relay: …".
 - **Home**: rename a bulb by clicking its name (Enter saves, Esc cancels). It
   works for a bulb that is not answering too. The old Rename… alert opened
   from inside the panel's menu and never saved a name.
-
-## 0.2.0 (2026-09-29)
 
 - **Machine > Guards**: every gate is listed, not only the muted ones. Gates
   opens inside the panel to the ones that are off (muted, with Re-arm; snoozed
@@ -36,8 +34,8 @@
   them in a terminal (`claude-ipc -i`, `claude-warden open`). The warden one
   opens a fork, so the running warden is never touched.
 - **Warden** also has a transcript icon: it opens the warden's current session
-  in a window, rendered by the claude-instances session hub. It needs the
-  Session Hub on and says so when it is off.
+  in a window, rendered by the claude-instances session hub, which it starts
+  when it is off.
 
 - **Machine > Context**: switch the claude.ai connectors (Vercel, Linear,
   Figma, Slack…) and the browser tools (Playwright, Chrome DevTools) off for
