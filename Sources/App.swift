@@ -124,11 +124,13 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var submenu: (() -> NSMenu)? = nil
         var tip: String = ""
         var link: String? = nil
+        var children: [SystemRow] = []
     }
 
     /// Everything the rows render, read off the main thread in one pass.
     struct SBSnapshot {
         var muted: [MutedGuard] = []
+        var gates: [GateState] = []
         var approvals: [PushApproval] = []
         var prompts: [SettingsFlag: Bool] = [:]
         var boardSync = false
@@ -153,7 +155,10 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
     func refreshSnapshot(completion: (() -> Void)? = nil) {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             var s = SBSnapshot()
-            if Integrations.guardHooks { s.muted = Guards.muted() }
+            if Integrations.guardHooks {
+                s.muted = Guards.muted()
+                s.gates = Guards.all()
+            }
             s.approvals = PushApprovals.armed(liveSessionIDs: LiveSessions.ids())
             if Integrations.claudeCode {
                 for f in SettingsFlag.allCases { s.prompts[f] = Settings.bool(f) }
@@ -221,23 +226,70 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         guard Integrations.guardHooks || Integrations.claudeCode else { return [] }
         let s = sbSnapshot
         let stale = s.approvals.filter { !$0.sessionIsLive }
-        let suppressed = SettingsFlag.allCases.filter { $0.isSuppressor && (s.prompts[$0] ?? false) }
-        if s.muted.isEmpty && stale.isEmpty && suppressed.isEmpty {
-            return [SBRow(label: "All armed", badge: .ok, note: "no mutes, no stale approvals", enabled: false,
-                          tip: "No guard is muted and no push approval is left armed.")]
-        }
+        let f = DateFormatter(); f.dateFormat = "d MMM"
         var rows: [SBRow] = []
-        if !s.muted.isEmpty {
-            rows.append(SBRow(label: "Muted guards", badge: .count(s.muted.count, menuYellow),
-                              note: s.muted.prefix(3).map { $0.name }.joined(separator: " · "),
-                              submenu: { [weak self] in self?.mutedGuardsMenu() ?? NSMenu() },
-                              tip: "Guards switched off machine-wide. Click one to re-arm it."))
+
+        // Every gate, opened inside the card: off ones first with the one
+        // action that restores them, then the ones that are on.
+        if Integrations.guardHooks && !s.gates.isEmpty {
+            let offCount = s.gates.filter { if case .on = $0.kind { return false }; return true }.count
+            // The gates that are on fold into one row of their own: 60-odd
+            // green rows would bury the few that need attention.
+            var onRows: [SystemRow] = []
+            var children: [SystemRow] = s.gates.compactMap { g in
+                switch g.kind {
+                case .on:
+                    var r = SystemRow(label: g.name, state: .on(menuGreen), note: "on", tip: "This gate is armed.")
+                    r.key = "gate-on-" + g.name
+                    onRows.append(r)
+                    return nil
+                case .muted(let m):
+                    var r = SystemRow(label: g.name, state: .off,
+                                      note: m.mutedAt.map { "muted since \(f.string(from: $0))" } ?? "muted",
+                                      tip: "Switched off by ~/.claude/\(m.sentinel). Re-arm deletes that file; muting again stays a deliberate act in a shell.",
+                                      action: { [weak self] in Guards.rearm(m); self?.refreshSnapshot() })
+                    r.buttonLabel = "Re-arm"
+                    return r
+                case .snoozed(let z):
+                    var r = SystemRow(label: g.name, state: .off,
+                                      note: "snoozed" + (z.until.map { " until \(f.string(from: $0))" } ?? "")
+                                          + (z.scope == "global" ? "" : " · \(z.scope)"),
+                                      tip: z.reason.isEmpty ? "Snoozed through hook-snooze.sh." : z.reason,
+                                      action: { [weak self] in HookSnoozes.lift(z); self?.refreshSnapshot() })
+                    r.buttonLabel = "Lift"
+                    return r
+                }
+            }
+            if !onRows.isEmpty {
+                var on = SystemRow(label: "\(onRows.count) on", state: .count(onRows.count, menuGreen),
+                                   note: "armed and working", tip: "Every gate that is armed. Click to list them.")
+                on.key = "gates-on"
+                on.children = onRows
+                children.append(on)
+            }
+            rows.append(SBRow(label: "Gates", badge: offCount == 0 ? .ok : .count(offCount, menuYellow),
+                              note: offCount == 0 ? "all \(s.gates.count) on" : "\(offCount) off · \(s.gates.count - offCount) on",
+                              tip: "Every hook gate: on, muted by a file, or snoozed with an expiry. Click to open.",
+                              children: children))
         }
-        if !suppressed.isEmpty {
-            rows.append(SBRow(label: "Permission prompts", badge: .count(suppressed.count, menuYellow),
-                              note: "suppressed in settings.json",
-                              submenu: { [weak self] in self?.promptsMenu() ?? NSMenu() },
-                              tip: "Confirmation prompts currently suppressed. Click one to bring it back."))
+
+        // The prompt, not the skip: "on" always means the safer state.
+        if Integrations.claudeCode {
+            let flags = SettingsFlag.allCases.filter { $0.isSuppressor }
+            let suppressed = flags.filter { s.prompts[$0] ?? false }
+            let children: [SystemRow] = flags.map { flag in
+                let off = s.prompts[flag] ?? false
+                return SystemRow(label: flag.label, state: off ? .off : .on(menuGreen),
+                                 note: off ? "suppressed" : "asks first",
+                                 tip: off ? "Turn on to bring this confirmation back."
+                                          : "This prompt is active. Turning it off asks for confirmation first.",
+                                 action: { [weak self] in self?.togglePrompt(flag, suppressed: off) })
+            }
+            rows.append(SBRow(label: "Permission prompts",
+                              badge: suppressed.isEmpty ? .ok : .count(suppressed.count, menuYellow),
+                              note: suppressed.isEmpty ? "all ask first" : "\(suppressed.count) suppressed in settings.json",
+                              tip: "Claude Code's confirmation prompts. Click to open.",
+                              children: children))
         }
         if !stale.isEmpty {
             rows.append(SBRow(label: "Push approvals", badge: .count(stale.count, menuYellow),
@@ -362,43 +414,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         return rows
     }
 
-    // ── Drill-downs ──────────────────────────────────────────────────────────
-
-    private func mutedGuardsMenu() -> NSMenu {
-        let m = NSMenu()
-        m.autoenablesItems = false
-        let f = DateFormatter(); f.dateFormat = "d MMM"
-        let rows = sbSnapshot.muted.map { g in
-            SBRow(label: g.name, badge: .off, note: g.mutedAt.map { "muted \(f.string(from: $0))" } ?? "muted",
-                  onClick: { [weak self] in Guards.rearm(g); self?.refreshSnapshot() },
-                  tip: "Click to re-arm this guard. Muting again stays a deliberate touch in a shell.")
-        }
-        let column = labelColumn(rows)
-        rows.forEach { addMenuRow(m, $0, labelColumn: column) }
-        m.addItem(.separator())
-        addNote(m, "Click re-arms. Muting stays a deliberate touch.")
-        return m
-    }
-
-    /// The row reads as the PROMPT, not the skip, so "on" always means the
-    /// safer state and a stray click can only add friction.
-    private func promptsMenu() -> NSMenu {
-        let m = NSMenu()
-        m.autoenablesItems = false
-        let rows = SettingsFlag.allCases.filter { $0.isSuppressor }.map { flag -> SBRow in
-            let suppressed = sbSnapshot.prompts[flag] ?? false
-            return SBRow(label: flag.label, badge: suppressed ? .off : .on(menuGreen),
-                         note: suppressed ? "suppressed" : "asks first",
-                         onClick: { [weak self] in self?.togglePrompt(flag, suppressed: suppressed) },
-                         tip: suppressed ? "Click to bring this confirmation back."
-                                         : "This prompt is active. Suppressing it will ask for confirmation.")
-        }
-        let column = labelColumn(rows)
-        rows.forEach { addMenuRow(m, $0, labelColumn: column) }
-        m.addItem(.separator())
-        addNote(m, "Restoring a prompt is one click. Suppressing one asks.")
-        return m
-    }
+    // ── Permission prompts ───────────────────────────────────────────────────
 
     private func togglePrompt(_ flag: SettingsFlag, suppressed: Bool) {
         if suppressed {
@@ -416,57 +432,6 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         guard a.runModal() == .alertFirstButtonReturn else { return }
         Settings.write(key: flag.rawValue, value: true)
         refreshSnapshot()
-    }
-
-    private func addNote(_ menu: NSMenu, _ text: String) {
-        let i = NSMenuItem()
-        i.attributedTitle = seg("  " + text, BarFont.caption, .tertiaryLabelColor)
-        i.isEnabled = false
-        menu.addItem(i)
-    }
-
-    /// Widest label in a list, so the rail is sized by its content.
-    private func labelColumn(_ rows: [SBRow]) -> CGFloat {
-        let widest = rows.map { r -> CGFloat in
-            let f = NSTextField(labelWithString: r.label)
-            f.font = BarFont.body
-            return ceil(f.attributedStringValue.size().width)
-        }.max() ?? BarFont.scaled(112)
-        return min(max(widest + BarFont.scaled(12), BarFont.scaled(96)), BarFont.scaled(190))
-    }
-
-    /// One drill-down row: label, badge, consequence. A view-based menu item
-    /// never sends its action, so the click is wired on the view.
-    private func addMenuRow(_ menu: NSMenu, _ r: SBRow, labelColumn: CGFloat) {
-        let padL = BarFont.scaled(18), badgeW = BarFont.scaled(40), noteW = BarFont.scaled(140)
-        let h = BarFont.scaled(26)
-        let v = MenuRowView(frame: NSRect(x: 0, y: 0, width: padL + labelColumn + badgeW + noteW + BarFont.scaled(14), height: h))
-        v.rowEnabled = r.enabled && r.onClick != nil
-
-        let name = NSTextField(labelWithString: r.label)
-        name.font = BarFont.body
-        name.textColor = r.enabled ? .labelColor : .secondaryLabelColor
-        let nameH = ceil(name.attributedStringValue.size().height)
-        name.frame = NSRect(x: padL, y: (h - nameH) / 2, width: labelColumn, height: nameH)
-        v.addSubview(name)
-
-        let badge = makeStateBadge(r.badge.text, tint: r.badge.tint)
-        badge.setFrameOrigin(NSPoint(x: padL + labelColumn, y: (h - badge.frame.height) / 2))
-        v.addSubview(badge)
-
-        let note = NSTextField(labelWithString: r.note)
-        note.font = BarFont.monoCaption
-        note.textColor = .tertiaryLabelColor
-        let noteH = ceil(note.attributedStringValue.size().height)
-        note.frame = NSRect(x: padL + labelColumn + badgeW, y: (h - noteH) / 2, width: noteW, height: noteH)
-        v.addSubview(note)
-
-        let item = NSMenuItem(title: r.label, action: nil, keyEquivalent: "")
-        item.view = v
-        item.isEnabled = r.enabled
-        item.toolTip = r.tip
-        if let click = r.onClick { v.onClick = click }
-        menu.addItem(item)
     }
 
     // ── The Machine tab ──────────────────────────────────────────────────────
@@ -491,6 +456,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             }
             var row = SystemRow(label: r.label, state: state, note: r.note, enabled: r.enabled,
                                 tip: r.tip, link: r.link, action: r.onClick, menu: r.submenu)
+            row.children = r.children
             if row.isSwitch && r.enabled {
                 row.timerKey = r.label
                 row.timer = systemTimers[r.label]
@@ -525,6 +491,15 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 out.append(String(format: "  %-20@ %-6@ %-28@ %@%@", r.label as NSString, badge as NSString,
                                   r.note as NSString, affordance as NSString, (r.enabled ? "" : " disabled") as NSString))
                 if let link = r.link { out.append("      link: \(link)") }
+                for c in r.children {
+                    let cb: String
+                    switch c.state {
+                    case .on: cb = "[on]"; case .off: cb = "(off)"
+                    case .count(let n, _): cb = "[\(n)]"; case .ok: cb = "(ok)"
+                    }
+                    out.append(String(format: "      · %-26@ %-6@ %@%@", c.label as NSString, cb as NSString,
+                                      c.note as NSString, (c.buttonLabel.map { "  [\($0)]" } ?? "") as NSString))
+                }
             }
         }
         out.append("\nsnapshot: muted=\(sbSnapshot.muted.count) approvals=\(sbSnapshot.approvals.count) "

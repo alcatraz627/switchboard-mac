@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Machine > Guards**: every gate is listed, not only the muted ones. Gates
+  opens inside the panel to the ones that are off (muted, with Re-arm; snoozed
+  through hook-snooze.sh, with its date and Lift), with the rest folded under
+  "N on". Permission prompts opens to a switch per prompt. The old AppKit
+  drop-down menus for both are gone.
+- Rows that open a list or a menu are clickable across the whole row.
+
 - **Machine > Context**: switch the claude.ai connectors (Vercel, Linear,
   Figma, Slack…) and the browser tools (Playwright, Chrome DevTools) off for
   new Claude sessions, so their tool names and instructions stop loading.

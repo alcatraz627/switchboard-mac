@@ -224,6 +224,11 @@ struct SystemRow: Identifiable {
     var timerKey: String? = nil
     /// A stable identity when labels can repeat (two jobs with one name).
     var key: String? = nil
+    /// Rows that open inside the card when this row is clicked, in place of a
+    /// native menu.
+    var children: [SystemRow] = []
+    /// A child's one action as a labelled button ("Re-arm", "Lift").
+    var buttonLabel: String? = nil
 
     var id: String { key ?? label }
     /// A plain on/off with a single action renders as a switch.

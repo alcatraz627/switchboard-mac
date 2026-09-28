@@ -98,6 +98,81 @@ enum Guards {
     }
 }
 
+// ── Guards: every gate and its state ─────────────────────────────────────────
+
+/// One gate as the panel lists it: on, muted by a sentinel file, or snoozed
+/// through hook-snooze.sh with an expiry and a reason.
+struct GateState {
+    enum Kind { case on, muted(MutedGuard), snoozed(HookSnooze) }
+    let name: String
+    let kind: Kind
+}
+
+struct HookSnooze {
+    let id: String
+    let hook: String
+    let scope: String
+    let until: Date?
+    let reason: String
+}
+
+enum HookSnoozes {
+    static var ledger: String { SwitchboardPaths.gccRoot + "/hooks/snooze.jsonl" }
+    static var cli: String { SwitchboardPaths.hooksDir + "/hook-snooze.sh" }
+
+    /// Live rows of the snooze ledger; expired ones are skipped, as the CLI does.
+    static func live(now: Date = Date()) -> [HookSnooze] {
+        guard let text = try? String(contentsOfFile: ledger, encoding: .utf8) else { return [] }
+        let iso = ISO8601DateFormatter()
+        var byId: [String: HookSnooze] = [:]
+        for line in text.split(separator: "\n") {
+            guard let o = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let id = o["id"] as? String, let hook = o["hook"] as? String else { continue }
+            var until: Date?
+            if let s = o["until"] as? String { until = iso.date(from: s) }
+            else if let n = o["until"] as? NSNumber { until = Date(timeIntervalSince1970: n.doubleValue) }
+            if o["lifted"] as? Bool == true { byId[id] = nil; continue }
+            if let u = until, u <= now { continue }
+            byId[id] = HookSnooze(id: id, hook: hook, scope: o["scope"] as? String ?? "global",
+                                  until: until, reason: o["reason"] as? String ?? "")
+        }
+        return byId.values.sorted { $0.hook < $1.hook }
+    }
+
+    /// Lift one snooze through its own CLI, so the ledger stays its format.
+    @discardableResult
+    static func lift(_ s: HookSnooze) -> Bool {
+        guard FileManager.default.fileExists(atPath: cli) else { return false }
+        _ = Services.shell("/bin/bash", [cli, "lift", s.id])
+        return !live().contains { $0.id == s.id }
+    }
+}
+
+extension Guards {
+    /// Every gate this machine knows of: sentinel gates (on or muted) and
+    /// snoozed hooks. Off ones first, then the rest by name.
+    static func all() -> [GateState] {
+        let muted = Dictionary(muted().map { ($0.sentinel, $0) }, uniquingKeysWith: { a, _ in a })
+        var gates: [GateState] = knownSentinels().compactMap { s in
+            guard s != ".allow-fable-subagents", !s.contains(".allow-") else { return nil }
+            if let m = muted[s] { return GateState(name: m.name, kind: .muted(m)) }
+            return GateState(name: displayName(s), kind: .on)
+        }
+        for z in HookSnoozes.live() {
+            gates.removeAll { $0.name == z.hook }
+            gates.append(GateState(name: z.hook, kind: .snoozed(z)))
+        }
+        func off(_ g: GateState) -> Int { if case .on = g.kind { return 1 }; return 0 }
+        return gates.sorted { (off($0), $0.name) < (off($1), $1.name) }
+    }
+
+    static func displayName(_ sentinel: String) -> String {
+        var name = (sentinel as NSString).lastPathComponent
+        for prefix in [".no-", ".allow-"] where name.hasPrefix(prefix) { name = String(name.dropFirst(prefix.count)) }
+        return name.hasPrefix(".") ? String(name.dropFirst()) : name
+    }
+}
+
 // ── Guards: stale push approvals ─────────────────────────────────────────────
 
 struct PushApproval {

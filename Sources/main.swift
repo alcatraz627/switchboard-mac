@@ -47,6 +47,7 @@ if args.contains("--dump-policy") {
 if let out = argAfter("--snapshot") {
     let tab = argAfter("--tab") ?? "agents"
     BulbRow.startExpanded = args.contains("--expand")
+    SystemRowView.startExpanded = args.contains("--expand")
     let ok = snapshotPolicyPanel(to: out, dark: !args.contains("--light"), scopeDir: argAfter("--scope"), tab: tab,
                                  system: tab == "system" ? delegate.panelSystemGroupsFresh() : [])
     print(ok ? "wrote \(out)" : "snapshot failed")

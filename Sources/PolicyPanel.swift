@@ -397,7 +397,7 @@ struct Card<Content: View>: View {
 
 // ── A system row: the dropdown Switchboard's row, as a panel row ───────────
 
-private struct SystemRowView: View {
+struct SystemRowView: View {
     let row: SystemRow
     @ObservedObject var store: PolicyStore
     @State private var picking = false
@@ -405,11 +405,44 @@ private struct SystemRowView: View {
     /// A flip asked for and not yet seen by the next probe.
     @State private var pendingFlip: PendingChange<Bool>?
     @State private var failure: String?
+    @State private var expanded: Bool
+    @State private var hovering = false
+    var indent: CGFloat = 0
+
+    init(row: SystemRow, store: PolicyStore, indent: CGFloat = 0) {
+        self.row = row
+        self.store = store
+        self.indent = indent
+        // Headless --expand opens the top rows only, so nested lists stay folded.
+        _expanded = State(initialValue: SystemRowView.startExpanded && indent == 0)
+    }
+
+    /// Headless renders set this (--expand) so opened rows can be checked.
+    static var startExpanded = false
+
+    private var opens: Bool { !row.children.isEmpty }
 
     var body: some View {
         VStack(spacing: 0) {
             mainLine
+                .background(hovering && (opens || row.menu != nil) ? Color.primary.opacity(0.05) : .clear)
+                .onHover { hovering = $0 }
+                // The whole row is the target for a row that opens something;
+                // the small chevron alone was too hard to hit.
+                .onTapGesture {
+                    if opens { withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() } }
+                    else if let menu = row.menu { menu().popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil) }
+                }
             if picking, let key = row.timerKey { timePicker(key) }
+            if opens && expanded {
+                VStack(spacing: 0) {
+                    ForEach(row.children) { child in
+                        Divider().padding(.leading, PT.rowH + indent + 14)
+                        AnyView(SystemRowView(row: child, store: store, indent: indent + 14))
+                    }
+                }
+                .background(Color.primary.opacity(0.025))
+            }
             if let f = failure {
                 RowFailure(message: f, retry: row.isSwitch ? { flip(to: !row.isOn) } : nil,
                            dismiss: { failure = nil })
@@ -468,7 +501,8 @@ private struct SystemRowView: View {
             }
             control.frame(minWidth: 44, alignment: .trailing)
         }
-        .padding(.horizontal, PT.rowH)
+        .padding(.leading, PT.rowH + indent)
+        .padding(.trailing, PT.rowH)
         .padding(.vertical, PT.rowV)
         .contentShape(Rectangle())
         .help(row.tip)
@@ -548,7 +582,16 @@ private struct SystemRowView: View {
     }
 
     @ViewBuilder private var control: some View {
-        if let choices = row.choices {
+        if opens {
+            HStack(spacing: 4) {
+                StateBadge(state: row.state)
+                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+            }
+        } else if let label = row.buttonLabel, let action = row.action {
+            Button(label, action: action).controlSize(.small)
+        } else if let choices = row.choices {
             Picker("", selection: Binding(get: { row.selected }, set: { row.onChoose?($0) })) {
                 ForEach(Array(choices.enumerated()), id: \.offset) { i, c in Text(c).tag(i) }
             }
