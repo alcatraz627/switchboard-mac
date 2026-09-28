@@ -61,6 +61,15 @@ check("snooze keeps the current value", item("github.comment")?.value == .text("
 t = Date(); store.cancelSnooze(item("github.comment")!); settle(t)
 check("cancel removes the snooze", item("github.comment")?.snooze == nil)
 
+// The multi-day presets go out as "--for Nd"; the end time must land N days out.
+for days in [2, 3] {
+    t = Date(); store.snooze(item("github.comment")!, seconds: days * 86400, then: .text("block")); settle(t)
+    let until = item("github.comment")?.snooze?.until.timeIntervalSinceNow ?? 0
+    check("\(days)-day snooze ends \(days) days out", abs(until - Double(days * 86400)) < 120,
+          "until in \(Int(until))s, \(store.error ?? "")")
+    t = Date(); store.cancelSnooze(item("github.comment")!); settle(t)
+}
+
 // "At the end of today" snooze.
 t = Date(); store.snoozeTonight(item("model.fable")!, then: .text("block")); settle(t)
 check("end-of-today snooze recorded", item("model.fable")?.snooze != nil, store.error ?? "")
