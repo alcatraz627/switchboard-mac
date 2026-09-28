@@ -150,6 +150,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var jobs: [[String: Any]] = []
         var wolTargets: [[String: Any]] = []
         var devServers: [[String: Any]] = []
+        var models: [String: Any] = [:]
     }
 
     /// Refresh the slow half off the main thread. The panel shows whatever
@@ -194,6 +195,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             let dev = Services.shell("/usr/bin/env", ["python3", AppPaths.lib("devservers.py"), "list"], timeout: 20)
             s.devServers = ((try? JSONSerialization.jsonObject(with: Data(dev.utf8)) as? [String: Any])?["servers"]
                 as? [[String: Any]]) ?? []
+            let models = Services.shell("/usr/bin/env", ["python3", AppPaths.lib("models.py"), "list"], timeout: 15)
+            s.models = (try? JSONSerialization.jsonObject(with: Data(models.utf8)) as? [String: Any]) ?? [:]
             DispatchQueue.main.async {
                 self?.sbSnapshot = s
                 if self?.kanbanBusy == false { self?.kanbanUp = kanban }
@@ -370,16 +373,27 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                               onClick: { [weak self] in Warden.set(running: !wr); self?.refreshSnapshot() },
                               tip: "The session warden. Click toggles YOUR pause. The yellow standing-down state is the usage gate; it clears itself when a window reopens.",
                               buttons: [
-                                  RowButton(label: "Transcript", kind: .run({
+                                  RowButton(label: "Transcript", kind: .run({ [weak self] in
                                       guard let sid = Warden.currentSession() else {
                                           return "the warden has no current session yet"
                                       }
-                                      guard Services.probeHTTP("http://127.0.0.1:5400/healthz") else {
-                                          return "Session Hub is off. Turn it on under Services, then try again."
+                                      // The hub renders the page; start it when it is off, as its own
+                                      // Services switch would, rather than sending you there.
+                                      if !Services.probeHTTP("http://127.0.0.1:5400/healthz") {
+                                          guard let hub = Integrations.hubScript else { return "the session hub is not installed" }
+                                          _ = Services.shell("/bin/bash", [hub, "restart"], timeout: 15)
+                                          var up = false
+                                          for _ in 0..<20 where !up {
+                                              Thread.sleep(forTimeInterval: 0.4)
+                                              up = Services.probeHTTP("http://127.0.0.1:5400/healthz")
+                                          }
+                                          self?.refreshSnapshot()
+                                          guard up else { return "the session hub did not start" }
                                       }
                                       DispatchQueue.main.async { TranscriptWindow.show(sessionID: sid, title: "Warden transcript") }
                                       return nil
-                                  }), help: "Read the warden's session, rendered by the session hub", icon: "text.bubble"),
+                                  }), help: "Read the warden's session. Starts the session hub if it is off.",
+                                            icon: "text.bubble", doing: "open the warden's transcript"),
                                   RowButton(label: "Copy", kind: .copy("claude-warden open"),
                                             help: "Copy claude-warden open: it opens a fork of the warden's session, so the warden itself and its beats are untouched"),
                               ]))
@@ -491,6 +505,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         }
         let dev = devServerRows()
         if !dev.isEmpty { out.append(SystemGroup(title: "Dev servers", rows: dev)) }
+        let models = modelRows()
+        if !models.isEmpty { out.append(SystemGroup(title: "Local models", rows: models)) }
         let schedules = scheduleRows()
         if !schedules.isEmpty { out.append(SystemGroup(title: "Schedules", rows: schedules)) }
         out.append(SystemGroup(title: "Session", rows: sessionRows().map(convert) + [wakeOnLANRow()]))
@@ -634,6 +650,84 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                                link: "file://" + SwitchboardPaths.gccRoot + "/features/dev-servers.md")
         policy.showsBadge = false
         rows.append(policy)
+        return rows
+    }
+
+    // ── Local models: the lm suite ───────────────────────────────────────────
+
+    /// What the local models hold in memory, and the watchdog that protects the
+    /// rest of the Mac from them.
+    private func modelRows() -> [SystemRow] {
+        let m = sbSnapshot.models
+        guard m["suite"] as? Bool == true else { return [] }
+        let script = AppPaths.lib("models.py")
+        let run: ([String]) -> () -> String? = { [weak self] args in {
+            let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script] + args, timeout: 130))
+            self?.refreshSnapshot()
+            return err
+        } }
+        var rows: [SystemRow] = []
+
+        let up = m["ollama"] as? Bool ?? false
+        let resident = m["resident"] as? [[String: Any]] ?? []
+        let gb = resident.reduce(0.0) { $0 + ($1["gb"] as? Double ?? 0) }
+        var ollama = SystemRow(label: "Ollama", state: !up ? .off : resident.isEmpty ? .ok : .count(resident.count, menuTeal),
+                               note: !up ? "not running" : resident.isEmpty ? "no models loaded"
+                                   : "\(resident.count) loaded · \(String(format: "%.1f", gb)) GB",
+                               tip: "Models Ollama holds in memory, and how long each stays. Click to open.")
+        ollama.key = "models-ollama"
+        let iso = ISO8601DateFormatter(); iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        ollama.children = resident.map { r in
+            let name = r["name"] as? String ?? "?"
+            let until = (r["until"] as? String).flatMap { iso.date(from: $0) ?? ISO8601DateFormatter().date(from: $0) }
+            // Ollama reports a pinned-forever model as expiring in the year 2318.
+            let stay = until.map { $0.timeIntervalSinceNow > 86400 * 365 ? "stays loaded" : "unloads in \(countdownText(to: $0, now: Date()))" } ?? ""
+            var c = SystemRow(label: name, state: .on(menuTeal),
+                              note: "\(r["gb"] as? Double ?? 0) GB" + (stay.isEmpty ? "" : " · \(stay)"),
+                              tip: "Resident in Ollama")
+            c.key = "model-" + name
+            c.buttons = [RowButton(label: "Unload", kind: .run(run(["unload", name])), help: "Free its memory now")]
+            return c
+        }
+        if up, let warm = m["warm_model"] as? String {
+            let on = m["warm"] as? Bool ?? false
+            // A button, not a switch: loading takes longer than a switch waits
+            // for confirmation, and the button waits for the real answer.
+            var w = SystemRow(label: "Warm companion", state: on ? .on(menuGreen) : .off,
+                              note: on ? "\(warm) loaded" : "\(warm), loads on first use",
+                              tip: "lm's small default model, kept loaded so local calls answer at once. Same as warm on / warm off.")
+            w.key = "models-warm"
+            w.buttons = [RowButton(label: on ? "Unload" : "Load", kind: .run(run(["warm", on ? "off" : "on"])),
+                                   help: on ? "warm off" : "warm on: load it and keep it loaded")]
+            ollama.children.append(w)
+        }
+        rows.append(ollama)
+
+        let pressure = m["pressure"] as? String ?? "unknown"
+        var p = SystemRow(label: "Memory pressure",
+                          state: pressure == "normal" ? .ok : .on(pressure == "warn" ? menuYellow : menuRed),
+                          note: pressure, tip: "macOS's own memory pressure level. At critical it starts killing apps.")
+        p.key = "models-pressure"
+        rows.append(p)
+
+        let guardOn = m["guard"] as? Bool ?? false
+        var g = SystemRow(label: "mem-guard", state: guardOn ? .on(menuGreen) : .off,
+                          note: guardOn ? "watching" : "off",
+                          tip: "Stops the largest model before macOS runs out of memory and kills other apps. Runs up to 2 hours per start.",
+                          action: {
+                              DispatchQueue.global(qos: .userInitiated).async { _ = run(["guard", guardOn ? "off" : "on"])() }
+                          })
+        g.key = "models-guard"
+        rows.append(g)
+
+        let mlx = m["mlx"] as? [[String: Any]] ?? []
+        if !mlx.isEmpty {
+            var j = SystemRow(label: "mlx jobs", state: .count(mlx.count, menuTeal),
+                              note: mlx.compactMap { $0["what"] as? String }.joined(separator: ", "),
+                              tip: "Image and vision jobs running outside Ollama (see, imagine).")
+            j.key = "models-mlx"
+            rows.append(j)
+        }
         return rows
     }
 

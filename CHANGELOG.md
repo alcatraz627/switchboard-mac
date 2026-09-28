@@ -7,6 +7,12 @@
   pinned ports, and one-offs with Reap for the expired ones; Reap asks first
   and names any expired one that is still running. A link opens the port
   policy.
+- **Machine > Local models**: what Ollama holds in memory, with size, time
+  left and Unload; the warm companion (Load / Unload, same as `warm on/off`);
+  memory pressure; a mem-guard switch; and running mlx jobs.
+- The Warden transcript icon starts the session hub itself when it is off,
+  instead of sending you to switch it on. Button failures read as a sentence:
+  "Couldn't open the warden's transcript: …".
 
 ## 0.2.0 (2026-09-29)
 

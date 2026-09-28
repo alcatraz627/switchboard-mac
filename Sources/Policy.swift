@@ -256,8 +256,10 @@ struct RowButton {
     let label: String
     let kind: Kind
     var help: String = ""
-    /// An SF Symbol shown in place of the label, which then names it in errors.
+    /// An SF Symbol shown in place of the label.
     var icon: String? = nil
+    /// What the button does, for its failure line: "Couldn't <doing>: why".
+    var doing: String? = nil
     /// Asked before running, for an action that is easy to regret.
     var confirm: String? = nil
 }

@@ -377,6 +377,7 @@ struct GroupHeader: View {
         "Context": "text.badge.minus",
         "Services": "server.rack",
         "Dev servers": "network",
+        "Local models": "cpu",
         "Schedules": "calendar.badge.clock",
         "Session": "cup.and.saucer",
         "Feed": "arrow.triangle.2.circlepath",
@@ -566,7 +567,7 @@ struct SystemRowView: View {
                 DispatchQueue.main.async {
                     busyButton = nil
                     if let err = err {
-                        failure = "\(b.label) \(row.label): \(err)"
+                        failure = "Couldn't \(b.doing ?? "\(b.label.lowercased()) \(row.label)"): \(err)"
                         dwarn("row button failed: \(b.label) \(row.label): \(err)")
                     }
                 }
