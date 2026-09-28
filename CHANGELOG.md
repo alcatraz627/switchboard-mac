@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0 (2026-09-29)
+
 - **Machine > Guards**: every gate is listed, not only the muted ones. Gates
   opens inside the panel to the ones that are off (muted, with Re-arm; snoozed
   through hook-snooze.sh, with its date and Lift), with the rest folded under
