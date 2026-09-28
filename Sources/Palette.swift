@@ -1,6 +1,6 @@
 // Palette.swift
-// PaletteToken, PaletteStore, NSColor helpers, model display.
-// (split from claude-instances-bar.swift — one module, same binary)
+// Named colour tokens with baked defaults and per-user overrides, plus hex
+// helpers. Code asks for a meaning (.warnHigh), never a literal colour.
 
 import AppKit
 import Foundation

@@ -1,8 +1,8 @@
 // DesignKit.swift
-// The dropdown's shared design system: one type scale, segment + columned text
-// builders, and truncation rules. Sections feed these instead of hand-rolling
-// NSAttributedString math and `leftPad` alignment, so spacing and alignment are
-// defined once. See docs/dropdown-redesign.md and ~/.claude/conventions/visual-design.md.
+// The shared design system for AppKit surfaces: one type scale, text builders,
+// truncation rules, contrast-safe state badges and clickable menu rows. Written
+// once so spacing, alignment and contrast are decided in one place.
+// Guide: docs/design-kit.md.
 
 import AppKit
 import Foundation

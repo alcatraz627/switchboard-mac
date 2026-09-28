@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 180" width="720" height="180" role="img" aria-label="Switchboard banner">
+  <defs>
+    <linearGradient id="banner-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#0d1316"/>
+      <stop offset="55%"  stop-color="#121c22"/>
+      <stop offset="100%" stop-color="#161a2e"/>
+    </linearGradient>
+    <linearGradient id="title-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"   stop-color="#ffffff"/>
+      <stop offset="55%"  stop-color="#dff5ee"/>
+      <stop offset="100%" stop-color="#4DD1B8"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"   stop-color="#2E9E58"/>
+      <stop offset="50%"  stop-color="#4DD1B8"/>
+      <stop offset="100%" stop-color="#6194FF"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="12%" cy="50%" r="32%">
+      <stop offset="0%"   stop-color="#4DD1B8" stop-opacity="0.30"/>
+      <stop offset="100%" stop-color="#4DD1B8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="720" height="180" rx="14" fill="url(#banner-bg)"/>
+  <rect width="720" height="180" rx="14" fill="url(#glow)"/>
+  <g stroke="#ffffff" stroke-opacity="0.025">
+    <line x1="0" y1="45"  x2="720" y2="45"/>
+    <line x1="0" y1="90"  x2="720" y2="90"/>
+    <line x1="0" y1="135" x2="720" y2="135"/>
+  </g>
+  <rect x="0" y="0" width="720" height="2" fill="url(#accent)" opacity="0.85"/>
+
+  <!-- the menu bar glyph: three faders -->
+  <g transform="translate(46,50)" stroke-linecap="round">
+    <line x1="10" y1="0" x2="10" y2="80" stroke="#ffffff" stroke-opacity="0.22" stroke-width="5"/>
+    <line x1="38" y1="0" x2="38" y2="80" stroke="#ffffff" stroke-opacity="0.22" stroke-width="5"/>
+    <line x1="66" y1="0" x2="66" y2="80" stroke="#ffffff" stroke-opacity="0.22" stroke-width="5"/>
+    <rect x="-1" y="46" width="22" height="12" rx="4" fill="#2E9E58"/>
+    <rect x="27" y="14" width="22" height="12" rx="4" fill="#4DD1B8"/>
+    <rect x="55" y="34" width="22" height="12" rx="4" fill="#6194FF"/>
+  </g>
+
+  <text x="150" y="92" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif" font-size="46" font-weight="800" fill="url(#title-grad)" letter-spacing="-1.2">Switchboard</text>
+  <text x="152" y="118" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif" font-size="14" font-weight="500" fill="#a8b8c0" letter-spacing="0.2">Every switch on your Mac, one click away</text>
+
+  <g transform="translate(152,138)" font-family="'SF Mono', ui-monospace, Menlo, monospace" font-size="11" font-weight="600">
+    <g>
+      <rect x="0" y="0" width="70" height="22" rx="11" fill="#E8A84C" fill-opacity="0.14" stroke="#E8A84C" stroke-opacity="0.55"/>
+      <circle cx="12" cy="11" r="3" fill="#E8A84C"/>
+      <text x="22" y="15" fill="#E8A84C">agents</text>
+    </g>
+    <g transform="translate(78,0)">
+      <rect x="0" y="0" width="62" height="22" rx="11" fill="#6194FF" fill-opacity="0.14" stroke="#6194FF" stroke-opacity="0.55"/>
+      <circle cx="12" cy="11" r="3" fill="#6194FF"/>
+      <text x="22" y="15" fill="#6194FF">usage</text>
+    </g>
+    <g transform="translate(148,0)">
+      <rect x="0" y="0" width="76" height="22" rx="11" fill="#4DD1B8" fill-opacity="0.14" stroke="#4DD1B8" stroke-opacity="0.55"/>
+      <circle cx="12" cy="11" r="3" fill="#4DD1B8"/>
+      <text x="22" y="15" fill="#4DD1B8">machine</text>
+    </g>
+    <g transform="translate(232,0)">
+      <rect x="0" y="0" width="56" height="22" rx="11" fill="#F2C94C" fill-opacity="0.14" stroke="#F2C94C" stroke-opacity="0.55"/>
+      <circle cx="12" cy="11" r="3" fill="#F2C94C"/>
+      <text x="22" y="15" fill="#F2C94C">home</text>
+    </g>
+  </g>
+
+  <!-- a slice of the Machine tab -->
+  <g transform="translate(496,34)" font-family="'SF Mono', ui-monospace, Menlo, monospace">
+    <rect x="0" y="0" width="190" height="112" rx="10" fill="#172027" stroke="#26343d"/>
+    <text x="14" y="20" font-size="9" font-weight="700" fill="#8a9aa2" letter-spacing="1">MACHINE</text>
+    <text x="14" y="42" font-size="10" fill="#e6f0f0">Keep Awake</text>
+    <rect x="148" y="33" width="28" height="14" rx="7" fill="#4DD1B8"/>
+    <circle cx="169" cy="40" r="5" fill="#ffffff"/>
+    <text x="14" y="64" font-size="10" fill="#e6f0f0">Kanban Board</text>
+    <rect x="148" y="55" width="28" height="14" rx="7" fill="#2E9E58"/>
+    <circle cx="169" cy="62" r="5" fill="#ffffff"/>
+    <text x="14" y="86" font-size="10" fill="#e6f0f0">Warden</text>
+    <rect x="148" y="77" width="28" height="14" rx="7" fill="#33434c"/>
+    <circle cx="155" cy="84" r="5" fill="#c8d2d6"/>
+    <text x="14" y="104" font-size="9" fill="#8a9aa2">timer · 2h left</text>
+    <circle cx="168" cy="101" r="5" fill="none" stroke="#4DD1B8" stroke-width="1.4"/>
+    <line x1="168" y1="101" x2="168" y2="98" stroke="#4DD1B8" stroke-width="1.4"/>
+  </g>
+</svg>
