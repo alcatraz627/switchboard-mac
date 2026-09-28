@@ -1,0 +1,7 @@
+build/
+dist/
+*.swp
+.DS_Store
+__pycache__/
+.claude/wal.*
+_*.claude.md
