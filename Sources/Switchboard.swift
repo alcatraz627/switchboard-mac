@@ -228,6 +228,41 @@ enum Settings {
     }
 }
 
+// ── What new Claude sessions load ────────────────────────────────────────────
+
+/// Switches that shrink what every NEW Claude Code session loads at start.
+/// Each writes one documented key in settings.json; a running session keeps
+/// what it started with.
+enum ContextSwitches {
+    /// The claude.ai connectors (Vercel, Linear, Figma, Slack…): their tool
+    /// names and instructions otherwise load into every session.
+    static let connectorsKey = "disableClaudeAiConnectors"
+    /// Plugins whose main payload is a browser-driving MCP server.
+    static let browserPlugins = ["playwright@claude-plugins-official", "chrome-devtools-mcp@claude-plugins-official"]
+
+    static func connectorsOn() -> Bool { !(Settings.read()[connectorsKey] as? Bool ?? false) }
+
+    @discardableResult
+    static func setConnectors(on: Bool) -> Bool { Settings.write(key: connectorsKey, value: !on) }
+
+    /// Nil when neither browser plugin is installed, so the row can hide.
+    static func browserToolsOn() -> Bool? {
+        guard let plugins = Settings.read()["enabledPlugins"] as? [String: Any] else { return nil }
+        let present = browserPlugins.filter { plugins[$0] != nil }
+        guard !present.isEmpty else { return nil }
+        return present.contains { plugins[$0] as? Bool ?? false }
+    }
+
+    /// Flips only the browser plugins that are installed; every other plugin
+    /// entry is written back unchanged.
+    @discardableResult
+    static func setBrowserTools(on: Bool) -> Bool {
+        guard var plugins = Settings.read()["enabledPlugins"] as? [String: Any] else { return false }
+        for p in browserPlugins where plugins[p] != nil { plugins[p] = on }
+        return Settings.write(key: "enabledPlugins", value: plugins)
+    }
+}
+
 // ── Services ─────────────────────────────────────────────────────────────────
 
 struct ServiceState {

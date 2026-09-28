@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Machine > Context**: switch the claude.ai connectors (Vercel, Linear,
+  Figma, Slack…) and the browser tools (Playwright, Chrome DevTools) off for
+  new Claude sessions, so their tool names and instructions stop loading.
+  Takes effect from the next new session; running ones keep what they have.
+
 - **Home**: pick any colour for a bulb (a hue strip, eight swatches, and a way
   back to white), and set how fast an animated scene moves.
 - `--snapshot --expand` renders the colour strips open, for checking.

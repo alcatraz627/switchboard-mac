@@ -374,6 +374,7 @@ struct GroupHeader: View {
         "Limits": "gauge.with.dots.needle.33percent",
         "Gates": "checkmark.shield",
         "Guards": "shield.lefthalf.filled",
+        "Context": "text.badge.minus",
         "Services": "server.rack",
         "Schedules": "calendar.badge.clock",
         "Session": "cup.and.saucer",

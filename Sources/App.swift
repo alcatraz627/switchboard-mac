@@ -142,6 +142,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var wardenGated = false
         var wardenGatePct = 90
         var awakeHolders: [String] = []
+        var connectorsOn: Bool? = nil
+        var browserToolsOn: Bool? = nil
         var jobs: [[String: Any]] = []
         var wolTargets: [[String: Any]] = []
     }
@@ -155,6 +157,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             s.approvals = PushApprovals.armed(liveSessionIDs: LiveSessions.ids())
             if Integrations.claudeCode {
                 for f in SettingsFlag.allCases { s.prompts[f] = Settings.bool(f) }
+                s.connectorsOn = ContextSwitches.connectorsOn()
+                s.browserToolsOn = ContextSwitches.browserToolsOn()
             }
             s.boardSync = BoardSync.enabled()
             if Integrations.hubScript != nil {
@@ -333,6 +337,31 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         return rows
     }
 
+    /// What every new Claude session loads. Changes apply from the next new
+    /// session; a running one keeps what it started with.
+    private func contextRows() -> [SBRow] {
+        var rows: [SBRow] = []
+        if let on = sbSnapshot.connectorsOn {
+            rows.append(SBRow(label: "claude.ai connectors", badge: on ? .on(menuGreen) : .off,
+                              note: on ? "load in new sessions" : "off from the next new session",
+                              onClick: { [weak self] in
+                                  ContextSwitches.setConnectors(on: !on)
+                                  self?.refreshSnapshot()
+                              },
+                              tip: "Vercel, Linear, Figma, Slack and the other claude.ai connectors. Off keeps their tool names and instructions out of every new session. Sets disableClaudeAiConnectors in ~/.claude/settings.json."))
+        }
+        if let on = sbSnapshot.browserToolsOn {
+            rows.append(SBRow(label: "Browser tools", badge: on ? .on(menuGreen) : .off,
+                              note: on ? "Playwright, Chrome DevTools" : "off from the next new session",
+                              onClick: { [weak self] in
+                                  ContextSwitches.setBrowserTools(on: !on)
+                                  self?.refreshSnapshot()
+                              },
+                              tip: "The Playwright and Chrome DevTools plugins, whose browser MCP servers load into every new session. Turning them off also hides their skills."))
+        }
+        return rows
+    }
+
     // ── Drill-downs ──────────────────────────────────────────────────────────
 
     private func mutedGuardsMenu() -> NSMenu {
@@ -469,7 +498,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             return row
         }
         var out: [SystemGroup] = []
-        for (title, rows) in [("Guards", guardRows()), ("Services", serviceRows())] where !rows.isEmpty {
+        for (title, rows) in [("Guards", guardRows()), ("Context", contextRows()), ("Services", serviceRows())] where !rows.isEmpty {
             out.append(SystemGroup(title: title, rows: rows.map(convert)))
         }
         let schedules = scheduleRows()

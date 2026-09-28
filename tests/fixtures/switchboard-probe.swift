@@ -213,6 +213,25 @@ row.rowEnabled = false
 row.mouseUp(with: ev)
 check("a disabled row stays inert", clicks == 1)
 
+print("\n── context switches (what new sessions load), fixture settings.json ──")
+SwitchboardPaths.gccRoot = fixture
+check("connectors count as on when the key is absent", ContextSwitches.connectorsOn())
+ContextSwitches.setConnectors(on: false)
+check("turning connectors off writes disableClaudeAiConnectors = true",
+      (Settings.read()["disableClaudeAiConnectors"] as? Bool) == true && !ContextSwitches.connectorsOn())
+ContextSwitches.setConnectors(on: true)
+check("turning them on writes false",
+      (Settings.read()["disableClaudeAiConnectors"] as? Bool) == false && ContextSwitches.connectorsOn())
+Settings.write(key: "enabledPlugins", value: ["playwright@claude-plugins-official": true, "hookify@x": true])
+check("browser tools read as on", ContextSwitches.browserToolsOn() == true)
+ContextSwitches.setBrowserTools(on: false)
+let ep = Settings.read()["enabledPlugins"] as? [String: Any] ?? [:]
+check("browser tools off flips the installed browser plugin", ep["playwright@claude-plugins-official"] as? Bool == false)
+check("other plugins are untouched", ep["hookify@x"] as? Bool == true)
+check("a browser plugin that is not installed is never added", ep["chrome-devtools-mcp@claude-plugins-official"] == nil)
+Settings.write(key: "enabledPlugins", value: ["hookify@x": true])
+check("no browser plugin installed means no row", ContextSwitches.browserToolsOn() == nil)
+
 print("\n── reads against the real config (no mutation) ──")
 SwitchboardPaths.gccRoot = realRoot
 let realMuted = Guards.muted()
