@@ -8,6 +8,16 @@
   "N on". Permission prompts opens to a switch per prompt. The old AppKit
   drop-down menus for both are gone.
 - Rows that open a list or a menu are clickable across the whole row.
+- **Machine > Schedules** opens inside the panel too: every launchd job is its
+  own row with Start or Stop and Open (its log, or the plist when it keeps no
+  log). Stopping an always-on agent asks first, since launchd will not bring
+  it back until Start. Switchboard's own agent offers Open only. Two jobs that
+  share a launchd label (pm2's user and root agents) now show as two rows.
+- **Machine > Wake a device** opens in place: Wake and Forget per saved
+  machine, and Add… at the end.
+- **ipc Broker** and **Warden** have a Copy button for the command that opens
+  them in a terminal (`claude-ipc -i`, `claude-warden open`). The warden one
+  opens a fork, so the running warden is never touched.
 
 - **Machine > Context**: switch the claude.ai connectors (Vercel, Linear,
   Figma, Slack…) and the browser tools (Playwright, Chrome DevTools) off for

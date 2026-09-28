@@ -229,6 +229,12 @@ struct SystemRow: Identifiable {
     var children: [SystemRow] = []
     /// A child's one action as a labelled button ("Re-arm", "Lift").
     var buttonLabel: String? = nil
+    /// Small labelled buttons beside the row's own control ("Start", "Open",
+    /// "Copy"), each with its own waiting and failure state.
+    var buttons: [RowButton] = []
+    /// False for a row that is only a thing to act on (a saved device), where
+    /// an on/off badge would claim a state nobody measured.
+    var showsBadge = true
 
     var id: String { key ?? label }
     /// A plain on/off with a single action renders as a switch.
@@ -237,6 +243,21 @@ struct SystemRow: Identifiable {
         switch state { case .on, .off: return true; default: return false }
     }
     var isOn: Bool { if case .on = state { return true }; return false }
+}
+
+/// One small button on a row. A copy button puts text on the clipboard and
+/// says so for a moment; a run button does its work off the main thread and
+/// reports what went wrong in plain words, or nil when it worked.
+struct RowButton {
+    enum Kind {
+        case copy(String)
+        case run(() -> String?)
+    }
+    let label: String
+    let kind: Kind
+    var help: String = ""
+    /// Asked before running, for an action that is easy to regret.
+    var confirm: String? = nil
 }
 
 /// A switch flipped for a while: at `until` it returns to `restoreOn`, unless

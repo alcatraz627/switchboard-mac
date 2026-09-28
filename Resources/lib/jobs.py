@@ -6,8 +6,11 @@ The Switchboard's Machine tab calls this. Only the owner's own agents are
 listed (com.alcatraz.*, dev.*, and anything else in ~/Library/LaunchAgents),
 never Apple's or third-party installers'.
 
-  jobs.py list          JSON list of jobs
-  jobs.py run <label>   start a job now (launchctl kickstart); JSON {ok}
+  jobs.py list            JSON list of jobs
+  jobs.py run <label>     start a job now (launchctl kickstart); JSON {ok}
+  jobs.py start <label>   load it if unloaded, then start it; JSON {ok}
+  jobs.py stop <label>    stop it; an always-running job is unloaded, since
+                          launchd would restart a merely killed one; JSON {ok}
 """
 import glob
 import json
@@ -92,9 +95,51 @@ def jobs():
             "plist": path,
             "log": log if log and os.path.exists(os.path.expanduser(log)) else None,
         })
+    # Two plists can share a Label tail (pm2's user and root agents are both
+    # "PM2"); name those by their file so the rows can be told apart.
+    names = [j["name"] for j in result]
+    for j in result:
+        if names.count(j["name"]) > 1:
+            j["name"] = os.path.basename(j["plist"])[:-6].replace(".", " ").replace("-", " ")
     # Failing first, then running, then the rest by name.
     result.sort(key=lambda j: (not j["failing"], not j["running"], j["name"]))
     return result
+
+
+def launchctl(*argv):
+    r = subprocess.run(["launchctl", *argv], capture_output=True, text=True)
+    return r.returncode == 0, (r.stderr.strip() or r.stdout.strip() or f"launchctl exit {r.returncode}")
+
+
+def find(label):
+    return next((j for j in jobs() if j["label"] == label), None)
+
+
+def start(label):
+    j = find(label)
+    if j is None:
+        return False, "no such job"
+    if not j["loaded"]:
+        ok, err = launchctl("bootstrap", f"gui/{UID}", j["plist"])
+        if not ok:
+            return False, err
+        # A KeepAlive or RunAtLoad job starts on load; kicking it again would restart it.
+        if j["schedule"] in ("always running", "at login"):
+            return True, None
+    return launchctl("kickstart", f"gui/{UID}/{label}")
+
+
+def stop(label):
+    j = find(label)
+    if j is None:
+        return False, "no such job"
+    if j["schedule"] == "always running":
+        if not j["loaded"]:
+            return True, None
+        return launchctl("bootout", f"gui/{UID}/{label}")
+    if not j["running"]:
+        return True, None
+    return launchctl("kill", "SIGTERM", f"gui/{UID}/{label}")
 
 
 def main():
@@ -102,10 +147,13 @@ def main():
     cmd = args[0] if args else "help"
     if cmd == "list":
         print(json.dumps(jobs()))
-    elif cmd == "run" and len(args) == 2:
-        r = subprocess.run(["launchctl", "kickstart", f"gui/{UID}/{args[1]}"], capture_output=True, text=True)
-        print(json.dumps({"ok": r.returncode == 0, "error": r.stderr.strip() or None}))
-        sys.exit(0 if r.returncode == 0 else 1)
+    elif cmd in ("run", "start", "stop") and len(args) == 2:
+        if cmd == "run":
+            ok, err = launchctl("kickstart", f"gui/{UID}/{args[1]}")
+        else:
+            ok, err = (start if cmd == "start" else stop)(args[1])
+        print(json.dumps({"ok": ok, "error": None if ok else err}))
+        sys.exit(0 if ok else 1)
     else:
         print(__doc__)
         sys.exit(0 if cmd in ("help", "-h", "--help") else 64)

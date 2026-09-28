@@ -407,6 +407,10 @@ struct SystemRowView: View {
     @State private var failure: String?
     @State private var expanded: Bool
     @State private var hovering = false
+    /// The row button still working, and since when.
+    @State private var busyButton: String?
+    @State private var busySince = Date()
+    @State private var copiedButton: String?
     var indent: CGFloat = 0
 
     init(row: SystemRow, store: PolicyStore, indent: CGFloat = 0) {
@@ -446,6 +450,7 @@ struct SystemRowView: View {
             if let f = failure {
                 RowFailure(message: f, retry: row.isSwitch ? { flip(to: !row.isOn) } : nil,
                            dismiss: { failure = nil })
+                    .padding(.leading, indent)
             }
         }
         // A switch reports nothing back; the next probe showing it in the asked
@@ -490,7 +495,9 @@ struct SystemRowView: View {
             }
             Spacer(minLength: 6)
             if let p = pendingFlip { PendingMark(since: p.since) }
+            else if busyButton != nil { PendingMark(since: busySince) }
             else if let key = row.timerKey { timerMenu(key).frame(width: 18) }
+            ForEach(row.buttons.indices, id: \.self) { i in rowButton(row.buttons[i]) }
             if let link = row.link, let url = URL(string: link) {
                 Button { NSWorkspace.shared.open(url) } label: {
                     Image(systemName: "arrow.up.right.square").font(.system(size: 12))
@@ -499,13 +506,59 @@ struct SystemRowView: View {
                 .foregroundStyle(.secondary)
                 .help("Open \(link)")
             }
-            control.frame(minWidth: 44, alignment: .trailing)
+            control.frame(minWidth: row.showsBadge ? 44 : 0, alignment: .trailing)
         }
         .padding(.leading, PT.rowH + indent)
         .padding(.trailing, PT.rowH)
         .padding(.vertical, PT.rowV)
         .contentShape(Rectangle())
         .help(row.tip)
+    }
+
+    // ── Row buttons ──
+
+    private func rowButton(_ b: RowButton) -> some View {
+        let copied = copiedButton == b.label
+        return Button(copied ? "Copied" : b.label) { press(b) }
+            .controlSize(.small)
+            .disabled(busyButton != nil)
+            .foregroundStyle(copied ? AnyShapeStyle(Color(nsColor: .systemGreen)) : AnyShapeStyle(.primary))
+            .help(b.help)
+    }
+
+    private func press(_ b: RowButton) {
+        failure = nil
+        switch b.kind {
+        case .copy(let text):
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            copiedButton = b.label
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                if copiedButton == b.label { copiedButton = nil }
+            }
+        case .run(let work):
+            if let question = b.confirm {
+                let a = NSAlert()
+                a.messageText = question
+                a.alertStyle = .warning
+                a.addButton(withTitle: b.label)
+                a.addButton(withTitle: "Cancel")
+                NSApp.activate(ignoringOtherApps: true)
+                guard a.runModal() == .alertFirstButtonReturn else { return }
+            }
+            busyButton = b.label
+            busySince = Date()
+            DispatchQueue.global(qos: .userInitiated).async {
+                let err = work()
+                DispatchQueue.main.async {
+                    busyButton = nil
+                    if let err = err {
+                        failure = "\(b.label) \(row.label): \(err)"
+                        dwarn("row button failed: \(b.label) \(row.label): \(err)")
+                    }
+                }
+            }
+        }
     }
 
     // ── Timers: flip now, flip back later ──
@@ -623,7 +676,7 @@ struct SystemRowView: View {
         } else if let action = row.action, row.enabled {
             Button(action: action) { StateBadge(state: row.state) }
                 .buttonStyle(.plain)
-        } else {
+        } else if row.showsBadge {
             StateBadge(state: row.state)
         }
     }

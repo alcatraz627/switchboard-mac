@@ -125,6 +125,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var tip: String = ""
         var link: String? = nil
         var children: [SystemRow] = []
+        var buttons: [RowButton] = []
     }
 
     /// Everything the rows render, read off the main thread in one pass.
@@ -341,7 +342,9 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
 
         if let up = s.brokerUp {
             rows.append(SBRow(label: "ipc Broker", badge: up ? .on(menuGreen) : .off, note: up ? "up" : "down",
-                              enabled: false, tip: "The cross-session message broker. Read-only here: it runs under launchd."))
+                              enabled: false, tip: "The cross-session message broker. Read-only here: it runs under launchd.",
+                              buttons: [RowButton(label: "Copy", kind: .copy("claude-ipc -i"),
+                                                  help: "Copy claude-ipc -i, the broker's interactive view, to paste in a terminal")]))
         }
 
         if let dp = s.decisionPages {
@@ -361,7 +364,9 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                               note: !wr ? "paused by you, deltas held"
                                   : (s.wardenGated ? "standing down, usage >\(s.wardenGatePct)% (auto-resumes)" : "beats live"),
                               onClick: { [weak self] in Warden.set(running: !wr); self?.refreshSnapshot() },
-                              tip: "The session warden. Click toggles YOUR pause. The yellow standing-down state is the usage gate; it clears itself when a window reopens."))
+                              tip: "The session warden. Click toggles YOUR pause. The yellow standing-down state is the usage gate; it clears itself when a window reopens.",
+                              buttons: [RowButton(label: "Copy", kind: .copy("claude-warden open"),
+                                                  help: "Copy claude-warden open: it opens a fork of the warden's session, so the warden itself and its beats are untouched")]))
         }
         return rows
     }
@@ -457,6 +462,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             var row = SystemRow(label: r.label, state: state, note: r.note, enabled: r.enabled,
                                 tip: r.tip, link: r.link, action: r.onClick, menu: r.submenu)
             row.children = r.children
+            row.buttons = r.buttons
             if row.isSwitch && r.enabled {
                 row.timerKey = r.label
                 row.timer = systemTimers[r.label]
@@ -488,8 +494,9 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 case .ok: badge = "(ok)"
                 }
                 let affordance = r.menu != nil ? "submenu" : (r.action != nil ? "click" : "readonly")
-                out.append(String(format: "  %-20@ %-6@ %-28@ %@%@", r.label as NSString, badge as NSString,
-                                  r.note as NSString, affordance as NSString, (r.enabled ? "" : " disabled") as NSString))
+                out.append(String(format: "  %-20@ %-6@ %-28@ %@%@%@", r.label as NSString, badge as NSString,
+                                  r.note as NSString, affordance as NSString, (r.enabled ? "" : " disabled") as NSString,
+                                  r.buttons.map { "  [\($0.label)]" }.joined() as NSString))
                 if let link = r.link { out.append("      link: \(link)") }
                 for c in r.children {
                     let cb: String
@@ -498,7 +505,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                     case .count(let n, _): cb = "[\(n)]"; case .ok: cb = "(ok)"
                     }
                     out.append(String(format: "      · %-26@ %-6@ %@%@", c.label as NSString, cb as NSString,
-                                      c.note as NSString, (c.buttonLabel.map { "  [\($0)]" } ?? "") as NSString))
+                                      c.note as NSString,
+                                      ((c.buttonLabel.map { "  [\($0)]" } ?? "") + c.buttons.map { "  [\($0.label)]" }.joined()) as NSString))
                 }
             }
         }
@@ -524,30 +532,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
     private func scheduleRows() -> [SystemRow] {
         let jobs = sbSnapshot.jobs
         guard !jobs.isEmpty else { return [] }
-        let script = AppPaths.lib("jobs.py")
-        func jobMenu(_ j: [String: Any]) -> NSMenu {
-            let m = NSMenu()
-            let label = j["label"] as? String ?? ""
-            m.addItem(ClosureMenuItem("Run now") { [weak self] in
-                _ = Services.shell("/usr/bin/env", ["python3", script, "run", label])
-                self?.refreshSnapshot()
-            })
-            if let plist = j["plist"] as? String {
-                m.addItem(ClosureMenuItem("Show plist in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: plist)])
-                })
-            }
-            if let log = j["log"] as? String {
-                m.addItem(ClosureMenuItem("Open log") { NSWorkspace.shared.open(URL(fileURLWithPath: log)) })
-            }
-            m.addItem(.separator())
-            let info = NSMenuItem(title: label, action: nil, keyEquivalent: "")
-            info.isEnabled = false
-            m.addItem(info)
-            return m
-        }
-        // Always-on agents are services, not schedules: one summary row. Only
-        // failing scheduled jobs earn a row of their own.
+        // Always-on agents are services, not schedules: one row that opens to
+        // list them. Failing scheduled jobs also earn a top row of their own.
         let always = jobs.filter { ($0["schedule"] as? String) == "always running" }
         let timed = jobs.filter { ($0["schedule"] as? String) != "always running" }
         let healthy = timed.filter { !($0["failing"] as? Bool ?? false) }
@@ -560,44 +546,86 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                               state: down.isEmpty ? .count(running, menuGreen) : .count(down.count, menuRed),
                               note: (down.isEmpty ? "\(running) running" : "\(down.count) stopped")
                                   + (unloaded > 0 ? " · \(unloaded) not loaded" : ""),
-                              tip: "Agents launchd keeps alive. Pick one for its actions.",
-                              menu: {
-                                  let m = NSMenu()
-                                  for j in always {
-                                      let item = NSMenuItem(title: "\(j["running"] as? Bool ?? false ? "●" : "○")  \(j["name"] as? String ?? "?")", action: nil, keyEquivalent: "")
-                                      item.submenu = jobMenu(j)
-                                      m.addItem(item)
-                                  }
-                                  return m
-                              })
+                              tip: "Agents launchd keeps alive. Click to open.")
             r.key = "always-on-agents"
+            r.children = always.map(jobRow)
             rows.append(r)
         }
         if !healthy.isEmpty {
             var r = SystemRow(label: "Scheduled jobs", state: .count(healthy.count, menuGreen),
-                              note: "last runs ok · pick one for run now, plist, log",
-                              tip: "launchd jobs that run on a clock.",
-                              menu: {
-                                  let m = NSMenu()
-                                  for j in healthy {
-                                      let item = NSMenuItem(title: "\(j["name"] as? String ?? "?")  ·  \(j["schedule"] as? String ?? "")", action: nil, keyEquivalent: "")
-                                      item.submenu = jobMenu(j)
-                                      m.addItem(item)
-                                  }
-                                  return m
-                              })
+                              note: "last runs ok", tip: "launchd jobs that run on a clock. Click to open.")
             r.key = "scheduled-jobs"
+            r.children = healthy.map(jobRow)
             rows.append(r)
         }
         for j in timed where j["failing"] as? Bool ?? false {
-            let exit = (j["last_exit"] as? NSNumber)?.intValue ?? 1
-            var r = SystemRow(label: (j["name"] as? String ?? "?").capitalized, state: .count(exit, menuRed),
-                              note: (j["schedule"] as? String ?? "") + " · last run failed (exit \(exit))",
-                              tip: j["label"] as? String ?? "", menu: { jobMenu(j) })
-            r.key = j["label"] as? String
+            var r = jobRow(j)
+            r.key = "failing-" + (j["label"] as? String ?? "")
             rows.append(r)
         }
         return rows
+    }
+
+    /// One launchd job as a row: its state, when it runs, and Start or Stop
+    /// plus Open (its log, or the plist in Finder when it keeps no log).
+    private func jobRow(_ j: [String: Any]) -> SystemRow {
+        let script = AppPaths.lib("jobs.py")
+        let label = j["label"] as? String ?? ""
+        let schedule = j["schedule"] as? String ?? ""
+        let running = j["running"] as? Bool ?? false
+        let loaded = j["loaded"] as? Bool ?? false
+        let exit = (j["last_exit"] as? NSNumber)?.intValue
+        let failing = j["failing"] as? Bool ?? false
+        let state: SystemRow.State = running ? .on(menuGreen) : failing ? .count(exit ?? 1, menuRed) : .off
+        let status = running ? "running" : !loaded ? "not loaded" : failing ? "last run failed (exit \(exit ?? 1))"
+            : exit == 0 ? "last run ok" : "idle"
+        // This app's own agent gets no Start or Stop: Stop would quit the
+        // panel mid-click, Start would launch a second copy.
+        let isSelf = label == "io.github.alcatraz627.switchboard"
+        let always = schedule == "always running"
+        var r = SystemRow(label: (j["name"] as? String ?? "?").capitalized, state: state,
+                          note: (always ? status : "\(schedule) · \(status)") + (isSelf ? " · this app" : ""),
+                          tip: label + ((j["program"] as? String).map { " · runs \($0)" } ?? ""))
+        // Two plists can carry one Label (pm2's user and root agents are both com.PM2).
+        r.key = j["plist"] as? String ?? label
+        let act: (String) -> () -> String? = { [weak self] verb in {
+            let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script, verb, label], timeout: 15))
+            self?.refreshSnapshot()
+            return err
+        } }
+        if isSelf {
+            // Open only.
+        } else if running {
+            r.buttons.append(RowButton(label: "Stop", kind: .run(act("stop")),
+                                       help: always ? "Unload it, so launchd stops restarting it. Start loads it again."
+                                                    : "Stop this run. The next scheduled run still happens.",
+                                       confirm: always ? "Stop \(r.label)? launchd will not restart it until you press Start." : nil))
+        } else {
+            r.buttons.append(RowButton(label: "Start", kind: .run(act("start")),
+                                       help: loaded ? "Run it now" : "Load it into launchd and run it"))
+        }
+        let log = j["log"] as? String, plist = j["plist"] as? String
+        if log != nil || plist != nil {
+            r.buttons.append(RowButton(label: "Open", kind: .run({
+                DispatchQueue.main.async {
+                    if let log = log { NSWorkspace.shared.open(URL(fileURLWithPath: log)) }
+                    else if let plist = plist { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: plist)]) }
+                }
+                return nil
+            }), help: log != nil ? "Open its log" : "Show its plist in Finder (it keeps no log)"))
+        }
+        return r
+    }
+
+    /// What a lib helper's `{"ok": …, "error": …}` answer means for a button:
+    /// nil when it worked, otherwise the reason in the helper's words.
+    static func helperError(_ out: String) -> String? {
+        guard let d = out.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else {
+            let raw = out.trimmingCharacters(in: .whitespacesAndNewlines)
+            return raw.isEmpty ? "no answer" : raw
+        }
+        return (obj["ok"] as? Bool ?? false) ? nil : (obj["error"] as? String ?? "refused")
     }
 
     // ── Wake-on-LAN ──────────────────────────────────────────────────────────
@@ -605,38 +633,42 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
     private func wakeOnLANRow() -> SystemRow {
         let targets = sbSnapshot.wolTargets
         let wol = AppPaths.lib("wol.py")
-        return SystemRow(
+        var row = SystemRow(
             label: "Wake a device",
             state: targets.isEmpty ? .off : .count(targets.count, menuTeal),
             note: targets.isEmpty ? "no saved devices" : targets.compactMap { $0["name"] as? String }.joined(separator: ", "),
-            tip: "Send a wake-on-LAN packet to a saved machine on the home network.",
-            menu: { [weak self] in
-                let m = NSMenu()
-                for t in targets {
-                    let name = t["name"] as? String ?? "?", mac = t["mac"] as? String ?? ""
-                    let bcast = t["broadcast"] as? String ?? "255.255.255.255"
-                    m.addItem(ClosureMenuItem("Wake \(name)") {
-                        let r = Services.shell("/usr/bin/env", ["python3", wol, "wake", mac, bcast])
-                        dlog("wol: \(name) \(r.trimmingCharacters(in: .whitespacesAndNewlines))")
-                    })
-                }
-                if !targets.isEmpty { m.addItem(.separator()) }
-                m.addItem(ClosureMenuItem("Add device…") { self?.addWakeTarget(wol) })
-                if !targets.isEmpty {
-                    let forget = NSMenuItem(title: "Forget", action: nil, keyEquivalent: "")
-                    let sub = NSMenu()
-                    for t in targets {
-                        let mac = t["mac"] as? String ?? ""
-                        sub.addItem(ClosureMenuItem(t["name"] as? String ?? mac) {
-                            _ = Services.shell("/usr/bin/env", ["python3", wol, "remove", mac])
-                            self?.refreshSnapshot()
-                        })
-                    }
-                    forget.submenu = sub
-                    m.addItem(forget)
-                }
-                return m
-            })
+            tip: "Send a wake-on-LAN packet to a saved machine on the home network. Click to open.")
+        row.key = "wake-a-device"
+        row.children = targets.map { t in
+            let name = t["name"] as? String ?? "?", mac = t["mac"] as? String ?? ""
+            let bcast = t["broadcast"] as? String ?? "255.255.255.255"
+            var r = SystemRow(label: name, state: .off, note: mac, tip: "Broadcast to \(bcast)")
+            r.key = "wol-" + mac
+            r.showsBadge = false
+            r.buttons = [
+                RowButton(label: "Wake", kind: .run({
+                    let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", wol, "wake", mac, bcast]))
+                    dlog("wol: \(name) \(err ?? "sent")")
+                    return err
+                }), help: "Send the magic packet. A sleeping machine takes a few seconds to answer."),
+                RowButton(label: "Forget", kind: .run({ [weak self] in
+                    let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", wol, "remove", mac]))
+                    self?.refreshSnapshot()
+                    return err
+                }), help: "Remove it from the saved devices"),
+            ]
+            return r
+        }
+        var add = SystemRow(label: "Add a device", state: .off, note: "name and MAC address",
+                            tip: "Save a machine to wake. It must have wake-on-LAN turned on.")
+        add.key = "wol-add"
+        add.showsBadge = false
+        add.buttons = [RowButton(label: "Add…", kind: .run({ [weak self] in
+            DispatchQueue.main.async { self?.addWakeTarget(wol) }
+            return nil
+        }))]
+        row.children.append(add)
+        return row
     }
 
     private func addWakeTarget(_ wol: String) {
