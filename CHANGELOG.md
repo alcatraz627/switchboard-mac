@@ -18,6 +18,9 @@
 - **ipc Broker** and **Warden** have a Copy button for the command that opens
   them in a terminal (`claude-ipc -i`, `claude-warden open`). The warden one
   opens a fork, so the running warden is never touched.
+- **Warden** also has a transcript icon: it opens the warden's current session
+  in a window, rendered by the claude-instances session hub. It needs the
+  Session Hub on and says so when it is off.
 
 - **Machine > Context**: switch the claude.ai connectors (Vercel, Linear,
   Figma, Slack…) and the browser tools (Playwright, Chrome DevTools) off for

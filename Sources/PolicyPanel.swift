@@ -517,7 +517,19 @@ struct SystemRowView: View {
 
     // ── Row buttons ──
 
-    private func rowButton(_ b: RowButton) -> some View {
+    @ViewBuilder private func rowButton(_ b: RowButton) -> some View {
+        if let icon = b.icon {
+            Button { press(b) } label: { Image(systemName: icon).font(.system(size: 12)) }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .disabled(busyButton != nil)
+                .help(b.help)
+        } else {
+            labelButton(b)
+        }
+    }
+
+    private func labelButton(_ b: RowButton) -> some View {
         let copied = copiedButton == b.label
         return Button(copied ? "Copied" : b.label) { press(b) }
             .controlSize(.small)

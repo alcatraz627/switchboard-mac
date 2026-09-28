@@ -365,8 +365,20 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                                   : (s.wardenGated ? "standing down, usage >\(s.wardenGatePct)% (auto-resumes)" : "beats live"),
                               onClick: { [weak self] in Warden.set(running: !wr); self?.refreshSnapshot() },
                               tip: "The session warden. Click toggles YOUR pause. The yellow standing-down state is the usage gate; it clears itself when a window reopens.",
-                              buttons: [RowButton(label: "Copy", kind: .copy("claude-warden open"),
-                                                  help: "Copy claude-warden open: it opens a fork of the warden's session, so the warden itself and its beats are untouched")]))
+                              buttons: [
+                                  RowButton(label: "Transcript", kind: .run({
+                                      guard let sid = Warden.currentSession() else {
+                                          return "the warden has no current session yet"
+                                      }
+                                      guard Services.probeHTTP("http://127.0.0.1:5400/healthz") else {
+                                          return "Session Hub is off. Turn it on under Services, then try again."
+                                      }
+                                      DispatchQueue.main.async { TranscriptWindow.show(sessionID: sid, title: "Warden transcript") }
+                                      return nil
+                                  }), help: "Read the warden's session, rendered by the session hub", icon: "text.bubble"),
+                                  RowButton(label: "Copy", kind: .copy("claude-warden open"),
+                                            help: "Copy claude-warden open: it opens a fork of the warden's session, so the warden itself and its beats are untouched"),
+                              ]))
         }
         return rows
     }

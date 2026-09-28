@@ -450,6 +450,13 @@ enum Warden {
         installed() && !FileManager.default.fileExists(atPath: pausedSentinel)
     }
 
+    /// The warden's own Claude session, which it rewrites on succession.
+    static func currentSession() -> String? {
+        let raw = try? String(contentsOfFile: SwitchboardPaths.gccRoot + "/warden/current-session", encoding: .utf8)
+        let sid = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return sid.isEmpty ? nil : sid
+    }
+
     /// The auto-standdown state: usage-gate says both windows are hot. Distinct
     /// from paused — nothing is written, so a quota reset re-enables by itself.
     /// The manual sentinel always supersedes this in what the row displays.
