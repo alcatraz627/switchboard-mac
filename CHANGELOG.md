@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Home**: pick any colour for a bulb (a hue strip, eight swatches, and a way
+  back to white), and set how fast an animated scene moves.
+- `--snapshot --expand` renders the colour strips open, for checking.
+
 ## 0.1.0 (2026-09-29)
 
 First release as its own app. Switchboard used to run as a second icon inside
