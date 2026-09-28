@@ -154,7 +154,8 @@ final class LightsStore: ObservableObject {
     }
 
     func retry(_ bulb: Bulb) {
-        if let pairs = lastPairs[bulb.mac] { set(bulb, pairs) }
+        if let name = failedRename[bulb.mac] { rename(bulb, to: name) }
+        else if let pairs = lastPairs[bulb.mac] { set(bulb, pairs) }
     }
 
     /// The bulb as it will look once the change lands, for showing at once.
@@ -194,9 +195,31 @@ final class LightsStore: ObservableObject {
         for b in bulbs where b.reachable && b.on != on { set(b, ["state=\(on ? "on" : "off")"]) }
     }
 
-    func rename(_ bulb: Bulb, to name: String) {
-        _ = WizCLI.run(["name", bulb.mac, name])
-        if let i = bulbs.firstIndex(where: { $0.mac == bulb.mac }) { bulbs[i].name = name }
+    /// Names a rename could not save, by bulb, so Retry saves that name again.
+    @Published var failedRename: [String: String] = [:]
+
+    /// Save a bulb's display name. It shows at once and goes back if the save
+    /// fails. Names live on this Mac, so a bulb that is not answering can be renamed.
+    func rename(_ bulb: Bulb, to raw: String) {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let i = bulbs.firstIndex(where: { $0.mac == bulb.mac }), bulbs[i].name != name else { return }
+        let before = bulbs[i].name
+        bulbs[i].name = name
+        failures[bulb.mac] = nil
+        failedRename[bulb.mac] = nil
+        pendingSince[bulb.mac] = Date()
+        queue.async { [weak self] in
+            let r = WizCLI.run(["name", bulb.mac, name])
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.pendingSince[bulb.mac] = nil
+                guard let e = r.err else { return }
+                if let j = self.bulbs.firstIndex(where: { $0.mac == bulb.mac }) { self.bulbs[j].name = before }
+                self.failedRename[bulb.mac] = name
+                self.failures[bulb.mac] = "The name was not saved: \(e)"
+                dwarn("bulb rename \(bulb.mac): \(e)")
+            }
+        }
     }
 
     func loadForSnapshot() {
@@ -279,6 +302,9 @@ struct BulbRow: View {
     @State private var hue: Double = 0
     @State private var editing = false
     @State private var showColour = BulbRow.startExpanded
+    @State private var renaming = false
+    @State private var draftName = ""
+    @FocusState private var nameFocused: Bool
 
     /// Headless renders set this (--expand) so the colour strip can be checked.
     static var startExpanded = false
@@ -297,7 +323,19 @@ struct BulbRow: View {
                     .foregroundStyle(bulb.on ? Color.yellow : Color.secondary)
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(bulb.title).font(SBStyle.label)
+                    if renaming {
+                        TextField("Name", text: $draftName)
+                            .textFieldStyle(.roundedBorder).controlSize(.small).font(SBStyle.label)
+                            .focused($nameFocused)
+                            .onSubmit { finishRename(save: true) }
+                            .onExitCommand { finishRename(save: false) }
+                            .onChange(of: nameFocused) { f in if !f && renaming { finishRename(save: true) } }
+                    } else {
+                        Text(bulb.title).font(SBStyle.label)
+                            .contentShape(Rectangle())
+                            .onTapGesture { startRename() }
+                            .help("Click to rename")
+                    }
                     Text(bulb.reachable
                          ? (bulb.on ? "\(bulb.dimming)% · \(bulb.modeText)" : "off")
                          : "not answering")
@@ -327,7 +365,7 @@ struct BulbRow: View {
                         }
                     }
                     Divider()
-                    Button("Rename…") { rename() }
+                    Button("Rename") { startRename() }
                 } label: {
                     Image(systemName: "ellipsis.circle").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
@@ -410,16 +448,19 @@ struct BulbRow: View {
         }
     }
 
-    private func rename() {
-        let a = NSAlert()
-        a.messageText = "Name this bulb"
-        a.informativeText = "\(bulb.ip) · \(bulb.mac)"
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
-        field.stringValue = bulb.name
-        a.accessoryView = field
-        a.addButton(withTitle: "Save")
-        a.addButton(withTitle: "Cancel")
+    /// Edit the name in the row itself. A separate alert window would close the
+    /// panel (it is transient) and could lose the typing.
+    private func startRename() {
+        draftName = bulb.name
+        renaming = true
+        // A menu bar app only takes keystrokes once it is the active app.
         NSApp.activate(ignoringOtherApps: true)
-        if a.runModal() == .alertFirstButtonReturn { lights.rename(bulb, to: field.stringValue) }
+        DispatchQueue.main.async { nameFocused = true }
+    }
+
+    private func finishRename(save: Bool) {
+        guard renaming else { return }
+        renaming = false
+        if save { lights.rename(bulb, to: draftName) }
     }
 }

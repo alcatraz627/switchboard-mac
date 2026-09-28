@@ -66,6 +66,12 @@ eq "no answer is an error, not a hang" 1 "$(rc python3 Resources/lib/wiz.py set 
 eq "a malformed colour is refused"   2 "$(rc python3 Resources/lib/wiz.py set 127.0.0.1 rgb=zz0000)"
 eq "a short colour is refused"       2 "$(rc python3 Resources/lib/wiz.py set 127.0.0.1 rgb=fff)"
 eq "a well-formed colour gets to the bulb" 1 "$(rc python3 Resources/lib/wiz.py set 127.0.0.1 rgb=ff8800)"
+python3 Resources/lib/wiz.py name aa0000000009 "Desk lamp" >/dev/null
+eq "a bulb name is saved in the state folder" "Desk lamp" \
+   "$(python3 -c "import json;print(json.load(open('$SWITCHBOARD_STATE/wiz-names.json'))['aa0000000009'])")"
+python3 Resources/lib/wiz.py name aa0000000009 "" >/dev/null
+eq "an empty name removes it" "absent" \
+   "$(python3 -c "import json;print(json.load(open('$SWITCHBOARD_STATE/wiz-names.json')).get('aa0000000009','absent'))")"
 eq "scene speed out of range is refused"   2 "$(rc python3 Resources/lib/wiz.py set 127.0.0.1 speed=500)"
 echo '{"aa0000000001": "127.0.0.1"}' > "$SWITCHBOARD_STATE/wiz-known.json"
 kept="$(python3 Resources/lib/wiz.py discover --timeout 1)"

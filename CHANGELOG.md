@@ -13,6 +13,9 @@
 - The Warden transcript icon starts the session hub itself when it is off,
   instead of sending you to switch it on. Button failures read as a sentence:
   "Couldn't open the warden's transcript: …".
+- **Home**: rename a bulb by clicking its name (Enter saves, Esc cancels). It
+  works for a bulb that is not answering too. The old Rename… alert opened
+  from inside the panel's menu and never saved a name.
 
 ## 0.2.0 (2026-09-29)
 
