@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Machine > Dev servers**: the port ledger in the panel. Local services
+  (running first, Start or Stop when pm2 runs them, a link when live), your
+  pinned ports, and one-offs with Reap for the expired ones; Reap asks first
+  and names any expired one that is still running. A link opens the port
+  policy.
+
 ## 0.2.0 (2026-09-29)
 
 - **Machine > Guards**: every gate is listed, not only the muted ones. Gates

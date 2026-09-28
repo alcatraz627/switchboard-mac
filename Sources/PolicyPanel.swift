@@ -376,6 +376,7 @@ struct GroupHeader: View {
         "Guards": "shield.lefthalf.filled",
         "Context": "text.badge.minus",
         "Services": "server.rack",
+        "Dev servers": "network",
         "Schedules": "calendar.badge.clock",
         "Session": "cup.and.saucer",
         "Feed": "arrow.triangle.2.circlepath",

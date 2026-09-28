@@ -149,6 +149,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var browserToolsOn: Bool? = nil
         var jobs: [[String: Any]] = []
         var wolTargets: [[String: Any]] = []
+        var devServers: [[String: Any]] = []
     }
 
     /// Refresh the slow half off the main thread. The panel shows whatever
@@ -190,6 +191,9 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             }
             s.jobs = pyList("jobs.py")
             s.wolTargets = pyList("wol.py")
+            let dev = Services.shell("/usr/bin/env", ["python3", AppPaths.lib("devservers.py"), "list"], timeout: 20)
+            s.devServers = ((try? JSONSerialization.jsonObject(with: Data(dev.utf8)) as? [String: Any])?["servers"]
+                as? [[String: Any]]) ?? []
             DispatchQueue.main.async {
                 self?.sbSnapshot = s
                 if self?.kanbanBusy == false { self?.kanbanUp = kanban }
@@ -485,6 +489,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         for (title, rows) in [("Guards", guardRows()), ("Context", contextRows()), ("Services", serviceRows())] where !rows.isEmpty {
             out.append(SystemGroup(title: title, rows: rows.map(convert)))
         }
+        let dev = devServerRows()
+        if !dev.isEmpty { out.append(SystemGroup(title: "Dev servers", rows: dev)) }
         let schedules = scheduleRows()
         if !schedules.isEmpty { out.append(SystemGroup(title: "Schedules", rows: schedules)) }
         out.append(SystemGroup(title: "Session", rows: sessionRows().map(convert) + [wakeOnLANRow()]))
@@ -537,6 +543,98 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
         }
         return panelSystemGroups()
+    }
+
+    // ── Dev servers: the port ledger ─────────────────────────────────────────
+
+    /// Local services (tier 2), your pinned ports (tier 1), and one-off demos
+    /// (tier 3), each opening to its ports. See features/dev-servers.md.
+    private func devServerRows() -> [SystemRow] {
+        let all = sbSnapshot.devServers
+        guard !all.isEmpty else { return [] }
+        let script = AppPaths.lib("devservers.py")
+        func tier(_ n: Int) -> [[String: Any]] { all.filter { ($0["tier"] as? Int) == n } }
+        func live(_ s: [String: Any]) -> Bool { s["live"] as? Bool ?? false }
+        let act: (String, String) -> () -> String? = { [weak self] verb, name in {
+            let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script, verb, name], timeout: 20))
+            self?.refreshSnapshot()
+            return err
+        } }
+        func serverRow(_ s: [String: Any]) -> SystemRow {
+            let port = s["port"] as? Int ?? 0, name = s["name"] as? String ?? "?"
+            let pm2 = s["pm2"] as? String, on = live(s)
+            let how = pm2 == "online" ? "pm2" : on ? (pm2 == nil ? "running" : "running outside pm2")
+                : pm2 != nil ? "pm2, \(pm2!)" : "not running"
+            var r = SystemRow(label: name, state: on ? .on(menuGreen) : .off, note: ":\(port) · \(how)",
+                              tip: (s["note"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Claimed in the port ledger",
+                              link: on ? "http://localhost:\(port)" : nil)
+            r.key = "dev-\(port)"
+            if pm2 == "online" {
+                r.buttons = [RowButton(label: "Stop", kind: .run(act("stop", name)), help: "pm2 stop \(name)")]
+            } else if pm2 != nil && !on {
+                r.buttons = [RowButton(label: "Start", kind: .run(act("start", name)), help: "pm2 start \(name)")]
+            }
+            return r
+        }
+        var rows: [SystemRow] = []
+
+        let services = tier(2)
+        if !services.isEmpty {
+            let up = services.filter(live)
+            var r = SystemRow(label: "Local services", state: up.isEmpty ? .off : .count(up.count, menuGreen),
+                              note: "\(up.count) of \(services.count) running",
+                              tip: "Tier 2: persistent local services on 51xx, most under pm2. Click to open.")
+            r.key = "dev-services"
+            // Running ones first, so the few that matter are not buried under idle claims.
+            r.children = (up + services.filter { !live($0) }).map(serverRow)
+            rows.append(r)
+        }
+
+        let pins = tier(1)
+        if !pins.isEmpty {
+            let up = pins.filter(live)
+            var r = SystemRow(label: "Pinned ports", state: up.isEmpty ? .off : .count(up.count, menuGreen),
+                              note: pins.compactMap { ($0["port"] as? Int).map(String.init) }.joined(separator: ", ")
+                                  + " · \(up.count) in use",
+                              tip: "Tier 1: your own ports. Agents never take them. Read-only here.")
+            r.key = "dev-pins"
+            r.children = pins.map(serverRow)
+            rows.append(r)
+        }
+
+        let oneOffs = tier(3)
+        if !oneOffs.isEmpty {
+            let up = oneOffs.filter(live)
+            let expired = oneOffs.filter { $0["expired"] as? Bool ?? false }
+            let expiredLive = expired.filter(live).compactMap { s -> String? in
+                guard let n = s["name"] as? String, let p = s["port"] as? Int else { return nil }
+                return "\(n) (:\(p))"
+            }
+            var r = SystemRow(label: "One-offs", state: up.isEmpty ? .off : .count(up.count, expiredLive.isEmpty ? menuGreen : menuYellow),
+                              note: "\(up.count) running · \(expired.count) expired"
+                                  + (expiredLive.isEmpty ? "" : ", \(expiredLive.count) still running"),
+                              tip: "Tier 3: demos and previews on 62xx with a time limit. Reap stops the expired ones and records how to revive each.")
+            r.key = "dev-oneoffs"
+            r.children = up.map(serverRow)
+            if !expired.isEmpty {
+                r.buttons = [RowButton(label: "Reap", kind: .run({ [weak self] in
+                    let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script, "reap"], timeout: 40))
+                    self?.refreshSnapshot()
+                    return err
+                }), help: "ports.sh reap: stop the expired one-offs and free their ports. Each can be brought back with ports.sh revive.",
+                   confirm: "Reap \(expired.count) expired one-offs?"
+                       + (expiredLive.isEmpty ? "" : " This stops \(expiredLive.joined(separator: ", ")), which is still running.")
+                       + " Each can be revived with ports.sh revive.")]
+            }
+            rows.append(r)
+        }
+
+        var policy = SystemRow(label: "Port policy", state: .ok, note: "which ports agents may use",
+                               tip: "features/dev-servers.md: the three tiers and how ports are claimed.",
+                               link: "file://" + SwitchboardPaths.gccRoot + "/features/dev-servers.md")
+        policy.showsBadge = false
+        rows.append(policy)
+        return rows
     }
 
     // ── Schedules: launchd jobs ──────────────────────────────────────────────

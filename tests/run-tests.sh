@@ -80,6 +80,8 @@ eq "jobs.py run of an unknown label fails"  1 "$(rc python3 Resources/lib/jobs.p
 eq "jobs.py start of an unknown label fails" 1 "$(rc python3 Resources/lib/jobs.py start com.example.no-such-job)"
 eq "jobs.py stop of an unknown label fails"  1 "$(rc python3 Resources/lib/jobs.py stop com.example.no-such-job)"
 check "jobs.py gives every job a distinct name" python3 -c "import json,subprocess;n=[j['name'] for j in json.loads(subprocess.run(['python3','Resources/lib/jobs.py','list'],capture_output=True,text=True).stdout)];assert len(n)==len(set(n)),n"
+check "devservers.py list emits servers" python3 -c "import json,subprocess;d=json.loads(subprocess.run(['python3','Resources/lib/devservers.py','list'],capture_output=True,text=True,timeout=60).stdout);assert isinstance(d['servers'],list)"
+eq "devservers.py start of a name pm2 lacks fails" 1 "$(rc python3 Resources/lib/devservers.py start no-such-server-xyz)"
 eq "wol.py refuses a malformed MAC"         2 "$(rc python3 Resources/lib/wol.py wake not-a-mac)"
 eq "wol.py sends to a well-formed MAC"      0 "$(rc python3 Resources/lib/wol.py wake 02:00:00:00:00:01)"
 python3 Resources/lib/wol.py add "Test box" 02:00:00:00:00:02 >/dev/null
