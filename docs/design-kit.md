@@ -67,8 +67,8 @@ a constant that silently clips the day a label grows.
 The popover is SwiftUI hosted in an `NSPopover`. `PT` in `PolicyPanel.swift`
 is the SwiftUI side of the same scale. Patterns worth keeping:
 
-- Grouped cards: a small caps section label with an SF Symbol, then rows inside
-  one rounded container, hairline dividers between rows.
+- Group rows into one rounded card under a small-caps section label with an SF
+  Symbol, with hairline dividers between rows.
 - Size the popover to its content up to the screen height (`ContentHeightKey`),
   so a short tab is not padded with empty space.
 - Every tab can be rendered headlessly to a PNG in dark and light

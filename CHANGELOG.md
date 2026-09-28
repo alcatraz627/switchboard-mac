@@ -21,6 +21,6 @@ the claude-instances menu bar widget.
   when the tool is missing.
 - Settings, saved devices and bulb names carry over from claude-instances on
   first launch.
-- Muted guards read by cron gates and adapter scripts are now found, not just
-  those read by hooks.
+- Switchboard now finds muted guards read by cron gates and adapter scripts,
+  not only those read by hooks.
 - Headless checks: `--dump`, `--dump-policy`, `--snapshot`, `--probe-timers`.

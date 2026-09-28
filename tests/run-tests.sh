@@ -50,6 +50,8 @@ check "guards, approvals, settings, warden, shell caps" bash tests/fixtures/swit
 
 section "agent policy (optional: needs ~/.claude/scripts/pol/pol.sh)"
 if [[ -f "$HOME/.claude/scripts/pol/pol.sh" ]]; then
+  check "pol.sh store (resolution, scopes, snoozes, owner-only writes)" bash "$HOME/.claude/scripts/pol/pol.test.sh"
+  check "policy hooks (every key and route, old stores still win)" bash "$HOME/.claude/scripts/hooks/guard-policy.test.sh"
   check "panel store probe (every write the panel makes)" bash tests/fixtures/policy-probe.sh
 else
   skip "policy store not installed"

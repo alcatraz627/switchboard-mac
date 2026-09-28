@@ -62,7 +62,7 @@ It is not notarized, so the first time, right-click the app and choose Open
 Switchboard grew out of a personal Claude Code setup, and the Agents tab and
 several Machine rows drive tools from that setup (a policy store, guard hooks,
 a kanban server). Each is optional: when a tool is not installed, its row or
-tab simply is not shown. On a plain Mac you get Keep Awake, schedules,
+tab is not shown. On a plain Mac you get Keep Awake, schedules,
 wake-on-LAN, the WiZ bulbs, and Claude usage if a statusline writes it. The
 full list of what needs what is in [docs/architecture.md](docs/architecture.md#optional-integrations).
 
