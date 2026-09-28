@@ -28,7 +28,7 @@ func settle(_ from: Date) {
     let deadline = Date().addingTimeInterval(8)
     while Date() < deadline {
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        if store.busyKey == nil && store.now > from { return }
+        if store.busyKey == nil && store.pending.isEmpty && store.now > from { return }
     }
 }
 func item(_ k: String) -> PolicyItem? { store.items.first { $0.key == k } }
@@ -37,9 +37,14 @@ var t = Date(); store.reload(); settle(t)
 check("store loads every registry entry", store.items.count > 15, "\(store.items.count)")
 check("no load error", store.error == nil, store.error ?? "")
 
-// A switch flip, as the Toggle binding makes it.
-t = Date(); store.set(item("slack.post")!, .text("block")); settle(t)
+// A switch flip, as the Toggle binding makes it. The row shows the asked value
+// at once, before pol.sh has answered.
+t = Date(); store.set(item("slack.post")!, .text("block"))
+check("the row shows the asked value before the save lands",
+      store.pending["slack.post"]?.target == .text("block") && item("slack.post")?.value == .text("allow"))
+settle(t)
 check("toggle writes through pol.sh despite the agent marker", item("slack.post")?.value == .text("block"), store.error ?? "")
+check("a confirmed change leaves nothing pending", store.pending["slack.post"] == nil)
 check("written value reports source global", item("slack.post")?.source == "global")
 
 // A segmented choice and a slider.
@@ -51,7 +56,15 @@ check("slider writes a number", item("ops.usage_gate_pct")?.value == .number(70)
 // An out-of-range value is refused by pol.sh and surfaces as an error.
 t = Date(); store.set(item("ops.usage_gate_pct")!, .number(20)); settle(t)
 check("out-of-range value refused", item("ops.usage_gate_pct")?.value == .number(70))
-check("refusal shown to the owner", (store.error ?? "").contains("invalid value"), store.error ?? "nil")
+let refusal = store.failures["ops.usage_gate_pct"] ?? ""
+check("refusal shown on that row", refusal.contains("invalid value"), refusal.isEmpty ? "nil" : refusal)
+check("a row's refusal is not a load error", store.error == nil, store.error ?? "")
+check("the refused row falls back to the stored value", store.pending["ops.usage_gate_pct"] == nil)
+t = Date(); store.retry("ops.usage_gate_pct"); settle(t)
+check("retry resends the same change and is refused again",
+      (store.failures["ops.usage_gate_pct"] ?? "").contains("invalid value"))
+store.failures["ops.usage_gate_pct"] = nil
+check("dismiss clears the row's failure", store.failures.isEmpty)
 
 // Snooze, then cancel.
 t = Date(); store.snooze(item("github.comment")!, seconds: 3600, then: .text("block")); settle(t)

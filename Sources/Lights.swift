@@ -90,8 +90,14 @@ final class LightsStore: ObservableObject {
     @Published private(set) var bulbs: [Bulb] = []
     @Published private(set) var discovering = false
     @Published private(set) var lastScan: Date?
+    @Published private(set) var scanStarted: Date?
+    /// A scan that failed outright; a bulb's own failure lives in `failures`.
     @Published var error: String?
     @Published private(set) var busy: Set<String> = []
+    /// When each bulb's unconfirmed change was sent, by MAC.
+    @Published private(set) var pendingSince: [String: Date] = [:]
+    @Published var failures: [String: String] = [:]
+    private var lastPairs: [String: [String]] = [:]
     private let queue = DispatchQueue(label: "lights.store", qos: .userInitiated)
 
     /// Scan the network. Cheap (one broadcast, 3 s of listening), so it runs
@@ -99,6 +105,7 @@ final class LightsStore: ObservableObject {
     func discover() {
         guard !discovering else { return }
         discovering = true
+        scanStarted = Date()
         queue.async { [weak self] in
             let r = WizCLI.run(["discover"])
             let list = (r.json as? [[String: Any]])?.compactMap(Bulb.init) ?? []
@@ -106,30 +113,81 @@ final class LightsStore: ObservableObject {
                 guard let self = self else { return }
                 self.discovering = false
                 self.lastScan = Date()
-                if let e = r.err { self.error = e; return }
+                // A failed scan keeps the list on screen; the status line says
+                // it could not be refreshed and how old it is.
+                if let e = r.err { self.error = e; dwarn("bulb scan failed: \(e)"); return }
                 self.error = nil
                 self.bulbs = list
             }
         }
     }
 
-    /// Send one change to one bulb and show what the bulb reports back.
+    /// Send one change to one bulb. The row shows the change at once; the
+    /// bulb's own report replaces it, or the old state comes back on failure.
     func set(_ bulb: Bulb, _ pairs: [String]) {
+        guard let i = bulbs.firstIndex(where: { $0.mac == bulb.mac }) else { return }
+        let before = bulbs[i]
+        bulbs[i] = Self.applying(pairs, to: before)
         busy.insert(bulb.mac)
+        pendingSince[bulb.mac] = Date()
+        failures[bulb.mac] = nil
+        lastPairs[bulb.mac] = pairs
         queue.async { [weak self] in
             let r = WizCLI.run(["set", bulb.ip] + pairs)
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.busy.remove(bulb.mac)
-                if let e = r.err { self.error = "\(bulb.title): \(e)"; return }
-                self.error = nil
-                if let d = r.json as? [String: Any], var b = Bulb(d),
-                   let i = self.bulbs.firstIndex(where: { $0.mac == bulb.mac }) {
-                    b.name = self.bulbs[i].name
-                    self.bulbs[i] = b
+                self.pendingSince[bulb.mac] = nil
+                guard let j = self.bulbs.firstIndex(where: { $0.mac == bulb.mac }) else { return }
+                if let e = r.err {
+                    self.bulbs[j] = before
+                    self.failures[bulb.mac] = Self.plain(e)
+                    dwarn("bulb \(bulb.ip) \(pairs.joined(separator: " ")): \(e)")
+                    return
+                }
+                if let d = r.json as? [String: Any], var b = Bulb(d) {
+                    b.name = self.bulbs[j].name
+                    self.bulbs[j] = b
                 }
             }
         }
+    }
+
+    func retry(_ bulb: Bulb) {
+        if let pairs = lastPairs[bulb.mac] { set(bulb, pairs) }
+    }
+
+    /// The bulb as it will look once the change lands, for showing at once.
+    static func applying(_ pairs: [String], to b: Bulb) -> Bulb {
+        var n = b
+        for p in pairs {
+            let kv = p.split(separator: "=", maxSplits: 1).map(String.init)
+            guard kv.count == 2 else { continue }
+            switch kv[0] {
+            case "state": n.on = kv[1] == "on"
+            case "dimming": n.dimming = Int(kv[1]) ?? n.dimming
+            case "temp": n.temp = Int(kv[1]); n.scene = nil; n.sceneName = nil; n.rgb = nil
+            case "scene":
+                n.scene = Int(kv[1]); n.rgb = nil
+                n.sceneName = scenes.first { $0.0 == n.scene }?.1
+            case "rgb":
+                let h = kv[1]
+                if h.count == 6, let v = Int(h, radix: 16) {
+                    n.rgb = ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF); n.scene = nil; n.sceneName = nil
+                }
+            case "speed": n.speed = Int(kv[1])
+            default: break
+            }
+        }
+        return n
+    }
+
+    /// wiz.py's messages, in the words the owner needs.
+    static func plain(_ e: String) -> String {
+        if e.contains("did not confirm") || e.contains("timed out") {
+            return "The bulb did not answer. It may be switched off at the wall or out of Wi-Fi range."
+        }
+        return e
     }
 
     func setAll(on: Bool) {
@@ -162,12 +220,20 @@ final class LightsStore: ObservableObject {
 struct LightsTabView: View {
     @ObservedObject var lights: LightsStore
 
+    private var scanState: ReadingState {
+        if let e = lights.error {
+            return lights.bulbs.isEmpty ? .failed("Could not look for bulbs: \(e)")
+                                        : .stale(lights.lastScan ?? Date(), e)
+        }
+        if let d = lights.lastScan { return .fresh(d) }
+        return .loading
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: SBStyle.gap) {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     SBGroupHeader(name: "Lights")
-                    if lights.discovering { ProgressView().controlSize(.mini) }
                     Spacer()
                     if lights.bulbs.contains(where: { $0.reachable }) {
                         Button("All off") { lights.setAll(on: false) }.controlSize(.small)
@@ -180,13 +246,13 @@ struct LightsTabView: View {
                     .help("Look for bulbs on the network again")
                 }
                 .padding(.trailing, 4)
+                ReadingStatus(state: scanState, staleAfter: 600,
+                              busySince: lights.discovering && !lights.bulbs.isEmpty ? lights.scanStarted : nil,
+                              retry: lights.error != nil ? { lights.discover() } : nil)
+                    .padding(.horizontal, 4)
                 SBCard {
-                    if let e = lights.error {
-                        Text(e).font(SBStyle.caption).foregroundStyle(.red)
-                            .padding(.horizontal, SBStyle.rowH).padding(.vertical, 6)
-                    }
-                    if lights.bulbs.isEmpty {
-                        Text(lights.discovering ? "Looking for bulbs…" : "No bulbs answered on this network.")
+                    if lights.bulbs.isEmpty && !lights.discovering && lights.error == nil {
+                        Text("No bulbs answered on this network.")
                             .font(SBStyle.caption).foregroundStyle(.secondary)
                             .padding(.horizontal, SBStyle.rowH).padding(.vertical, 8)
                     }
@@ -267,10 +333,12 @@ struct BulbRow: View {
                 }
                 .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
                 .disabled(!bulb.reachable)
+                if let since = lights.pendingSince[bulb.mac] { PendingMark(since: since) }
                 Toggle("", isOn: Binding(get: { bulb.on },
                                          set: { lights.set(bulb, ["state=\($0 ? "on" : "off")"]) }))
                     .toggleStyle(.switch).controlSize(.small).labelsHidden()
-                    .disabled(!bulb.reachable || busy)
+                    .disabled(!bulb.reachable)
+                    .allowsHitTesting(!busy)
             }
             if bulb.on && bulb.reachable {
                 HStack(spacing: 8) {
@@ -291,8 +359,13 @@ struct BulbRow: View {
                         .help("Warm to cool white")
                 }
                 .padding(.leading, 24)
-                .disabled(busy)
-                if showColour { colourRow.padding(.leading, 24).disabled(busy) }
+                .allowsHitTesting(!busy)
+                if showColour { colourRow.padding(.leading, 24).allowsHitTesting(!busy) }
+            }
+            if let f = lights.failures[bulb.mac] {
+                RowFailure(message: f, retry: { lights.retry(bulb) },
+                           dismiss: { lights.failures[bulb.mac] = nil })
+                    .padding(.horizontal, -SBStyle.rowH).padding(.leading, 24)
             }
         }
         .padding(.horizontal, SBStyle.rowH).padding(.vertical, SBStyle.rowV + 1)

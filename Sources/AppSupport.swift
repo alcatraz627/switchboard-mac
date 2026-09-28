@@ -73,6 +73,21 @@ func fmtErr(_ error: Error) -> String {
     return "\(ns.domain) #\(ns.code): \(ns.localizedDescription)"
 }
 
+// ── Changes waiting to be confirmed (drawn by States.swift) ─────────────────
+
+enum Pending {
+    /// Most saves finish well inside this, so a fast change never flickers.
+    static let showAfter: TimeInterval = 0.35
+    /// A change still unconfirmed after this is reported as failed.
+    static let giveUpAfter: TimeInterval = 8
+}
+
+/// A change the owner asked for that has not been confirmed yet.
+struct PendingChange<Value: Equatable>: Equatable {
+    let target: Value
+    let since: Date
+}
+
 // ── Claude sessions running right now ───────────────────────────────────────
 
 /// Claude Code writes one small file per running session to ~/.claude/sessions

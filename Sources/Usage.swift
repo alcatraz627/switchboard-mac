@@ -4,8 +4,8 @@
 //
 // Claude's windows come from what Claude Code hands the statusline
 // (~/.claude/widgets/.rate-limits-raw.json, every window it sends, falling
-// back to .limits.json). Codex's come from codex-usage-gate.py --json, which
-// asks Codex's app-server and caches the answer for ten minutes.
+// back to .limits.json). Codex's come from the cache the Codex usage gate
+// keeps; the panel never starts Codex unless the owner asks it to.
 
 import AppKit
 import Foundation
@@ -30,8 +30,6 @@ final class UsageStore: ObservableObject {
     @Published private(set) var codexAsOf: Date?
     @Published private(set) var codexPlan: String?
     @Published private(set) var codexResets: [CodexResetCredit] = []
-    @Published private(set) var codexError: String?
-    @Published private(set) var codexBusy = false
 
     /// The Claude usage zones, kept under the same keys claude-instances reads.
     @Published var warnPct: Int = UserDefaults.standard.integer(forKey: "rateLimitWarningThreshold") {
@@ -73,13 +71,39 @@ final class UsageStore: ObservableObject {
                                                                      userInfo: nil, deliverImmediately: true)
     }
 
-    /// Claude is a file read, so it is always fresh; Codex is re-asked only
-    /// when its cache is older than ten minutes, or when `force` is set.
-    func reload(forceCodex: Bool = false) {
+    /// Both are file reads and cheap. Opening the panel never starts Codex:
+    /// its numbers come from the cache the usage gate keeps, and only the
+    /// owner's "Ask Codex now" asks Codex itself.
+    func reload() {
         loadClaude()
-        if forceCodex || codexAsOf.map({ Date().timeIntervalSince($0) > 600 }) ?? true {
-            loadCodex(fresh: forceCodex)
+        loadCodexCache()
+    }
+
+    @Published private(set) var codexBusySince: Date?
+    /// Why the last "Ask Codex now" did not produce a new reading.
+    @Published private(set) var codexRefreshError: String?
+
+    static var codexCache = NSString(string: "~/.claude/adapters/codex/state/limits.json").expandingTildeInPath
+    static var codexMute = NSString(string: "~/.claude/.no-codex-usage-gate").expandingTildeInPath
+
+    var claudeState: ReadingState {
+        if let d = claudeAsOf, !claude.isEmpty { return .fresh(d) }
+        return .unavailable("No usage reading yet. It arrives with the next statusline render.")
+    }
+
+    var codexState: ReadingState {
+        if let d = codexAsOf, !codex.isEmpty {
+            if let e = codexRefreshError { return .stale(d, e) }
+            return .fresh(d)
         }
+        if let e = codexRefreshError { return .failed(e) }
+        if !FileManager.default.fileExists(atPath: Self.codexGate) {
+            return .unavailable("Codex usage needs the Codex adapter in ~/.claude.")
+        }
+        if FileManager.default.fileExists(atPath: Self.codexMute) {
+            return .unavailable("No reading yet. The Codex usage gate is muted, so nothing asks Codex.")
+        }
+        return .unavailable("No reading yet. One arrives when a Codex seat runs, or ask Codex now.")
     }
 
     // ── Claude ──
@@ -132,44 +156,60 @@ final class UsageStore: ObservableObject {
 
     // ── Codex ──
 
-    func loadCodex(fresh: Bool) {
-        guard !codexBusy else { return }
-        codexBusy = true
+    /// The usage gate's last good reading, as it left it on disk.
+    func loadCodexCache() {
+        guard let d = FileManager.default.contents(atPath: Self.codexCache),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return }
+        applyCodex(o, asOf: modified(Self.codexCache) ?? Date())
+    }
+
+    /// For --demo-states snapshots only.
+    func demoRefreshFailure(_ why: String) { codexRefreshError = why }
+
+    /// The one path that asks Codex itself (it starts a short-lived
+    /// `codex app-server`), so it runs only when the owner clicks for it.
+    func askCodexNow() {
+        guard codexBusySince == nil else { return }
+        if FileManager.default.fileExists(atPath: Self.codexMute) {
+            codexRefreshError = "the Codex usage gate is muted (~/.claude/.no-codex-usage-gate)"
+            return
+        }
+        codexBusySince = Date()
+        codexRefreshError = nil
         queue.async { [weak self] in
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            p.arguments = ["python3", Self.codexGate, "--json"] + (fresh ? ["--fresh"] : [])
+            p.arguments = ["python3", Self.codexGate, "--fresh"]
             var env = ProcessInfo.processInfo.environment
             env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (env["PATH"] ?? "")
             p.environment = env
             let pipe = Pipe()
             p.standardOutput = pipe
             p.standardError = FileHandle.nullDevice
-            var parsed: [String: Any]?
+            var verdict = ""
             if (try? p.run()) != nil {
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                verdict = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
                 p.waitUntilExit()
-                // stdout is the JSON object, then one VERDICT line; take the object.
-                if let s = String(data: data, encoding: .utf8), let end = s.range(of: "\n}", options: .backwards) {
-                    let obj = String(s[s.startIndex..<end.upperBound])
-                    parsed = try? JSONSerialization.jsonObject(with: Data(obj.utf8)) as? [String: Any]
-                }
+            } else {
+                verdict = "UNKNOWN: could not start python3"
             }
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                self.codexBusy = false
-                guard let o = parsed else {
-                    self.codexError = "Could not read Codex usage (is the codex CLI installed and signed in?)"
-                    return
+                self.codexBusySince = nil
+                // The gate prints "PASS<TAB>UNKNOWN: <why>" when it could not read.
+                if let r = verdict.range(of: "UNKNOWN: ") {
+                    let why = verdict[r.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+                    self.codexRefreshError = why.isEmpty ? "Codex did not answer" : String(why.prefix(140))
+                    dwarn("codex usage refresh failed: \(why)")
+                } else {
+                    self.loadCodexCache()
                 }
-                self.applyCodex(o)
             }
         }
     }
 
-    func applyCodex(_ o: [String: Any]) {
-        codexError = nil
-        codexAsOf = Date()
+    func applyCodex(_ o: [String: Any], asOf: Date = Date()) {
+        codexAsOf = asOf
         var windows: [UsageWindow] = []
         let byId = o["rateLimitsByLimitId"] as? [String: [String: Any]]
             ?? ["codex": (o["rateLimits"] as? [String: Any]) ?? [:]]
@@ -204,11 +244,6 @@ final class UsageStore: ObservableObject {
         (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
     }
 
-    /// Fill synchronously, for the headless snapshot.
-    func loadForSnapshot(codexJSON: [String: Any]?) {
-        loadClaude()
-        if let o = codexJSON { applyCodex(o) }
-    }
 }
 
 // ── The tab ─────────────────────────────────────────────────────────────────
@@ -220,10 +255,7 @@ struct UsageTabView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: SBStyle.gap) {
-            section("Claude", link: ("Usage page", "https://claude.ai/settings/usage"), asOf: usage.claudeAsOf) {
-                if usage.claude.isEmpty {
-                    note("No usage reading yet. It arrives with the next statusline render.")
-                }
+            section("Claude", link: ("Usage page", "https://claude.ai/settings/usage"), state: usage.claudeState) {
                 ForEach(usage.claude) { w in
                     UsageBarRow(window: w, now: now,
                                 color: zoneColor(w.pct, warn: usage.warnPct, danger: usage.dangerPct),
@@ -234,12 +266,9 @@ struct UsageTabView: View {
                 ZoneSlider(label: "Warn at", value: $usage.warnPct, tint: .orange)
                 ZoneSlider(label: "Danger at", value: $usage.dangerPct, tint: .red)
             }
-            section("Codex", link: ("Usage page", "https://chatgpt.com/settings/usage?tab=overview"), asOf: usage.codexAsOf,
-                    trailing: AnyView(refreshButton)) {
-                if let e = usage.codexError { note(e) }
-                if usage.codex.isEmpty && usage.codexError == nil {
-                    note(usage.codexBusy ? "Asking Codex…" : "No Codex reading yet.")
-                }
+            section("Codex", link: ("Usage page", "https://chatgpt.com/settings/usage?tab=overview"),
+                    state: usage.codexState, busySince: usage.codexBusySince,
+                    refresh: { usage.askCodexNow() }, refreshLabel: "Ask Codex now") {
                 ForEach(usage.codex) { w in
                     UsageBarRow(window: w, now: now,
                                 color: zoneColor(w.pct, warn: usage.codexWarnPct, danger: codexGate),
@@ -280,15 +309,6 @@ struct UsageTabView: View {
         return nil
     }
 
-    private var refreshButton: some View {
-        Button { usage.reload(forceCodex: true) } label: {
-            if usage.codexBusy { ProgressView().controlSize(.mini) }
-            else { Image(systemName: "arrow.clockwise").font(.system(size: 10)) }
-        }
-        .buttonStyle(.borderless)
-        .help("Ask Codex for fresh numbers (takes a few seconds)")
-    }
-
     private func zoneColor(_ pct: Int, warn: Int, danger: Int) -> Color {
         pct >= danger ? .red : pct >= warn ? .orange : .green
     }
@@ -299,22 +319,30 @@ struct UsageTabView: View {
             .padding(.horizontal, SBStyle.rowH).padding(.vertical, 4)
     }
 
-    private func section<C: View>(_ title: String, link: (String, String), asOf: Date?,
-                                  trailing: AnyView? = nil, @ViewBuilder _ content: () -> C) -> some View {
+    /// A reading's section: header and link, its status line (age, failure,
+    /// or why there is nothing), then the card.
+    private func section<C: View>(_ title: String, link: (String, String), state: ReadingState,
+                                  busySince: Date? = nil, refresh: (() -> Void)? = nil,
+                                  refreshLabel: String = "Refresh",
+                                  @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
                 SBGroupHeader(name: title)
-                if let a = asOf, now.timeIntervalSince(a) > 1800 {
-                    Text("as of \(relative(a, now: now))").font(.system(size: 9.5)).foregroundStyle(.tertiary)
-                }
                 Spacer()
-                if let t = trailing { t }
+                if let r = refresh {
+                    if let since = busySince { PendingMark(since: since) }
+                    else {
+                        Button(refreshLabel, action: r).buttonStyle(.link).font(SBStyle.caption)
+                            .help("Starts Codex briefly to read fresh numbers (a few seconds)")
+                    }
+                }
                 Link(destination: URL(string: link.1)!) {
                     Label(link.0, systemImage: "arrow.up.right").font(SBStyle.caption).labelStyle(.titleAndIcon)
                 }
                 .help(link.1)
             }
             .padding(.trailing, 4)
+            ReadingStatus(state: state, staleAfter: 3600).padding(.horizontal, 4)
             SBCard { content() }
         }
     }

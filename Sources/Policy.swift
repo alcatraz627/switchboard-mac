@@ -330,8 +330,19 @@ final class PolicyStore: ObservableObject {
         }
     }
 
-    private func write(_ key: String, _ args: [String]) {
+    /// Changes sent to pol.sh and not yet confirmed, by policy key. A value
+    /// here is what the row shows until the store confirms or refuses it.
+    @Published private(set) var pending: [String: PendingChange<PolicyValue?>] = [:]
+    /// The last refusal per policy key, shown under that row until dismissed
+    /// or until a later change to the same row succeeds.
+    @Published var failures: [String: String] = [:]
+    /// The last args per key, so Retry can resend exactly what failed.
+    private var lastArgs: [String: [String]] = [:]
+
+    private func write(_ key: String, _ args: [String], showing value: PolicyValue? = nil) {
         busyKey = key
+        pending[key] = PendingChange(target: value, since: Date())
+        lastArgs[key] = args
         queue.async { [weak self] in
             let r = PolicyCLI.run(args)
             DispatchQueue.main.async {
@@ -339,18 +350,28 @@ final class PolicyStore: ObservableObject {
                 self.busyKey = nil
                 if r.code != 0 {
                     let msg = r.err.trimmingCharacters(in: .whitespacesAndNewlines)
-                    self.error = msg.isEmpty ? "Could not save \(key)." : msg
+                    self.failures[key] = msg.isEmpty ? "Could not save this change." : msg
+                    dwarn("policy write failed: \(key): \(self.failures[key]!)")
                 } else {
-                    self.error = nil
+                    self.failures[key] = nil
                 }
-                self.reload(keepError: r.code != 0)
+                // The row keeps showing the asked value until the reload lands,
+                // so a successful change never flicks back for a frame.
+                self.reload { self.pending[key] = nil }
             }
         }
     }
 
+    /// Send the change that failed on this row again.
+    func retry(_ key: String) {
+        guard let args = lastArgs[key] else { return }
+        failures[key] = nil
+        write(key, args, showing: pending[key]?.target ?? nil)
+    }
+
     func set(_ item: PolicyItem, _ value: PolicyValue) {
         guard value != item.value || (scopeIsProject && item.source != "project") else { return }
-        write(item.key, ["set", item.key, value.cli] + scope.cliArgs)
+        write(item.key, ["set", item.key, value.cli] + scope.cliArgs, showing: value)
     }
 
     func snooze(_ item: PolicyItem, seconds: Int, then: PolicyValue) {

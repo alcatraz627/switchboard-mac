@@ -199,13 +199,12 @@ struct AgentsTabView: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 4)
+            // A write's refusal shows on its own row; this line is only for the
+            // store itself failing to load.
             if let e = store.error {
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(blockedTint)
-                    Text(e).font(PT.caption).fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 4)
+                ReadingStatus(state: store.items.isEmpty ? .failed(e) : .stale(store.now, e),
+                              retry: { store.reload() })
+                    .padding(.horizontal, 4)
             }
             if store.scopeIsProject, case .project(let root) = store.scope {
                 Text("Overrides for \(abbreviate(root)). A row with no override follows the Everywhere value.")
@@ -214,7 +213,7 @@ struct AgentsTabView: View {
                     .padding(.horizontal, 4)
             }
             if store.items.isEmpty && store.error == nil {
-                Text("Loading…").font(PT.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
+                ReadingStatus(state: .loading).padding(.horizontal, 4)
             }
             // Usage thresholds (the *_pct limits) live on the Usage tab, next
             // to the bars they act on.
@@ -312,7 +311,7 @@ struct SystemTabView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: PT.gap) {
             if store.systemGroups.isEmpty {
-                Text("Loading…").font(PT.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
+                ReadingStatus(state: .loading).padding(.horizontal, 4)
             }
             ForEach(store.systemGroups) { g in
                 VStack(alignment: .leading, spacing: 5) {
@@ -402,11 +401,36 @@ private struct SystemRowView: View {
     @ObservedObject var store: PolicyStore
     @State private var picking = false
     @State private var pickedTime = SystemRowView.defaultPick()
+    /// A flip asked for and not yet seen by the next probe.
+    @State private var pendingFlip: PendingChange<Bool>?
+    @State private var failure: String?
 
     var body: some View {
         VStack(spacing: 0) {
             mainLine
             if picking, let key = row.timerKey { timePicker(key) }
+            if let f = failure {
+                RowFailure(message: f, retry: row.isSwitch ? { flip(to: !row.isOn) } : nil,
+                           dismiss: { failure = nil })
+            }
+        }
+        // A switch reports nothing back; the next probe showing it in the asked
+        // position is the confirmation.
+        .onChange(of: row.isOn) { now in
+            if pendingFlip?.target == now { pendingFlip = nil; failure = nil }
+        }
+    }
+
+    private func flip(to on: Bool) {
+        let p = PendingChange(target: on, since: Date())
+        pendingFlip = p
+        failure = nil
+        row.action?()
+        DispatchQueue.main.asyncAfter(deadline: .now() + Pending.giveUpAfter) {
+            guard pendingFlip == p else { return }
+            pendingFlip = nil
+            failure = "\(row.label) did not turn \(on ? "on" : "off"). It is still \(row.isOn ? "on" : "off")."
+            dwarn("switch did not confirm: \(row.label) -> \(on ? "on" : "off")")
         }
     }
 
@@ -431,7 +455,8 @@ private struct SystemRowView: View {
                 }
             }
             Spacer(minLength: 6)
-            if let key = row.timerKey { timerMenu(key).frame(width: 18) }
+            if let p = pendingFlip { PendingMark(since: p.since) }
+            else if let key = row.timerKey { timerMenu(key).frame(width: 18) }
             if let link = row.link, let url = URL(string: link) {
                 Button { NSWorkspace.shared.open(url) } label: {
                     Image(systemName: "arrow.up.right.square").font(.system(size: 12))
@@ -532,11 +557,13 @@ private struct SystemRowView: View {
             .fixedSize()
             .disabled(!row.enabled)
         } else if row.isSwitch {
-            Toggle("", isOn: Binding(get: { row.isOn }, set: { _ in row.action?() }))
+            Toggle("", isOn: Binding(get: { pendingFlip?.target ?? row.isOn },
+                                     set: { flip(to: $0) }))
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .labelsHidden()
                 .disabled(!row.enabled)
+                .allowsHitTesting(pendingFlip == nil)
         } else if let menu = row.menu {
             // The dropdown's own drill-down menu, popped where the click was.
             Button {
@@ -598,32 +625,43 @@ struct PolicyRowView: View {
     @State private var draft: Double = 0
     @State private var dragging = false
 
-    private var busy: Bool { store.busyKey == item.key }
+    private var pendingChange: PendingChange<PolicyValue?>? { store.pending[item.key] }
+    /// What the row shows: the value just asked for while it is being saved,
+    /// otherwise the stored one.
+    private var shown: PolicyValue { (pendingChange?.target ?? nil) ?? item.value }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 5) {
-                    Text(item.label).font(PT.label).lineLimit(1)
-                    if !item.isDefault {
-                        Circle().fill(changedTint).frame(width: 5, height: 5)
-                            .help("Changed from the default (\(item.defaultValue.cli))")
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
+                        Text(item.label).font(PT.label).lineLimit(1)
+                        if !item.isDefault {
+                            Circle().fill(changedTint).frame(width: 5, height: 5)
+                                .help("Changed from the default (\(item.defaultValue.cli))")
+                        }
                     }
+                    caption
                 }
-                caption
-            }
-            Spacer(minLength: 6)
-            // Fixed columns: the clock and the control line up down the whole
-            // panel whatever each control's own width is.
-            snoozeMenu
+                Spacer(minLength: 6)
+                // Fixed columns: the clock and the control line up down the whole
+                // panel whatever each control's own width is. While a change is
+                // saving, the clock's slot holds the pending mark instead.
+                Group {
+                    if let p = pendingChange { PendingMark(since: p.since) } else { snoozeMenu }
+                }
                 .frame(width: 18, alignment: .center)
-            control
-                .disabled(busy)
-                .opacity(busy ? 0.5 : 1)
-                .frame(width: PT.control, alignment: .trailing)
+                control
+                    .allowsHitTesting(pendingChange == nil)
+                    .frame(width: PT.control, alignment: .trailing)
+            }
+            .padding(.horizontal, PT.rowH)
+            .padding(.vertical, PT.rowV)
+            if let f = store.failures[item.key] {
+                RowFailure(message: f, retry: { store.retry(item.key) },
+                           dismiss: { store.failures[item.key] = nil })
+            }
         }
-        .padding(.horizontal, PT.rowH)
-        .padding(.vertical, PT.rowV)
         .contentShape(Rectangle())
         .help(item.help)
     }
@@ -669,7 +707,7 @@ struct PolicyRowView: View {
     @ViewBuilder private var control: some View {
         switch item.kind {
         case .toggle:
-            let allowed = item.value == .text("allow")
+            let allowed = shown == .text("allow")
             HStack(spacing: 8) {
                 Text(allowed ? "Allowed" : "Blocked")
                     .font(PT.caption)
@@ -683,7 +721,7 @@ struct PolicyRowView: View {
             }
         case .segmented(let opts):
             Picker("", selection: Binding(
-                get: { item.value.cli },
+                get: { shown.cli },
                 set: { store.set(item, .text($0)) })) {
                 ForEach(opts, id: \.self) { Text(word(.text($0))).tag($0) }
             }
@@ -693,7 +731,7 @@ struct PolicyRowView: View {
             .frame(width: CGFloat(max(2, opts.count)) * PT.segment)
         case .menu(let opts):
             Picker("", selection: Binding(
-                get: { item.value.cli },
+                get: { shown.cli },
                 set: { store.set(item, .text($0)) })) {
                 ForEach(opts, id: \.self) { Text(word(.text($0))).tag($0) }
             }
@@ -706,7 +744,7 @@ struct PolicyRowView: View {
                 // Snapped by hand rather than with `step:`, which draws a tick
                 // mark per step and turns a 50-100 range into a row of dots.
                 Slider(value: Binding(
-                    get: { dragging ? draft : numeric(item.value) },
+                    get: { dragging ? draft : numeric(shown) },
                     set: { draft = (($0 - lo) / step).rounded() * step + lo }),
                        in: lo...hi,
                        onEditingChanged: { editing in
@@ -715,7 +753,7 @@ struct PolicyRowView: View {
                        })
                     .controlSize(.small)
                     .frame(width: PT.slider)
-                Text("\(Int(dragging ? draft : numeric(item.value)))\(unit)")
+                Text("\(Int(dragging ? draft : numeric(shown)))\(unit)")
                     .font(PT.mono)
                     .frame(width: 36, alignment: .trailing)
             }
@@ -907,23 +945,18 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     store.systemGroups = system
     let usage = UsageStore()
     let lights = LightsStore()
-    if tab == "usage" {
-        // The Codex reading comes from the gate's own cache or a live ask.
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        p.arguments = ["python3", UsageStore.codexGate, "--json"]
-        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
-        var codex: [String: Any]?
-        if (try? p.run()) != nil {
-            let s = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            p.waitUntilExit()
-            if let end = s.range(of: "\n}", options: .backwards) {
-                codex = try? JSONSerialization.jsonObject(with: Data(s[s.startIndex..<end.upperBound].utf8)) as? [String: Any]
-            }
-        }
-        usage.loadForSnapshot(codexJSON: codex)
-    }
+    if tab == "usage" { usage.reload() }   // file reads only; never starts Codex
     if tab == "home" { lights.loadForSnapshot() }
+    // --demo-states plants one failure per tab so their look can be checked.
+    if CommandLine.arguments.contains("--demo-states") {
+        if let k = store.items.first(where: { $0.kind == .toggle })?.key {
+            store.failures[k] = "pol.sh: invalid value (demo failure)"
+        }
+        if let b = lights.bulbs.first {
+            lights.failures[b.mac] = LightsStore.plain("bulb did not confirm the change")
+        }
+        usage.demoRefreshFailure("Codex did not answer within 20s (demo failure)")
+    }
     let concerns = SwitchboardConcerns.all(policy: store, usage: usage, lights: lights)
 
     let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!

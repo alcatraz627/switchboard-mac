@@ -62,6 +62,35 @@ label.
 widest label and clamp it (see `labelColumn` in `App.swift`) instead of picking
 a constant that silently clips the day a label grows.
 
+## Pending and failure
+
+Every control and every reading in the panel follows the same five rules. The
+views live in `Sources/States.swift` (`PendingMark`, `RowFailure`,
+`ReadingStatus`); the timings in `Pending` in `AppSupport.swift`.
+
+1. **Move at once.** A control shows the value you asked for the moment you
+   touch it. Nothing waits on the save to redraw.
+2. **Stay quiet while it is fast.** For the first 350 ms nothing else changes,
+   so a normal save never flickers a spinner. After that, a small spinner takes
+   the row's status slot (where the timer or clock icon sits) until the save
+   lands. The control ignores clicks meanwhile instead of greying out.
+3. **Snap back and say why.** If the change fails, the control returns to the
+   real value and the row grows one red line: what went wrong in plain words,
+   Retry, and a dismiss button. It stays until dismissed or until a later
+   change to that row succeeds, and it is written to the log. A switch that
+   reports nothing back counts as failed if the next probe does not show it in
+   the asked position within 8 seconds.
+4. **Readings carry their age.** Every number from outside the app shows when
+   it was read ("as of 3m ago"). Past its expected freshness the age turns
+   amber. A refresh that fails keeps the old value on screen with an amber
+   "couldn't refresh: why". Only a reading with no value at all turns red, with
+   Retry.
+5. **Absent is not failed.** A source that is not installed, or deliberately
+   muted, shows a grey line saying so, with nothing to retry.
+
+`--snapshot … --demo-states` plants one failure per tab so these can be
+checked in both appearances without breaking anything.
+
 ## Panels (SwiftUI)
 
 The popover is SwiftUI hosted in an `NSPopover`. `PT` in `PolicyPanel.swift`

@@ -5,6 +5,17 @@
 - **Home**: pick any colour for a bulb (a hue strip, eight swatches, and a way
   back to white), and set how fast an animated scene moves.
 - `--snapshot --expand` renders the colour strips open, for checking.
+- **Every control and reading now shows pending and failure the same way**:
+  changes show at once, a spinner appears only if a save takes longer than
+  350 ms, a failed change snaps back with a plain-words line and Retry, and
+  readings show their age (amber when old). See docs/design-kit.md.
+- **Home**: bulbs no longer vanish when a scan misses them. Discovery repeats
+  its broadcast and asks every bulb seen before directly; one that still does
+  not answer stays listed as not answering. Measured before: 3 of 8 scans
+  found 3, 2 and 0 of 5 bulbs; after: 8 of 8 found all 5.
+- **Usage**: opening the panel never starts Codex. Codex numbers come from the
+  usage gate's cache with their age; "Ask Codex now" is the only path that
+  asks Codex itself, and it says so when the gate is muted.
 
 ## 0.1.0 (2026-09-29)
 

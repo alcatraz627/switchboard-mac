@@ -25,6 +25,7 @@ from state import state_path
 
 PORT = 38899
 NAMES = state_path("wiz-names.json", ".wiz-names.json")
+KNOWN = state_path("wiz-known.json")        # mac -> last address, so a missed broadcast loses nothing
 REPLY_TIMEOUT = 2.0
 
 # WiZ's built-in scene ids, as the bulbs number them.
@@ -106,16 +107,47 @@ def bulb_state(ip, mac, names):
     }
 
 
+def load_known():
+    try:
+        with open(KNOWN) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_known(known):
+    tmp = KNOWN + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(known, f, indent=2)
+    os.replace(tmp, KNOWN)
+
+
 def discover(timeout):
+    """Every bulb on the network, plus every bulb seen before.
+
+    One broadcast is easily lost (measured: 3 of 8 back-to-back scans found
+    3, 2 and 0 of 5 bulbs), so the broadcast repeats through the window, and
+    each bulb seen before is also asked directly at its last address. A known
+    bulb that still does not answer is listed as not reachable, not dropped.
+    """
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    s.settimeout(0.25)
-    msg = {"method": "registration",
-           "params": {"phoneMac": "AAAAAAAAAAAA", "register": False, "phoneIp": local_ip(), "id": "1"}}
-    s.sendto(json.dumps(msg).encode(), ("255.255.255.255", PORT))
+    s.settimeout(0.2)
+    msg = json.dumps({"method": "registration",
+                      "params": {"phoneMac": "AAAAAAAAAAAA", "register": False,
+                                 "phoneIp": local_ip(), "id": "1"}}).encode()
+    known = load_known()
     found = {}
     end = time.time() + timeout
+    next_send = 0.0
     while time.time() < end:
+        if time.time() >= next_send:
+            s.sendto(msg, ("255.255.255.255", PORT))
+            for mac, ip in known.items():
+                if mac not in found:
+                    s.sendto(msg, (ip, PORT))
+            next_send = time.time() + 0.6
         try:
             data, addr = s.recvfrom(4096)
             r = json.loads(data).get("result", {})
@@ -126,8 +158,16 @@ def discover(timeout):
         except (OSError, ValueError):
             break
     s.close()
+    if found:
+        known.update(found)
+        save_known(known)
     names = load_names()
     bulbs = [bulb_state(ip, mac, names) for mac, ip in found.items()]
+    for mac, ip in known.items():
+        if mac not in found:
+            bulbs.append({"ip": ip, "mac": mac, "name": names.get(mac) or "", "reachable": False,
+                          "on": False, "dimming": None, "temp": None, "scene": None,
+                          "scene_name": None, "rgb": None, "speed": None})
     # Named bulbs first, then by address, so the list order is stable.
     bulbs.sort(key=lambda b: (b["name"] == "", b["name"].lower(), tuple(int(x) for x in b["ip"].split("."))))
     return bulbs

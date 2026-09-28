@@ -67,6 +67,11 @@ eq "a malformed colour is refused"   2 "$(rc python3 Resources/lib/wiz.py set 12
 eq "a short colour is refused"       2 "$(rc python3 Resources/lib/wiz.py set 127.0.0.1 rgb=fff)"
 eq "a well-formed colour gets to the bulb" 1 "$(rc python3 Resources/lib/wiz.py set 127.0.0.1 rgb=ff8800)"
 eq "scene speed out of range is refused"   2 "$(rc python3 Resources/lib/wiz.py set 127.0.0.1 speed=500)"
+echo '{"aa0000000001": "127.0.0.1"}' > "$SWITCHBOARD_STATE/wiz-known.json"
+kept="$(python3 Resources/lib/wiz.py discover --timeout 1)"
+[[ "$kept" == *'"mac": "aa0000000001"'*'"reachable": false'* ]] \
+  && ok "a known bulb that misses a scan stays listed as not answering" \
+  || bad "known bulb dropped from the scan: ${kept:0:160}"
 check "the Home tab renders with colour strips open" "$BIN" --snapshot "$WORK/home-expanded.png" --tab home --expand
 
 section "machine helpers (jobs.py, wol.py)"
