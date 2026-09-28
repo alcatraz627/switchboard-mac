@@ -17,8 +17,19 @@ struct Bulb: Identifiable, Equatable {
     var temp: Int?
     var scene: Int?
     var sceneName: String?
+    /// Set when the bulb is showing a colour rather than a white or a scene.
+    var rgb: (r: Int, g: Int, b: Int)?
+    var speed: Int?
+
+    static func == (a: Bulb, b: Bulb) -> Bool {
+        a.ip == b.ip && a.mac == b.mac && a.name == b.name && a.reachable == b.reachable && a.on == b.on
+            && a.dimming == b.dimming && a.temp == b.temp && a.scene == b.scene && a.speed == b.speed
+            && a.rgb?.r == b.rgb?.r && a.rgb?.g == b.rgb?.g && a.rgb?.b == b.rgb?.b
+    }
 
     var id: String { mac }
+    /// Speed applies to animated scenes; the bulb reports one only while it is in one.
+    var isAnimatedScene: Bool { scene != nil && speed != nil }
     var title: String { name.isEmpty ? "Bulb \(ip.split(separator: ".").last ?? "")" : name }
 
     init?(_ d: [String: Any]) {
@@ -31,7 +42,26 @@ struct Bulb: Identifiable, Equatable {
         temp = (d["temp"] as? NSNumber)?.intValue
         scene = (d["scene"] as? NSNumber)?.intValue
         sceneName = d["scene_name"] as? String
+        speed = (d["speed"] as? NSNumber)?.intValue
+        if let c = d["rgb"] as? [Any], c.count == 3,
+           let r = (c[0] as? NSNumber)?.intValue, let g = (c[1] as? NSNumber)?.intValue,
+           let b = (c[2] as? NSNumber)?.intValue, scene == nil {
+            rgb = (r, g, b)
+        }
     }
+
+    /// What the second line says the bulb is showing.
+    var modeText: String {
+        if let s = sceneName { return s }
+        if let c = rgb { return String(format: "#%02X%02X%02X", c.r, c.g, c.b) }
+        return temp.map { "\($0)K" } ?? ""
+    }
+}
+
+/// Hue (0-1) at full saturation and brightness, as the hex a bulb takes.
+func hueHex(_ hue: Double) -> String {
+    let c = NSColor(calibratedHue: CGFloat(hue), saturation: 1, brightness: 1, alpha: 1).usingColorSpace(.sRGB)!
+    return String(format: "%02X%02X%02X", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255))
 }
 
 enum WizCLI {
@@ -175,12 +205,22 @@ struct LightsTabView: View {
     }
 }
 
-private struct BulbRow: View {
+struct BulbRow: View {
     let bulb: Bulb
     @ObservedObject var lights: LightsStore
     @State private var dim: Double = 50
     @State private var warm: Double = 2700
+    @State private var hue: Double = 0
     @State private var editing = false
+    @State private var showColour = BulbRow.startExpanded
+
+    /// Headless renders set this (--expand) so the colour strip can be checked.
+    static var startExpanded = false
+
+    private static let swatches: [(String, String)] = [
+        ("FF3B30", "Red"), ("FF9500", "Orange"), ("FFD60A", "Yellow"), ("34C759", "Green"),
+        ("00C7BE", "Teal"), ("007AFF", "Blue"), ("AF52DE", "Purple"), ("FF2D55", "Pink"),
+    ]
 
     private var busy: Bool { lights.busy.contains(bulb.mac) }
 
@@ -193,15 +233,31 @@ private struct BulbRow: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(bulb.title).font(SBStyle.label)
                     Text(bulb.reachable
-                         ? (bulb.on ? "\(bulb.dimming)% · \(bulb.sceneName ?? bulb.temp.map { "\($0)K" } ?? "")" : "off")
+                         ? (bulb.on ? "\(bulb.dimming)% · \(bulb.modeText)" : "off")
                          : "not answering")
                         .font(SBStyle.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button { showColour.toggle() } label: {
+                    Image(systemName: "paintpalette").font(.system(size: 11))
+                        .foregroundStyle(showColour ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Colour")
+                .disabled(!bulb.reachable || !bulb.on)
                 Menu {
                     Section("Scene") {
                         ForEach(LightsStore.scenes, id: \.0) { s in
                             Button(s.1) { lights.set(bulb, ["scene=\(s.0)"]) }
+                        }
+                    }
+                    if bulb.isAnimatedScene {
+                        Section("Scene speed") {
+                            ForEach([("Slow", 40), ("Normal", 100), ("Fast", 180)], id: \.1) { s in
+                                Button(s.0 + ((bulb.speed ?? 100) == s.1 ? "  ✓" : "")) {
+                                    lights.set(bulb, ["speed=\(s.1)"])
+                                }
+                            }
                         }
                     }
                     Divider()
@@ -236,10 +292,49 @@ private struct BulbRow: View {
                 }
                 .padding(.leading, 24)
                 .disabled(busy)
+                if showColour { colourRow.padding(.leading, 24).disabled(busy) }
             }
         }
         .padding(.horizontal, SBStyle.rowH).padding(.vertical, SBStyle.rowV + 1)
         .opacity(bulb.reachable ? 1 : 0.55)
+    }
+
+    /// A hue strip for any colour, eight quick swatches, and a way back to white.
+    /// It stays inside the panel: the system colour window would take focus and
+    /// close the popover mid-pick.
+    private var colourRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Slider(value: $hue, in: 0...1, onEditingChanged: { e in
+                if !e { lights.set(bulb, ["rgb=\(hueHex(hue))"]) }
+            })
+            .controlSize(.mini)
+            .onAppear {
+                if let c = bulb.rgb {
+                    hue = Double(NSColor(srgbRed: CGFloat(c.r) / 255, green: CGFloat(c.g) / 255,
+                                         blue: CGFloat(c.b) / 255, alpha: 1).hueComponent)
+                }
+            }
+            .background(
+                LinearGradient(colors: stride(from: 0.0, through: 1.0, by: 1.0 / 6).map { Color(hue: $0, saturation: 1, brightness: 1) },
+                               startPoint: .leading, endPoint: .trailing)
+                    .frame(height: 4).clipShape(Capsule())
+            )
+            .help("Drag to pick a colour")
+            HStack(spacing: 6) {
+                ForEach(Self.swatches, id: \.0) { s in
+                    Button { lights.set(bulb, ["rgb=\(s.0)"]) } label: {
+                        Circle().fill(Color(nsColor: NSColor.fromHex(s.0) ?? .gray))
+                            .frame(width: 14, height: 14)
+                            .overlay(Circle().stroke(Color.primary.opacity(0.15)))
+                    }
+                    .buttonStyle(.plain).help(s.1)
+                }
+                Spacer()
+                Button("White") { lights.set(bulb, ["temp=\(bulb.temp ?? 2700)"]) }
+                    .controlSize(.mini)
+                    .help("Back to warm or cool white")
+            }
+        }
     }
 
     private func rename() {

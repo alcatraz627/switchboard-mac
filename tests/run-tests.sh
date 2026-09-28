@@ -63,6 +63,11 @@ eq "out-of-range brightness refused" 2 "$(rc python3 Resources/lib/wiz.py set 12
 eq "unknown key refused"             2 "$(rc python3 Resources/lib/wiz.py set 127.0.0.1 color=red)"
 eq "bad state refused"               2 "$(rc python3 Resources/lib/wiz.py set 127.0.0.1 state=maybe)"
 eq "no answer is an error, not a hang" 1 "$(rc python3 Resources/lib/wiz.py set 127.0.0.1 state=on)"
+eq "a malformed colour is refused"   2 "$(rc python3 Resources/lib/wiz.py set 127.0.0.1 rgb=zz0000)"
+eq "a short colour is refused"       2 "$(rc python3 Resources/lib/wiz.py set 127.0.0.1 rgb=fff)"
+eq "a well-formed colour gets to the bulb" 1 "$(rc python3 Resources/lib/wiz.py set 127.0.0.1 rgb=ff8800)"
+eq "scene speed out of range is refused"   2 "$(rc python3 Resources/lib/wiz.py set 127.0.0.1 speed=500)"
+check "the Home tab renders with colour strips open" "$BIN" --snapshot "$WORK/home-expanded.png" --tab home --expand
 
 section "machine helpers (jobs.py, wol.py)"
 check "jobs.py list emits a JSON array" python3 -c "import json,subprocess;assert isinstance(json.loads(subprocess.run(['python3','Resources/lib/jobs.py','list'],capture_output=True,text=True).stdout),list)"

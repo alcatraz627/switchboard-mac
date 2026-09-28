@@ -8,7 +8,8 @@ wiz-names.json in Switchboard's state folder (see state.py), keyed by MAC.
 
   wiz.py discover [--timeout 3]          JSON list of bulbs with their state
   wiz.py set <ip> key=value ...          keys: state=on|off, dimming=10-100,
-                                         temp=2200-6500, scene=1-32
+                                         temp=2200-6500, scene=1-32,
+                                         rgb=RRGGBB, speed=10-200 (animated scenes)
   wiz.py name <mac> "<name>"             save a display name ("" removes it)
   wiz.py scenes                          JSON id-to-name table
 
@@ -101,6 +102,7 @@ def bulb_state(ip, mac, names):
         "scene": scene if scene else None,
         "scene_name": SCENES.get(scene) if scene else None,
         "rgb": [r.get("r"), r.get("g"), r.get("b")] if r.get("r") is not None else None,
+        "speed": r.get("speed"),
     }
 
 
@@ -157,6 +159,16 @@ def parse_set(pairs):
                 if n not in SCENES:
                     raise ValueError
                 params["sceneId"] = n
+            elif k == "rgb":
+                h = v.lstrip("#")
+                if len(h) != 6:
+                    raise ValueError
+                params["r"], params["g"], params["b"] = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+            elif k == "speed":
+                n = int(v)
+                if not 10 <= n <= 200:
+                    raise ValueError
+                params["speed"] = n
             else:
                 out({"error": f"unknown key {k}"}, 2)
         except ValueError:
