@@ -104,6 +104,10 @@ eq "wol.py sends to a well-formed MAC"      0 "$(rc python3 Resources/lib/wol.py
 python3 Resources/lib/wol.py add "Test box" 02:00:00:00:00:02 >/dev/null
 eq "a saved device lands in the state folder" "Test box" \
    "$(python3 -c "import json;print(json.load(open('$SWITCHBOARD_STATE/wol-targets.json'))[0]['name'])")"
+printf '[{"name": "Kept box", "mac": "02:00' > "$SWITCHBOARD_STATE/wol-targets.json"
+eq "an add refuses to overwrite an unreadable device file" 1 "$(rc python3 Resources/lib/wol.py add "New box" 02:00:00:00:00:03)"
+eq "and the unreadable file is left as it was" '[{"name": "Kept box", "mac": "02:00' "$(cat "$SWITCHBOARD_STATE/wol-targets.json")"
+rm -f "$SWITCHBOARD_STATE/wol-targets.json"
 
 section "state folder adoption (state.py)"
 FAKE="$WORK/fakehome"

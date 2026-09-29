@@ -16,10 +16,11 @@ import sys
 
 
 def info(target):
-    r = subprocess.run(["diskutil", "info", "-plist", target], capture_output=True, timeout=15)
     try:
+        r = subprocess.run(["diskutil", "info", "-plist", target], capture_output=True, timeout=10)
         return plistlib.loads(r.stdout) if r.returncode == 0 else {}
     except Exception:
+        # A volume that hangs diskutil is skipped, not allowed to sink the list.
         return {}
 
 

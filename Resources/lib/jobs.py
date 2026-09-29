@@ -79,39 +79,48 @@ def disabled_labels():
     return off
 
 
+def describe_job(path, loaded, switched_off):
+    """One of the owner's launchd jobs as the panel shows it, or None for a foreign one."""
+    with open(path, "rb") as f:
+        p = plistlib.load(f)
+    label = p.get("Label") or os.path.basename(path)[:-6]
+    if not isinstance(label, str):
+        return None
+    if label.startswith(FOREIGN):
+        return None
+    pid, status = loaded.get(label, (None, None))
+    prog = p.get("Program") or (p.get("ProgramArguments") or [""])[0]
+    args = p.get("ProgramArguments") or []
+    # The script a wrapper runs says more than "/bin/bash" does.
+    script = next((a for a in args[1:] if a.endswith((".sh", ".py", ".js", ".ts", ".mjs"))), None)
+    log = p.get("StandardErrorPath") or p.get("StandardOutPath")
+    return {
+        "label": label,
+        "name": label.split(".")[-1].replace("-", " "),
+        "schedule": describe_schedule(p),
+        "loaded": label in loaded,
+        "running": pid is not None,
+        "last_exit": status,
+        "failing": status not in (None, 0) and pid is None,
+        "disabled": bool(p.get("Disabled")) or label in switched_off,
+        "pid": pid,
+        "program": os.path.basename(script or prog or ""),
+        "plist": path,
+        "log": log if log and os.path.exists(os.path.expanduser(log)) else None,
+    }
+
+
 def jobs():
     loaded = launchctl_list()
     switched_off = disabled_labels()
     result = []
     for path in sorted(glob.glob(os.path.join(AGENTS, "*.plist"))):
         try:
-            with open(path, "rb") as f:
-                p = plistlib.load(f)
+            entry = describe_job(path, loaded, switched_off)
         except Exception:
-            continue
-        label = p.get("Label") or os.path.basename(path)[:-6]
-        if label.startswith(FOREIGN):
-            continue
-        pid, status = loaded.get(label, (None, None))
-        prog = p.get("Program") or (p.get("ProgramArguments") or [""])[0]
-        args = p.get("ProgramArguments") or []
-        # The script a wrapper runs says more than "/bin/bash" does.
-        script = next((a for a in args[1:] if a.endswith((".sh", ".py", ".js", ".ts", ".mjs"))), None)
-        log = p.get("StandardErrorPath") or p.get("StandardOutPath")
-        result.append({
-            "label": label,
-            "name": label.split(".")[-1].replace("-", " "),
-            "schedule": describe_schedule(p),
-            "loaded": label in loaded,
-            "running": pid is not None,
-            "last_exit": status,
-            "failing": status not in (None, 0) and pid is None,
-            "disabled": bool(p.get("Disabled")) or label in switched_off,
-            "pid": pid,
-            "program": os.path.basename(script or prog or ""),
-            "plist": path,
-            "log": log if log and os.path.exists(os.path.expanduser(log)) else None,
-        })
+            continue   # one malformed plist is skipped, never the whole list
+        if entry:
+            result.append(entry)
     # Two plists can share a Label tail (pm2's user and root agents are both
     # "PM2"); name those by their file so the rows can be told apart.
     names = [j["name"] for j in result]

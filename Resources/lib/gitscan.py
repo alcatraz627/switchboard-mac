@@ -5,7 +5,7 @@ commits not pushed, a detached head, stashes, or worktrees that can be pruned.
 The Switchboard's Machine tab calls this. It only reads, except `fetch` and
 `prune`; it never commits, pushes or resets.
 
-  gitscan.py list [--fresh]     JSON {repos, clean, scanned_at}; cached 2 min
+  gitscan.py list [--fresh]     JSON {repos, clean, scanned_at}; answers from the last scan at once and rescans in the background when it is over 2 min old
   gitscan.py fetch <repo>       git fetch; JSON {ok}
   gitscan.py prune <repo>       git worktree prune; JSON {ok}
 """
@@ -23,6 +23,7 @@ ROOT = os.path.expanduser("~/Code")
 DEPTH = 3
 SKIP = {"node_modules", ".venv", "venv", "dist", "build", "target", "__pycache__"}
 CACHE = state_path("git-scan.json", ".git-scan.json")
+LOCK = CACHE + ".rescan"
 TTL_S = 120
 
 
@@ -114,18 +115,35 @@ def scan():
     with open(tmp, "w") as f:
         json.dump(data, f)
     os.replace(tmp, CACHE)
+    try:
+        os.remove(LOCK)
+    except OSError:
+        pass
     return data
 
 
 def cached():
+    """The last scan at once, however old; a stale one also starts a rescan in
+    the background, so the panel never waits on ~10 s of git."""
     try:
         with open(CACHE) as f:
             data = json.load(f)
-        if time.time() - data.get("scanned_at", 0) < TTL_S:
-            return data
     except (OSError, ValueError):
-        pass
-    return None
+        return None
+    if time.time() - data.get("scanned_at", 0) >= TTL_S and not rescan_running():
+        with open(LOCK, "w") as f:
+            f.write(str(time.time()))
+        subprocess.Popen([sys.executable, os.path.abspath(__file__), "list", "--fresh"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return data
+
+
+def rescan_running():
+    # A rescan marks itself for up to a minute, so parallel callers start only one.
+    try:
+        return time.time() - float(open(LOCK).read()) < 60
+    except (OSError, ValueError):
+        return False
 
 
 def answer(code, err):

@@ -38,13 +38,21 @@ def norm_mac(mac):
     return ":".join(h[i:i + 2] for i in range(0, 12, 2))
 
 
-def load():
+def load(strict=False):
+    """The saved devices. Missing means none; an unreadable file is empty for a
+    read, but refuses a write (strict), so saving never erases what is there."""
+    if not os.path.exists(TARGETS):
+        return []
     try:
         with open(TARGETS) as f:
             d = json.load(f)
-        return d if isinstance(d, list) else []
+        if isinstance(d, list):
+            return d
     except Exception:
-        return []
+        pass
+    if strict:
+        out({"error": f"the saved devices file is unreadable, so it was left alone: {TARGETS}"}, 1)
+    return []
 
 
 def save(items):
@@ -72,13 +80,13 @@ def main():
         out(load())
     elif cmd == "add" and len(a) >= 3:
         mac = norm_mac(a[2])
-        items = [t for t in load() if t.get("mac") != mac]
+        items = [t for t in load(strict=True) if t.get("mac") != mac]
         items.append({"name": a[1] or mac, "mac": mac, "broadcast": a[3] if len(a) > 3 else "255.255.255.255"})
         save(items)
         out({"ok": True})
     elif cmd == "remove" and len(a) == 2:
         mac = norm_mac(a[1])
-        save([t for t in load() if t.get("mac") != mac])
+        save([t for t in load(strict=True) if t.get("mac") != mac])
         out({"ok": True})
     elif cmd == "wake" and len(a) >= 2:
         mac = norm_mac(a[1])

@@ -45,13 +45,22 @@ def out(obj, code=0):
     sys.exit(code)
 
 
-def load_names():
+def load_names(strict=False):
+    """Saved bulb names. Missing means none; an unreadable file is empty for a
+    read, but refuses a write (strict), so a rename never erases the others."""
+    if not os.path.exists(NAMES):
+        return {}
     try:
         with open(NAMES) as f:
             d = json.load(f)
-        return d if isinstance(d, dict) else {}
+        if isinstance(d, dict):
+            return d
     except Exception:
-        return {}
+        pass
+    if strict:
+        print(json.dumps({"error": f"the bulb names file is unreadable, so it was left alone: {NAMES}"}))
+        sys.exit(1)
+    return {}
 
 
 def local_ip():
@@ -234,7 +243,7 @@ def main():
         mac = (ask_retry(ip, "getSystemConfig") or {}).get("mac", "")
         out(bulb_state(ip, mac, load_names()))
     elif cmd == "name" and len(args) == 3:
-        names = load_names()
+        names = load_names(strict=True)
         if args[2]:
             names[args[1]] = args[2]
         else:

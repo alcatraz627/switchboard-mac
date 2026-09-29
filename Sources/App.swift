@@ -158,10 +158,49 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
     }
 
     /// Refresh the slow half off the main thread. The panel shows whatever
-    /// the last snapshot held and never waits on a probe.
+    /// the last snapshot held and never waits on a probe. One refresh runs at a
+    /// time: a request while one is running queues a single rerun, since
+    /// opening the panel asks from several tabs at once.
     func refreshSnapshot(completion: (() -> Void)? = nil) {
+        // Row actions call this from background queues; the running flag lives on main.
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.refreshSnapshot(completion: completion) }
+            return
+        }
+        if let c = completion { snapshotWaiters.append(c) }
+        guard !snapshotRunning else { snapshotAgain = true; return }
+        snapshotRunning = true
+        let previous = sbSnapshot
         DispatchQueue.global(qos: .utility).async { [weak self] in
             var s = SBSnapshot()
+            // The helpers are separate processes, so they run side by side; a
+            // snapshot takes as long as its slowest probe, not all of them.
+            let group = DispatchGroup()
+            let lock = NSLock()
+            func probe(_ name: String, _ args: [String], timeout: TimeInterval, _ apply: @escaping (Any) -> Void) {
+                group.enter()
+                DispatchQueue.global(qos: .utility).async {
+                    defer { group.leave() }
+                    let out = Services.shell("/usr/bin/env", ["python3", AppPaths.lib(name)] + args, timeout: timeout)
+                    // A probe that failed keeps its last value instead of emptying its group.
+                    guard let v = try? JSONSerialization.jsonObject(with: Data(out.utf8)) else {
+                        dwarn("probe \(name) gave no answer; keeping the last one")
+                        return
+                    }
+                    lock.lock(); apply(v); lock.unlock()
+                }
+            }
+            s.jobs = previous.jobs; s.wolTargets = previous.wolTargets; s.drives = previous.drives
+            s.devServers = previous.devServers; s.models = previous.models; s.git = previous.git; s.remote = previous.remote
+            probe("jobs.py", ["list"], timeout: 8) { if let v = $0 as? [[String: Any]] { s.jobs = v } }
+            probe("wol.py", ["list"], timeout: 8) { if let v = $0 as? [[String: Any]] { s.wolTargets = v } }
+            probe("drives.py", ["list"], timeout: 30) { if let v = $0 as? [[String: Any]] { s.drives = v } }
+            probe("devservers.py", ["list"], timeout: 50) { if let v = ($0 as? [String: Any])?["servers"] as? [[String: Any]] { s.devServers = v } }
+            probe("models.py", ["list"], timeout: 25) { if let v = $0 as? [String: Any] { s.models = v } }
+            probe("gitscan.py", ["list"], timeout: 90) { if let v = $0 as? [String: Any] { s.git = v } }
+            if Integrations.csync {
+                probe("remote.py", ["list"], timeout: 70) { if let v = $0 as? [String: Any] { s.remote = v } }
+            }
             if Integrations.guardHooks {
                 s.muted = Guards.muted()
                 s.gates = Guards.all()
@@ -191,32 +230,26 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             }
             let kanban = Integrations.kanban ? Services.probeHTTP("http://127.0.0.1:5106/api/boards") : nil
             s.awakeHolders = Self.sleepHolders()
-            func pyList(_ script: String) -> [[String: Any]] {
-                let out = Services.shell("/usr/bin/env", ["python3", AppPaths.lib(script), "list"], timeout: 8)
-                return (try? JSONSerialization.jsonObject(with: Data(out.utf8)) as? [[String: Any]]) ?? []
-            }
-            s.jobs = pyList("jobs.py")
-            s.wolTargets = pyList("wol.py")
-            s.drives = pyList("drives.py")
-            let dev = Services.shell("/usr/bin/env", ["python3", AppPaths.lib("devservers.py"), "list"], timeout: 20)
-            s.devServers = ((try? JSONSerialization.jsonObject(with: Data(dev.utf8)) as? [String: Any])?["servers"]
-                as? [[String: Any]]) ?? []
-            let models = Services.shell("/usr/bin/env", ["python3", AppPaths.lib("models.py"), "list"], timeout: 15)
-            s.models = (try? JSONSerialization.jsonObject(with: Data(models.utf8)) as? [String: Any]) ?? [:]
-            let g = Services.shell("/usr/bin/env", ["python3", AppPaths.lib("gitscan.py"), "list"], timeout: 90)
-            s.git = (try? JSONSerialization.jsonObject(with: Data(g.utf8)) as? [String: Any]) ?? [:]
-            if Integrations.csync {
-                let r = Services.shell("/usr/bin/env", ["python3", AppPaths.lib("remote.py"), "list"], timeout: 70)
-                s.remote = (try? JSONSerialization.jsonObject(with: Data(r.utf8)) as? [String: Any]) ?? [:]
-            }
+            group.wait()
             DispatchQueue.main.async {
-                self?.sbSnapshot = s
-                if self?.kanbanBusy == false { self?.kanbanUp = kanban }
-                self?.refreshPanel()
-                completion?()
+                guard let self = self else { return }
+                self.sbSnapshot = s
+                if !self.kanbanBusy { self.kanbanUp = kanban }
+                self.refreshPanel()
+                let waiters = self.snapshotWaiters
+                self.snapshotWaiters = []
+                waiters.forEach { $0() }
+                self.snapshotRunning = false
+                if self.snapshotAgain {
+                    self.snapshotAgain = false
+                    self.refreshSnapshot()
+                }
             }
         }
     }
+    private var snapshotRunning = false
+    private var snapshotAgain = false
+    private var snapshotWaiters: [() -> Void] = []
 
     /// Other processes holding the Mac awake: pmset's per-process list, minus
     /// macOS's own daemons and this app. A caffeinate is named by the process
@@ -274,7 +307,9 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                                       note: "snoozed" + (z.until.map { " until \(f.string(from: $0))" } ?? "")
                                           + (z.scope == "global" ? "" : " · \(z.scope)"),
                                       tip: z.reason.isEmpty ? "Snoozed through hook-snooze.sh." : z.reason,
-                                      action: { [weak self] in HookSnoozes.lift(z); self?.refreshSnapshot() })
+                                      action: { [weak self] in
+                                          DispatchQueue.global(qos: .userInitiated).async { HookSnoozes.lift(z); self?.refreshSnapshot() }
+                                      })
                     r.buttonLabel = "Lift"
                     return r
                 }
@@ -355,8 +390,11 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             rows.append(SBRow(label: "Decision Pages", badge: dp == "online" ? .on(menuGreen) : .off,
                               note: dp == "online" ? "serving :5197" : "pm2, \(dp)",
                               onClick: { [weak self] in
-                                  Services.pm2(dp == "online" ? "stop" : "start", "decision-pages")
-                                  self?.refreshSnapshot()
+                                  // pm2 runs through a login shell: seconds, so never on main.
+                                  DispatchQueue.global(qos: .userInitiated).async {
+                                      Services.pm2(dp == "online" ? "stop" : "start", "decision-pages")
+                                      self?.refreshSnapshot()
+                                  }
                               },
                               tip: "The decision-page server used for batched human feedback.",
                               link: dp == "online" ? "http://localhost:5197" : nil))
@@ -413,8 +451,11 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             rows.append(SBRow(label: "Board sync", badge: sbSnapshot.boardSync ? .on(menuGreen) : .off,
                               note: sbSnapshot.boardSync ? "todos to kanban" : "hooks skip",
                               onClick: { [weak self] in
-                                  BoardSync.set(!(self?.sbSnapshot.boardSync ?? false))
-                                  self?.refreshSnapshot()
+                                  let on = !(self?.sbSnapshot.boardSync ?? false)
+                                  DispatchQueue.global(qos: .userInitiated).async {
+                                      BoardSync.set(on)
+                                      self?.refreshSnapshot()
+                                  }
                               },
                               tip: "Whether session hooks sync the todo list to the kanban board."))
         }
@@ -821,6 +862,9 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                     return nil
                 }), help: "Open in Finder"),
                 RowButton(label: "Terminal", kind: .run({
+                    // open reports a missing app on stderr, which is not captured; check first.
+                    guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.mitchellh.ghostty") != nil
+                    else { return "Ghostty is not installed" }
                     let out = Services.shell("/usr/bin/open", ["-na", "Ghostty.app", "--args", "--working-directory=\(path)"])
                     return out.isEmpty ? nil : out
                 }), help: "Open a Ghostty window here"),

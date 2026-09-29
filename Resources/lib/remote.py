@@ -55,6 +55,8 @@ def chat_command(name):
 
 
 def ghostty(command):
+    if not os.path.isdir("/Applications/Ghostty.app"):
+        return 1, {"error": "Ghostty is not installed"}
     r = subprocess.run(["open", "-na", "Ghostty.app", "--args", "-e", "/bin/bash", "-lc", command],
                        capture_output=True, text=True)
     return r.returncode, {"error": r.stderr.strip() or "could not open Ghostty"}
@@ -63,8 +65,13 @@ def ghostty(command):
 def state():
     if not CSYNC:
         return {"installed": False, "checks": [], "hosts": []}
-    _, st = csync("status", timeout=30)
+    code, st = csync("status", timeout=30)
     _, ls = csync("ls", timeout=30)
+    if not isinstance(st.get("checks"), list):
+        # Show a broken console as a failing check rather than hiding the row.
+        err = st.get("error")
+        st["checks"] = [{"check": "csync status", "ok": False, "fix": None,
+                         "detail": (err.get("message") if isinstance(err, dict) else err) or f"exit {code}"}]
     now = time.time()
     hosts = []
     for name, h in (ls.get("hosts") or {}).items():
@@ -142,7 +149,11 @@ def main():
         answer(code, obj, {"paste": obj.get("paste")})
     elif cmd == "fix":
         code, obj = csync("doctor", "--fix", timeout=120)
-        failing = [c["check"] for c in obj.get("checks", []) if not c.get("ok")]
+        checks = obj.get("checks")
+        if not isinstance(checks, list):
+            # No checks back means doctor did not finish; that is not a success.
+            answer(1, {"error": obj.get("error") or "csync doctor did not report back"})
+        failing = [c.get("check", "?") for c in checks if not c.get("ok")]
         answer(0 if not failing else 1, {"error": "still failing: " + ", ".join(failing) if failing else None})
     else:
         print(__doc__)

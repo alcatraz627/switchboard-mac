@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Faster panel**: a full refresh takes about 1.5 s instead of about 12. The
+  probes run side by side, one refresh runs at a time (opening the panel used
+  to start two), and the git scan answers from its last result while it
+  rescans in the background.
+- **Failures you can trust**: a probe that fails keeps its last reading
+  instead of emptying its group; "Fix" on the csync console no longer reports
+  success after a timeout; a damaged saved-devices or bulb-names file is left
+  alone instead of being overwritten by the next add or rename; one malformed
+  launchd plist no longer hides every scheduled job; Decision Pages, Board
+  sync and snooze Lift no longer freeze the panel while they run.
+
 - **Needs you**: a strip above the tabs, shown only while something waits:
   pushes held by the push gate and actions behind an "ask" policy, with the
   session they belong to. Copy puts the approve line on the clipboard to paste
