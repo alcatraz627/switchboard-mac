@@ -297,6 +297,8 @@ final class PolicyStore: ObservableObject {
     @Published var remoteGroups: [SystemGroup] = []
     /// The Skills tab's rows: every skill under ~/.claude/skills.
     @Published var skillGroups: [SystemGroup] = []
+    /// What the Skills tab's search field holds.
+    @Published var skillQuery = ""
     /// The Needs-you strip's rows: pushes and asks waiting on the owner.
     @Published var needs: [SystemRow] = []
 

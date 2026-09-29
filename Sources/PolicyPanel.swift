@@ -57,6 +57,8 @@ struct SwitchboardConcern: Identifiable {
     let content: AnyView
     /// Runs when the panel opens and on the footer's reload button.
     var refresh: () -> Void = {}
+    /// Stays above the scrolling content, such as a search field.
+    var pinned: AnyView? = nil
 }
 
 /// The registry: every concern, in tab order.
@@ -98,7 +100,10 @@ enum SwitchboardConcerns {
             SwitchboardConcern(id: "skills", title: "Skills", subtitle: "Every skill in ~/.claude", icon: "wand.and.stars",
                                footer: "Open a skill for its description; the path copies on click.", footerIcon: "doc.on.doc",
                                content: AnyView(SystemTabView(store: policy, source: .skills)),
-                               refresh: { policy.reloadSkills() }),
+                               refresh: { policy.reloadSkills() },
+                               pinned: AnyView(SearchField(text: Binding(get: { policy.skillQuery },
+                                                                         set: { policy.skillQuery = $0 }),
+                                                           prompt: "Search skills by name or description"))),
         ]
     }
 }
@@ -124,6 +129,7 @@ struct PolicyPanel: View {
             header
             Divider()
             if let store = store { NeedsStrip(store: store) }
+            if let pinned = current.pinned { pinned }
             if unbounded {
                 current.content
             } else {
@@ -332,7 +338,19 @@ struct SystemTabView: View {
         switch source {
         case .machine: return store.systemGroups
         case .remote: return store.remoteGroups
-        case .skills: return store.skillGroups
+        case .skills: return SystemTabView.filter(store.skillGroups, store.skillQuery)
+        }
+    }
+
+    /// Rows whose name, note or opened details contain every word of the query.
+    static func filter(_ groups: [SystemGroup], _ query: String) -> [SystemGroup] {
+        let words = query.lowercased().split(separator: " ").map(String.init)
+        guard !words.isEmpty else { return groups }
+        return groups.map { g in
+            SystemGroup(title: g.title, rows: g.rows.filter { r in
+                let hay = ([r.label, r.note] + r.children.map { $0.note }).joined(separator: " ").lowercased()
+                return words.allSatisfy { hay.contains($0) }
+            })
         }
     }
 
@@ -1209,6 +1227,7 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     store.systemGroups = system
     store.remoteGroups = remote
     if tab == "skills" { store.skillGroups = SkillsIndex.groups() }
+    if let q = CommandLine.arguments.firstIndex(of: "--query").flatMap({ $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }) { store.skillQuery = q }
     var needs = NeedsYou.items()
     if CommandLine.arguments.contains("--demo-states") {
         needs.append(NeedItem(id: "demo-push", kind: .push, title: "Push switchboard-mac (push targets main)",
@@ -1262,4 +1281,37 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     host.cacheDisplay(in: host.bounds, to: rep)
     guard let png = rep.representation(using: .png, properties: [:]) else { return false }
     return (try? png.write(to: URL(fileURLWithPath: path))) != nil
+}
+
+// ── A search field pinned above a list ──────────────────────────────────────
+
+/// A search field in the panel's own look: the rounded fill of the tab bar,
+/// a magnifying glass, and a clear button once there is text.
+struct SearchField: View {
+    @Binding var text: String
+    let prompt: String
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
+            TextField(prompt, text: $text)
+                .textFieldStyle(.plain).font(PT.label)
+                .focused($focused)
+                .onExitCommand { text = "" }
+            if !text.isEmpty {
+                Button { text = "" } label: {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 11))
+                }
+                .buttonStyle(.borderless).foregroundStyle(.secondary)
+                .help("Clear")
+            }
+        }
+        .padding(.horizontal, 9).padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.07)))
+        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(focused ? Color.accentColor.opacity(0.6) : .clear))
+        .padding(.horizontal, PT.gap).padding(.top, PT.gap - 2).padding(.bottom, 2)
+        // A menu bar app takes keystrokes only once it is active.
+        .onTapGesture { NSApp.activate(ignoringOtherApps: true); focused = true }
+    }
 }
