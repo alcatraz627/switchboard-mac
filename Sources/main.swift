@@ -131,6 +131,7 @@ if let out = argAfter("--snapshot") {
     let tab = argAfter("--tab") ?? "agents"
     BulbRow.startExpanded = args.contains("--expand")
     SystemRowView.startExpanded = args.contains("--expand")
+    if args.contains("--notifications-off") { TimerStore.shared.notificationsOff = true }
     // Tabs that draw Machine groups, their own or ones moved to them, need the probe.
     let usesSystem = tab == "system" || tab == "remote" || SystemTabView.groupHome.values.contains(tab)
     let fresh = usesSystem ? delegate.panelSystemGroupsFresh() : []

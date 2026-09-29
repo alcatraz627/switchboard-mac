@@ -32,6 +32,8 @@ struct PendingMark: View {
 struct RowFailure: View {
     let message: String
     var retry: (() -> Void)? = nil
+    /// The button's word when the fix is not a retry ("Open Settings").
+    var retryLabel = "Retry"
     let dismiss: () -> Void
 
     var body: some View {
@@ -42,7 +44,7 @@ struct RowFailure: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
             if let retry = retry {
-                Button("Retry", action: retry).buttonStyle(.link).font(PT.caption)
+                Button(retryLabel, action: retry).buttonStyle(.link).font(PT.caption)
             }
             Button(action: dismiss) {
                 Image(systemName: "xmark").font(.system(size: 8.5, weight: .semibold))

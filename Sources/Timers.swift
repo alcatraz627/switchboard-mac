@@ -32,15 +32,56 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
     @Published private(set) var timers: [SBTimer] = []
     /// Ticks once a second while a timer runs, so countdowns redraw.
     @Published private(set) var now = Date()
+    /// macOS has Switchboard's notifications off, so a timer shows no banner
+    /// and its notification makes no sound; the chime still rings.
+    @Published var notificationsOff = false
     private var tick: Timer?
+    private var ring: Timer?
 
     override init() {
         super.init()
         if let d = UserDefaults.standard.data(forKey: Self.key), let t = try? JSONDecoder().decode([SBTimer].self, from: d) {
             timers = t
         }
-        if Bundle.main.bundleIdentifier != nil { UNUserNotificationCenter.current().delegate = self }
+        if Bundle.main.bundleIdentifier != nil {
+            UNUserNotificationCenter.current().delegate = self
+            checkNotifications()
+        }
         resume()
+    }
+
+    /// Reads whether macOS will show Switchboard's notifications at all.
+    func checkNotifications() {
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        UNUserNotificationCenter.current().getNotificationSettings { s in
+            let off = s.authorizationStatus == .denied || (s.authorizationStatus != .notDetermined && s.alertSetting != .enabled)
+            DispatchQueue.main.async { self.notificationsOff = off }
+        }
+    }
+
+    /// Rings every 2 s for up to 30 s, so a single short chime is not missed.
+    /// Opening the panel stops it.
+    private func startRinging() {
+        ring?.invalidate()
+        var left = 15
+        chime()
+        ring = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            left -= 1
+            if left <= 0 { self?.silence() } else { self?.chime() }
+        }
+    }
+
+    func silence() { ring?.invalidate(); ring = nil }
+
+    /// Chimes so far; the probe counts them with the sound off.
+    private(set) var chimes = 0
+    var chimeAloud = true
+
+    private func chime() {
+        chimes += 1
+        guard chimeAloud else { return }
+        let played = (NSSound(named: "Glass") ?? NSSound(contentsOfFile: "/System/Library/Sounds/Glass.aiff", byReference: true))?.play() ?? false
+        if !played { dwarn("timer chime could not play") }
     }
 
     /// A menu bar app counts as in front, and macOS hides a notification from
@@ -108,20 +149,26 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
     }
 
     private func fire(_ t: SBTimer) {
-        NSSound(named: "Glass")?.play()
+        startRinging()
         dlog("timer fired: \(t.label)")
         guard Bundle.main.bundleIdentifier != nil else { return }   // the notification centre needs an app bundle
         let c = UNMutableNotificationContent()
         c.title = t.label
         c.body = "Timer done"
-        c.sound = .default
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: t.id, content: c, trigger: nil))
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: t.id, content: c, trigger: nil)) { err in
+            if let err = err { dwarn("timer notification not added: \(fmtErr(err))") }
+        }
+        checkNotifications()
     }
 
     /// Notification access is asked the first time a timer starts, never on launch.
     private func askToNotify() {
         guard Bundle.main.bundleIdentifier != nil else { return }   // headless runs have no bundle
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, err in
+            if let err = err { dwarn("notification access: \(fmtErr(err))") }
+            if !granted { dlog("notifications are off for Switchboard; timers ring in the app only") }
+            self.checkNotifications()
+        }
     }
 }
 
@@ -156,6 +203,17 @@ struct TimersTabView: View {
                 }
             }
             .padding(.horizontal, 4)
+            if timers.notificationsOff {
+                RowFailure(message: "macOS has Switchboard's notifications off, so a timer rings here with no banner.",
+                           retry: {
+                               let id = Bundle.main.bundleIdentifier ?? ""
+                               if let u = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)") {
+                                   NSWorkspace.shared.open(u)
+                               }
+                           },
+                           retryLabel: "Open Settings",
+                           dismiss: { timers.notificationsOff = false })
+            }
             if timers.timers.isEmpty {
                 Text("No timers. Name one, pick a colour, press Start.").font(PT.caption).foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
@@ -245,13 +303,23 @@ func probeTimers() -> String {
     defer { UserDefaults.standard.set(before, forKey: key) }
     UserDefaults.standard.removeObject(forKey: key)
     let s = TimerStore()
+    s.chimeAloud = false
     var lines: [String] = []
     func check(_ name: String, _ ok: Bool) { lines.append("\(ok ? "ok  " : "FAIL") \(name)") }
+    func pump(_ secs: Double) { RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(secs)) }
     s.add(label: "Tea", color: "green", fireAt: Date().addingTimeInterval(1))
     check("a new timer runs", s.running.count == 1)
     let until = Date().addingTimeInterval(3)
-    while Date() < until && !s.running.isEmpty { RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.1)) }
+    while Date() < until && !s.running.isEmpty { pump(0.1) }
     check("it goes off at its time", s.running.isEmpty && s.timers.first?.firedAt != nil)
+    let rang = Date().addingTimeInterval(2.5)
+    while Date() < rang { pump(0.1) }
+    check("it keeps ringing, not one chime (\(s.chimes) so far)", s.chimes >= 2)
+    s.silence()
+    let heard = s.chimes
+    let quiet = Date().addingTimeInterval(2.5)
+    while Date() < quiet { pump(0.1) }
+    check("opening the panel silences it", s.chimes == heard)
     check("the fired state is saved", TimerStore().timers.first?.firedAt != nil)
     s.extend(s.timers[0], by: 60)
     check("+ restarts a finished timer for a minute", s.running.count == 1 && abs(s.running[0].fireAt.timeIntervalSinceNow - 60) < 2)

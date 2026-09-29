@@ -1281,6 +1281,10 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         // what made the click feel slow.
         guard let b = item.button, !popover.isShown else { return }
         peek?.hide()
+        // Looking at the panel answers a ringing timer, and picks up a
+        // notification setting changed in System Settings.
+        TimerStore.shared.silence()
+        TimerStore.shared.checkNotifications()
         let t0 = Date()
         popover.show(relativeTo: b.bounds, of: b, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
