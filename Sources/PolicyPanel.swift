@@ -70,16 +70,23 @@ enum SwitchboardConcerns {
     /// A concern whose backing tool is not installed is left out, so a fresh
     /// Mac shows fewer tabs rather than an error.
     static func all(policy: PolicyStore, usage: UsageStore, lights: LightsStore, controls: ControlsStore) -> [SwitchboardConcern] {
-        registry(policy: policy, usage: usage, lights: lights, controls: controls)
+        let tabs = registry(policy: policy, usage: usage, lights: lights, controls: controls)
             .filter { $0.id != "agents" || Integrations.policyStore }
             .filter { $0.id != "remote" || Integrations.csync }
             .sorted { (tabOrder.firstIndex(of: $0.id) ?? 99) < (tabOrder.firstIndex(of: $1.id) ?? 99) }
+        // Settings lists every other tab, so it is built from the rest. Approvals
+        // cannot be hidden: it is how a waiting push reaches you.
+        let listed = tabs.filter { $0.id != "approvals" }.map { (id: $0.id, title: $0.title, icon: $0.icon) }
+        let settings = SwitchboardConcern(id: "settings", title: "Settings", subtitle: "What the panel shows", icon: "gearshape",
+                                          footer: "Hidden tabs and sections are not read, so they cost nothing.", footerIcon: "eye.slash",
+                                          content: AnyView(SettingsTabView(store: policy, tabs: listed)))
+        return (tabs + [settings]).sorted { (tabOrder.firstIndex(of: $0.id) ?? 99) < (tabOrder.firstIndex(of: $1.id) ?? 99) }
     }
 
     /// Tab order (docs/plans/20260929-tabs-plan.md): what needs you, what
     /// agents may do and how much, the gcc's own lists, then this Mac.
-    static let tabOrder = ["approvals", "agents", "usage", "rules", "ledger", "library",
-                           "runtime", "plugins", "system", "controls", "home", "remote"]
+    static let tabOrder = ["agents", "usage", "rules", "ledger", "library", "notes",
+                           "runtime", "plugins", "system", "controls", "home", "remote", "settings", "approvals"]
 
     private static func registry(policy: PolicyStore, usage: UsageStore, lights: LightsStore, controls: ControlsStore) -> [SwitchboardConcern] {
         [
@@ -120,12 +127,12 @@ enum SwitchboardConcerns {
                                pinned: AnyView(SearchField(text: Binding(get: { policy.queries["runtime"] ?? "" },
                                                                          set: { policy.queries["runtime"] = $0 }),
                                                            prompt: "Search services, ports, models and jobs"))),
-            SwitchboardConcern(id: "plugins", title: "Plugins & MCP", subtitle: "What extends Claude Code", icon: "puzzlepiece.extension",
+            SwitchboardConcern(id: "plugins", title: "Claude MCP", subtitle: "Plugins and MCP servers", icon: "puzzlepiece.extension",
                                footer: "Read-only. MCP keys and tokens are never shown; env lists names only.", footerIcon: "lock",
                                content: AnyView(SystemTabView(store: policy, source: .catalog("plugins"))),
                                refresh: { policy.reloadCatalog("plugins", PluginsCatalog.groups) },
                                pinned: AnyView(ScopedSearch(store: policy, id: "plugins", prompt: "Search plugins and MCP servers"))),
-            catalogTab(policy, id: "rules", title: "Rules & Hooks", subtitle: "Rules, gates and hook scripts", icon: "checklist",
+            catalogTab(policy, id: "rules", title: "Hooks", subtitle: "Rules, gates and hook scripts", icon: "checklist",
                        footer: "Problems sort first: a hook with no event, or one whose file is gone.",
                        search: "Search rules, gates and hooks", read: RulesCatalog.groups),
             catalogTab(policy, id: "ledger", title: "Ledger", subtitle: "Mistakes and the improvement backlog", icon: "list.bullet.clipboard",
@@ -162,7 +169,9 @@ struct PolicyPanel: View {
     @State private var contentHeight: CGFloat = 0
     @AppStorage("policyPanel.tab") private var storedTab = "agents"
 
-    private var shown: [SwitchboardConcern] { concerns.filter { $0.isShown() } }
+    private var shown: [SwitchboardConcern] {
+        concerns.filter { $0.isShown() && !store.hiddenTabs.contains($0.id) }
+    }
 
     /// The chosen tab, or the first other one when the chosen tab is hidden,
     /// so Approvals emptying out never leaves the panel on a blank tab.
@@ -177,8 +186,6 @@ struct PolicyPanel: View {
         VStack(spacing: 0) {
             header
             Divider()
-            // The strip would repeat the Approvals tab's own rows above them.
-            if current.id != "approvals" { NeedsStrip(store: store) }
             if let pinned = current.pinned { pinned }
             if unbounded {
                 current.content
@@ -404,10 +411,7 @@ struct SystemTabView: View {
 
     /// Machine groups that live on another tab now, by that tab's id. The
     /// snapshot still builds them; only where they are drawn changes.
-    static let groupHome: [String: String] = [
-        "Guards": "rules", "Context": "agents",
-        "Services": "runtime", "Dev servers": "runtime", "Local models": "runtime", "Schedules": "runtime",
-    ]
+    static let groupHome: [String: String] = Visibility.groupTab.filter { $0.value != "system" }
 
     private var groups: [SystemGroup] {
         switch source {
@@ -419,6 +423,7 @@ struct SystemTabView: View {
             let moved = store.systemGroups.filter { SystemTabView.groupHome[$0.title] == id }
             // Sections titled "Project …" apply in one repo; the scope filter picks them in or out.
             let scoped = (moved + (store.catalogs[id] ?? [])).filter { g in
+                if store.hiddenSections.contains(id + "::" + g.title) { return false }
                 switch store.queries[id + "::scope"] ?? "all" {
                 case "everywhere": return !g.title.hasPrefix("Project")
                 case "project": return g.title.hasPrefix("Project")
@@ -1313,7 +1318,8 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         // Every concern refreshes on open: each is cheap or runs in the
         // background (a Codex re-ask only when its cache is stale).
         store.reload()
-        concerns.forEach { $0.refresh() }
+        // A tab hidden in Settings is never refreshed, so it costs nothing.
+        concerns.filter { !store.hiddenTabs.contains($0.id) }.forEach { $0.refresh() }
         // Keep countdowns honest while open, and pick up changes made elsewhere.
         ticker?.invalidate()
         ticker = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
@@ -1459,16 +1465,25 @@ struct SearchField: View {
     @Binding var text: String
     let prompt: String
     @FocusState private var focused: Bool
+    /// What is typed; handed to `text` once typing pauses for 250 ms.
+    @State private var draft = ""
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
-            TextField(prompt, text: $text)
+            TextField(prompt, text: $draft)
                 .textFieldStyle(.plain).font(PT.label)
                 .focused($focused)
-                .onExitCommand { text = "" }
-            if !text.isEmpty {
-                Button { text = "" } label: {
+                .onExitCommand { draft = ""; text = "" }
+                .onAppear { draft = text }
+                .task(id: draft) {
+                    // Cancelled and restarted by every keystroke, so only a pause lands.
+                    if draft.isEmpty { text = ""; return }
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    if !Task.isCancelled { text = draft }
+                }
+            if !draft.isEmpty {
+                Button { draft = ""; text = "" } label: {
                     Image(systemName: "xmark.circle.fill").font(.system(size: 11))
                 }
                 .buttonStyle(.borderless).foregroundStyle(.secondary)

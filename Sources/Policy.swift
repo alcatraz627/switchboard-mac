@@ -306,9 +306,18 @@ final class PolicyStore: ObservableObject {
     @Published var catalogReading: Set<String> = []
     /// List sections the owner opened past their first few rows, as "tab::section".
     @Published var shownInFull: Set<String> = []
-    /// The Needs-you strip's rows: pushes and asks waiting on the owner.
-    @Published var needs: [SystemRow] = []
-    /// The same items as the Approvals tab's sections.
+    /// Tabs and sections hidden in Settings; kept in step with Visibility's store.
+    @Published var hiddenTabs: Set<String> = Visibility.hiddenTabs {
+        didSet { UserDefaults.standard.set(Array(hiddenTabs).sorted(), forKey: Visibility.tabsKey) }
+    }
+    @Published var hiddenSections: Set<String> = Visibility.hiddenSections {
+        didSet { UserDefaults.standard.set(Array(hiddenSections).sorted(), forKey: Visibility.sectionsKey) }
+    }
+    /// What the hover preview shows, chosen in Settings.
+    @Published var hoverItems: Set<HoverItem> = HoverItem.chosen {
+        didSet { UserDefaults.standard.set(hoverItems.map(\.rawValue).sorted(), forKey: HoverItem.key) }
+    }
+    /// The Approvals tab's sections: pushes and asks waiting on the owner.
     @Published var needGroups: [SystemGroup] = []
     /// Items a live session is waiting on, for the tab's badge.
     @Published var needsWaiting = 0

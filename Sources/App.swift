@@ -32,6 +32,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ note: Notification) {
         dlog("─── switchboard starting (pid \(getpid()), lib \(AppPaths.libDir)) ───")
         PreferenceMigration.run()
+        EditMenu.install()
         killOtherInstances()
         if UserDefaults.standard.bool(forKey: keepAwakeKey) { setKeepAwake(true) }
 
@@ -196,6 +197,11 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             let group = DispatchGroup()
             let lock = NSLock()
             func probe(_ name: String, _ args: [String], timeout: TimeInterval, _ apply: @escaping (Any) -> Void) {
+                // A section hidden in Settings is never read, so it costs nothing.
+                let owner: [String: String] = ["jobs.py": "Schedules", "drives.py": "Drives", "devservers.py": "Dev servers",
+                                               "models.py": "Local models", "gitscan.py": "Repos", "wol.py": "Session"]
+                if let section = owner[name], Visibility.groupHidden(section) { return }
+                if name == "remote.py", Visibility.tabHidden("remote") { return }
                 group.enter()
                 DispatchQueue.global(qos: .utility).async {
                     defer { group.leave() }
@@ -226,7 +232,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             if Integrations.csync {
                 probe("remote.py", ["list"], timeout: 70) { if let v = $0 as? [String: Any] { s.remote = v } }
             }
-            if Integrations.guardHooks {
+            if Integrations.guardHooks && !Visibility.groupHidden("Guards") {
                 s.muted = Guards.muted()
                 s.gates = Guards.all()
             }
@@ -238,22 +244,26 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 s.browserToolsOn = ContextSwitches.browserToolsOn()
             }
             s.boardSync = BoardSync.enabled()
-            if Integrations.hubScript != nil {
+            // Services are several network and login-shell probes; hidden, none run.
+            let servicesShown = !Visibility.groupHidden("Services")
+            if servicesShown, Integrations.hubScript != nil {
                 s.hubHost = Services.hubAdvertisedHost()
                 s.hubLocal = Services.probeHTTP("http://127.0.0.1:5400/healthz")
                 s.hubReachable = s.hubHost.map { Services.probeHTTP("http://\($0):5400/healthz") } ?? s.hubLocal
             }
-            if Integrations.ipcBroker {
+            if servicesShown, Integrations.ipcBroker {
                 s.brokerUp = Services.shell("/bin/zsh", ["-lc", "claude-ipc daemon status 2>/dev/null"]).contains("up")
             }
-            s.decisionPages = Services.pm2Status("decision-pages")
-            s.wardenRunning = Warden.installed() ? Warden.running() : nil
+            if servicesShown {
+                s.decisionPages = Services.pm2Status("decision-pages")
+                s.wardenRunning = Warden.installed() ? Warden.running() : nil
+            }
             if s.wardenRunning == true {
                 s.wardenGated = Warden.gated()
                 if let n = Int(PolicyCLI.run(["get", "ops.usage_gate_pct"]).out
                     .trimmingCharacters(in: .whitespacesAndNewlines)) { s.wardenGatePct = n }
             }
-            let kanban = Integrations.kanban ? Services.probeHTTP("http://127.0.0.1:5106/api/boards") : nil
+            let kanban = servicesShown && Integrations.kanban ? Services.probeHTTP("http://127.0.0.1:5106/api/boards") : nil
             s.awakeHolders = Self.sleepHolders()
             group.wait()
             DispatchQueue.main.async {
@@ -591,7 +601,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             if !rows.isEmpty || st != nil { out.append(SystemGroup(title: title, rows: rows, status: st)) }
         }
         out.append(SystemGroup(title: "Session", rows: sessionRows().map(convert) + [wakeOnLANRow()]))
-        return out
+        return out.filter { !Visibility.groupHidden($0.title) }
     }
 
     /// The Machine tab as text, for checking the rows without a screen.
@@ -1486,6 +1496,30 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 self?.refreshSnapshot()
             }
         }
+    }
+}
+
+// ── Headless probe: hidden sections are not read ────────────────────────────
+
+extension SwitchboardApp {
+    /// Hides Repos and Dev servers for this process only, takes a fresh
+    /// snapshot, and checks both groups are gone and their helpers never ran.
+    func probeVisibility() -> String {
+        let d = UserDefaults.standard
+        let before = d.stringArray(forKey: Visibility.sectionsKey)
+        defer { d.set(before, forKey: Visibility.sectionsKey) }
+        d.set(["system::Repos", "runtime::Dev servers"], forKey: Visibility.sectionsKey)
+        let titles = panelSystemGroupsFresh().map(\.title)
+        var lines: [String] = []
+        func check(_ name: String, _ ok: Bool) { lines.append("\(ok ? "ok  " : "FAIL") \(name)") }
+        check("a hidden group is not drawn", !titles.contains("Repos") && !titles.contains("Dev servers"))
+        check("a hidden group's helper never ran",
+              sbSnapshot.probeReadAt["gitscan.py"] == nil && sbSnapshot.probeReadAt["devservers.py"] == nil)
+        check("a shown group still reads", sbSnapshot.probeReadAt["jobs.py"] != nil && titles.contains("Schedules"))
+        let hiddenCatalog = Visibility.hiddenTitles("runtime")
+        check("the hidden title is known per tab", hiddenCatalog == ["Dev servers"])
+        lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
+        return lines.joined(separator: "\n")
     }
 }
 

@@ -162,7 +162,7 @@ final class ControlsStore: NSObject, ObservableObject, CLLocationManagerDelegate
         ssid = wifi?.ssid()
         locationAllowed = [.authorizedAlways, .authorized].contains(CLLocationManager().authorizationStatus)
         btOn = btGetPower() != 0
-        if devices { loadBluetoothDevices() }
+        if devices, !Visibility.sectionHidden("controls", "Bluetooth") { loadBluetoothDevices() }
     }
 
     func loadBluetoothDevices() {
@@ -354,10 +354,12 @@ struct ControlsTabView: View {
 
     // ── Pieces ──
 
-    private func section<C: View>(_ name: String, @ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            GroupHeader(name: name)
-            Card { VStack(alignment: .leading, spacing: 0) { content() } }
+    @ViewBuilder private func section<C: View>(_ name: String, @ViewBuilder _ content: () -> C) -> some View {
+        if !Visibility.sectionHidden("controls", name) {
+            VStack(alignment: .leading, spacing: 5) {
+                GroupHeader(name: name)
+                Card { VStack(alignment: .leading, spacing: 0) { content() } }
+            }
         }
     }
 

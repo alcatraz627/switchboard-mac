@@ -170,6 +170,106 @@ enum PreferenceMigration {
     }
 }
 
+/// Which tabs and sections the owner has hidden in Settings. A hidden one is
+/// not drawn and not read: its helper never runs, so hiding saves the work.
+enum Visibility {
+    static let tabsKey = "switchboard.hiddenTabs"
+    static let sectionsKey = "switchboard.hiddenSections"
+
+    static var hiddenTabs: Set<String> { Set(UserDefaults.standard.stringArray(forKey: tabsKey) ?? []) }
+    static var hiddenSections: Set<String> { Set(UserDefaults.standard.stringArray(forKey: sectionsKey) ?? []) }
+
+    static func tabHidden(_ tab: String) -> Bool { hiddenTabs.contains(tab) }
+    /// A section of a hidden tab counts as hidden too.
+    static func sectionHidden(_ tab: String, _ section: String) -> Bool {
+        tabHidden(tab) || hiddenSections.contains(tab + "::" + section)
+    }
+
+    /// Section titles hidden on one tab, for a reader to skip.
+    static func hiddenTitles(_ tab: String) -> Set<String> {
+        Set(hiddenSections.filter { $0.hasPrefix(tab + "::") }.map { String($0.dropFirst(tab.count + 2)) })
+    }
+
+    /// Every section a tab can show, for the Settings tab. Tabs not listed
+    /// have one body and are shown or hidden whole.
+    static let sections: [String: [String]] = [
+        "usage": ["Claude", "Codex"],
+        "rules": ["Guards", "Rules", "Hook scripts"],
+        "ledger": ["Mistakes", "Open proposals", "Closed proposals"],
+        "library": ["Skills", "Parked skills", "Knowledge", "Personas", "Scripts"],
+        "runtime": ["Services", "Dev servers", "Local models", "Schedules"],
+        "plugins": ["Plugins", "MCP servers", "Project plugins", "Project MCP servers"],
+        "system": ["Session", "Drives", "Repos"],
+        "controls": ["Sound", "Display", "Wi-Fi", "Bluetooth"],
+        "agents": ["Context"],
+    ]
+
+    /// Where each Machine group lives, so a probe can ask whether its section is shown.
+    static let groupTab: [String: String] = [
+        "Guards": "rules", "Context": "agents",
+        "Services": "runtime", "Dev servers": "runtime", "Local models": "runtime", "Schedules": "runtime",
+        "Session": "system", "Drives": "system", "Repos": "system",
+    ]
+
+    static func groupHidden(_ title: String) -> Bool { sectionHidden(groupTab[title] ?? "system", title) }
+}
+
+/// What the hover preview on the menu bar icon can carry. The owner picks in
+/// Settings; the defaults keep it to the three that change what you do next.
+enum HoverItem: String, CaseIterable {
+    case limits, approvals, problems, timers, services, iconDot
+
+    var title: String {
+        switch self {
+        case .limits: return "Claude limits"
+        case .approvals: return "Waiting on you"
+        case .problems: return "Problems"
+        case .timers: return "Running timers"
+        case .services: return "Services down"
+        case .iconDot: return "Dot on the icon"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .limits: return "the 5-hour and weekly bars, coloured by your warn and danger zones"
+        case .approvals: return "how many pushes and asks wait, and the oldest"
+        case .problems: return "sources that failed to read, failing jobs, hooks with no event"
+        case .timers: return "Keep Awake and other timed flips, with time left"
+        case .services: return "kanban, the session hub or the ipc broker when down"
+        case .iconDot: return "a small yellow dot on the menu bar icon while something waits on you"
+        }
+    }
+
+    static let key = "switchboard.hoverItems"
+    static let defaults: Set<HoverItem> = [.limits, .approvals, .problems]
+
+    static var chosen: Set<HoverItem> {
+        guard let raw = UserDefaults.standard.stringArray(forKey: key) else { return defaults }
+        return Set(raw.compactMap(HoverItem.init(rawValue:)))
+    }
+}
+
+/// A menu bar app has no menu bar of its own, and macOS routes ⌘A, ⌘X, ⌘C,
+/// ⌘V and ⌘Z to text fields through the Edit menu. An Edit menu that is never
+/// shown gives every field in the panel those keys.
+enum EditMenu {
+    static func install() {
+        let edit = NSMenu(title: "Edit")
+        for (title, action, key) in [("Undo", "undo:", "z"), ("Redo", "redo:", "Z"),
+                                     ("Cut", "cut:", "x"), ("Copy", "copy:", "c"),
+                                     ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a")] {
+            edit.addItem(NSMenuItem(title: title, action: Selector(action), keyEquivalent: key))
+        }
+        let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        editItem.submenu = edit
+        let main = NSMenu()
+        main.addItem(NSMenuItem(title: "Switchboard", action: nil, keyEquivalent: ""))
+        main.addItem(editItem)
+        NSApp.mainMenu = main
+    }
+}
+
 /// What a reading from outside the app is: waiting for its first value, a
 /// value with its age, a value that could not be refreshed, no value because
 /// reading failed, or nothing to read because the source is absent.

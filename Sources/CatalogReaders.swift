@@ -7,11 +7,20 @@ import Foundation
 
 private var gcc: String { SwitchboardPaths.gccRoot }
 
+/// A read that two sections share, done once and only if one of them asks.
+private func lazyRead(_ read: @escaping () throws -> [CatalogEntry]) -> () throws -> [CatalogEntry] {
+    var memo: Result<[CatalogEntry], Error>?
+    return {
+        if memo == nil { memo = Result { try read() } }
+        return try memo!.get()
+    }
+}
+
 // ── Rules & Hooks: behavioural rules and every hook script ──────────────────
 
 enum RulesCatalog {
     static func groups() -> [SystemGroup] {
-        [Catalog.section("Rules", rules), Catalog.section("Hook scripts", hooks)]
+        Catalog.sections("rules", [("Rules", rules), ("Hook scripts", hooks)])
     }
 
     /// Each rule's brief, whether every session loads it or only when a
@@ -155,11 +164,12 @@ enum PluginsCatalog {
     /// Section titles starting "Project" hold things that apply in one repo;
     /// the tab's filter shows or hides them by that prefix.
     static func groups() -> [SystemGroup] {
-        let installed = Result { try plugins() }
-        return [Catalog.section("Plugins") { try installed.get().filter { $0.tag?.contains("project") == false } },
-                Catalog.section("MCP servers", globalMCP),
-                Catalog.section("Project plugins") { try installed.get().filter { $0.tag?.contains("project") == true } },
-                Catalog.section("Project MCP servers", projectMCP)]
+        let installed = lazyRead(plugins)
+        return Catalog.sections("plugins", [
+            ("Plugins", { try installed().filter { $0.tag?.contains("project") == false } }),
+            ("MCP servers", globalMCP),
+            ("Project plugins", { try installed().filter { $0.tag?.contains("project") == true } }),
+            ("Project MCP servers", projectMCP)])
     }
 
     static func plugins() throws -> [CatalogEntry] {
@@ -300,13 +310,11 @@ func probeRedaction() -> [String] {
 
 enum LedgerCatalog {
     static func groups() -> [SystemGroup] {
-        let props = Result { try proposals() }
+        let props = lazyRead(proposals)
         func part(_ open: Bool) -> () throws -> [CatalogEntry] {
-            { try props.get().filter { ($0.tag?.hasPrefix("open") ?? false) == open } }
+            { try props().filter { ($0.tag?.hasPrefix("open") ?? false) == open } }
         }
-        return [Catalog.section("Mistakes", mistakes),
-                Catalog.section("Open proposals", part(true)),
-                Catalog.section("Closed proposals", part(false))]
+        return Catalog.sections("ledger", [("Mistakes", mistakes), ("Open proposals", part(true)), ("Closed proposals", part(false))])
     }
 
     /// One JSON object per line; a line that does not parse is skipped.
@@ -390,9 +398,8 @@ enum LedgerCatalog {
 
 enum LibraryCatalog {
     static func groups() -> [SystemGroup] {
-        [Catalog.section("Skills", skills), Catalog.section("Parked skills", parked),
-         Catalog.section("Knowledge", knowledge), Catalog.section("Personas", personas),
-         Catalog.section("Scripts", scripts)]
+        Catalog.sections("library", [("Skills", skills), ("Parked skills", parked), ("Knowledge", knowledge),
+                                     ("Personas", personas), ("Scripts", scripts)])
     }
 
     static func skills() throws -> [CatalogEntry] {

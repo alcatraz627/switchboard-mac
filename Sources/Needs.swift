@@ -28,6 +28,10 @@ struct NeedItem: Identifiable {
     var approved = false
     /// The single-use file its gate consumes; Approve writes it.
     var approvedFile: String? = nil
+    /// When it was approved, from that file's date.
+    var approvedAt: Date? {
+        approvedFile.flatMap { (try? FileManager.default.attributesOfItem(atPath: $0))?[.modificationDate] as? Date }
+    }
     /// Everything known about it, for the details below the row.
     var details: [(String, String)] = []
 }
@@ -153,33 +157,18 @@ enum NeedsYou {
     /// Set by the headless probe so it never messages a real session.
     static var probing = false
 
-    /// The strip's rows: each live item on its own, then everything whose
-    /// session has ended folded into one row with Clear all.
-    static func rows(_ items: [NeedItem], refresh: @escaping () -> Void) -> [SystemRow] {
-        let live = items.filter { $0.sessionDir != nil }
-        let dead = items.filter { $0.sessionDir == nil }
-        var out = itemRows(live, refresh: refresh)
-        if !dead.isEmpty {
-            var r = SystemRow(label: "\(dead.count) left by ended sessions", state: .count(dead.count, menuYellow),
-                              note: "nothing will retry them; clear to tidy up",
-                              tip: "Pushes and asks whose session is gone, and approvals never used. Click to list them.")
-            r.key = "needs-dead"
-            r.children = itemRows(dead, refresh: refresh)
-            r.buttons = [clearAll(dead, refresh: refresh)]
-            out.append(r)
-        }
-        return out
-    }
-
-    /// The Approvals tab: live pushes, live asks, then what ended sessions left
-    /// behind, each its own section. Empty when nothing waits.
+    /// The Approvals tab: live pushes and asks still waiting on the owner,
+    /// those approved but not yet run, then what ended sessions left behind.
+    /// Empty when nothing waits.
     static func groups(_ items: [NeedItem], refresh: @escaping () -> Void) -> [SystemGroup] {
-        let live = items.filter { $0.sessionDir != nil }
+        let live = items.filter { $0.sessionDir != nil && !$0.approved }
+        let approved = items.filter { $0.sessionDir != nil && $0.approved }
         let dead = items.filter { $0.sessionDir == nil }
         var out: [SystemGroup] = []
         let pushes = live.filter { $0.kind == .push }, asks = live.filter { $0.kind != .push }
         if !pushes.isEmpty { out.append(SystemGroup(title: "Pushes", rows: itemRows(pushes, refresh: refresh))) }
         if !asks.isEmpty { out.append(SystemGroup(title: "Policy asks", rows: itemRows(asks, refresh: refresh))) }
+        if !approved.isEmpty { out.append(SystemGroup(title: "Approved, waiting to run", rows: itemRows(approved, refresh: refresh))) }
         if !dead.isEmpty {
             var all = SystemRow(label: "Nothing will run these", state: .off,
                                 note: "their session is gone; ask a live session to try again, then clear these",
@@ -209,7 +198,11 @@ enum NeedsYou {
             let note: String
             switch item.kind {
             case .push, .ask:
-                note = item.approved ? "approved · runs when that session next takes a turn" : where_ + when
+                // Honest about the wake: a session with no inbox watcher sleeps
+                // through the request and runs on its next message instead.
+                note = item.approved
+                    ? "approved\(item.approvedAt.map { " " + age($0) } ?? "") · the session was asked to run it; if it is idle, it runs on your next message to it"
+                    : where_ + when
             case .armedApproval: note = "typed, never used; the session ended" + when
             }
             var r = SystemRow(label: item.title,
@@ -247,41 +240,11 @@ enum NeedsYou {
 }
 
 extension PolicyStore {
-    /// Publish what waits, to the strip and the Approvals tab together.
+    /// Publish what waits to the Approvals tab. The badge counts only what a
+    /// live session is still waiting on you for; an approved item is not.
     func setNeeds(_ items: [NeedItem], refresh: @escaping () -> Void) {
-        needs = NeedsYou.rows(items, refresh: refresh)
         needGroups = NeedsYou.groups(items, refresh: refresh)
-        needsWaiting = items.filter { $0.sessionDir != nil }.count
-    }
-}
-
-/// The strip above the tabs: a yellow-edged card, only while something waits.
-struct NeedsStrip: View {
-    @ObservedObject var store: PolicyStore
-
-    var body: some View {
-        if !store.needs.isEmpty {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 5) {
-                    Image(systemName: "hand.raised.fill").font(.system(size: 9.5, weight: .semibold))
-                    Text("NEEDS YOU").font(PT.section).tracking(0.7)
-                    // Same number as the Approvals tab badge: items a live session waits on.
-                    if store.needsWaiting > 0 {
-                        Text("\(store.needsWaiting)").font(PT.section).foregroundStyle(.secondary)
-                    }
-                }
-                .foregroundStyle(Color(nsColor: menuYellow))
-                .padding(.leading, 4)
-                Card {
-                    ForEach(Array(store.needs.enumerated()), id: \.element.id) { i, row in
-                        if i > 0 { Divider().padding(.leading, PT.rowH) }
-                        SystemRowView(row: row, store: store)
-                    }
-                }
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: menuYellow).opacity(0.5)))
-            }
-            .padding(.horizontal, PT.gap).padding(.top, PT.gap - 4)
-        }
+        needsWaiting = items.filter { $0.sessionDir != nil && !$0.approved }.count
     }
 }
 
@@ -319,7 +282,7 @@ func probeApprove() -> String {
     let items = all.filter { $0.kind == .push }
     check("the held push is listed", items.count == 1)
     check("an ended session gets no Approve button",
-          NeedsYou.rows(items) {}.first?.children.first?.buttons.contains { $0.label == "Approve" } == false)
+          NeedsYou.groups(items) {}.last?.rows.dropFirst().first?.buttons.contains { $0.label == "Approve" } == false)
     if let item = items.first {
         check("approve reports success", NeedsYou.approve(item) == nil)
         check("the approval file the gate reads exists", fm.fileExists(atPath: dir + "/.push-approved-" + sid))

@@ -244,6 +244,7 @@ struct UsageTabView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: SBStyle.gap) {
+            if !policy.hiddenSections.contains("usage::Claude") {
             section("Claude", link: ("Usage page", "https://claude.ai/settings/usage"), state: usage.claudeState) {
                 ForEach(usage.claude) { w in
                     UsageBarRow(window: w, now: now,
@@ -255,6 +256,8 @@ struct UsageTabView: View {
                 ZoneSlider(label: "Warn at", value: $usage.warnPct, tint: .orange)
                 ZoneSlider(label: "Danger at", value: $usage.dangerPct, tint: .red)
             }
+            }
+            if !policy.hiddenSections.contains("usage::Codex") {
             section("Codex", link: ("Usage page", "https://chatgpt.com/settings/usage?tab=overview"),
                     state: usage.codexState, busySince: usage.codexBusySince,
                     refresh: { usage.askCodexNow() }, refreshLabel: "Ask Codex now") {
@@ -271,6 +274,7 @@ struct UsageTabView: View {
                     note("\(usage.codexResets.count) free full reset\(usage.codexResets.count == 1 ? "" : "s") available"
                          + (usage.codexResets.compactMap { $0.expiresAt }.min().map { ", first expires \(f.string(from: $0))" } ?? ""))
                 }
+            }
             }
             // The thresholds that act on these numbers live in the policy
             // store; they render here with the same rows the Agents tab uses.

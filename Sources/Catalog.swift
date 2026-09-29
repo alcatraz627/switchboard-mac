@@ -49,6 +49,12 @@ enum Catalog {
     /// Longest summary under a name; the whole text is one click away in the details.
     static let summaryChars = 180
 
+    /// A tab's sections, skipping those hidden in Settings without reading them.
+    static func sections(_ tab: String, _ readers: [(String, () throws -> [CatalogEntry])]) -> [SystemGroup] {
+        let hidden = Visibility.hiddenTitles(tab)
+        return readers.filter { !hidden.contains($0.0) }.map { section($0.0, $0.1) }
+    }
+
     static func row(_ e: CatalogEntry, key: String) -> SystemRow {
         var summary = e.summary.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "\n", with: " ")
         if summary.count > summaryChars {
