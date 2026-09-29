@@ -69,6 +69,13 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
         save(); resume()
     }
 
+    func rename(_ t: SBTimer, to label: String) {
+        let l = label.trimmingCharacters(in: .whitespaces)
+        guard !l.isEmpty, let i = timers.firstIndex(where: { $0.id == t.id }) else { return }
+        timers[i].label = l
+        save()
+    }
+
     func remove(_ t: SBTimer) {
         timers.removeAll { $0.id == t.id }
         save()
@@ -171,6 +178,9 @@ struct TimerRow: View {
     let timer: SBTimer
     @ObservedObject var timers: TimerStore
     let grip: AnyView
+    @State private var editing = false
+    @State private var draft = ""
+    @FocusState private var focused: Bool
 
     var body: some View {
         let left = timer.fireAt.timeIntervalSince(timers.now)
@@ -179,7 +189,22 @@ struct TimerRow: View {
             Circle().fill(timerColor(timer.color)).frame(width: 9, height: 9)
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text(timer.label).font(PT.label)
+                    // Click the label to rename it; Enter or clicking away saves.
+                    if editing {
+                        TextField("Label", text: $draft).textFieldStyle(.plain).font(PT.label)
+                            .focused($focused)
+                            .onSubmit { finish() }
+                            .onChange(of: focused) { f in if !f { finish() } }
+                            .onExitCommand { editing = false }
+                    } else {
+                        Text(timer.label).font(PT.label)
+                            .onTapGesture {
+                                draft = timer.label; editing = true
+                                NSApp.activate(ignoringOtherApps: true)
+                                DispatchQueue.main.async { focused = true }
+                            }
+                            .help("Click to rename")
+                    }
                     Spacer()
                     Text(timer.running ? clock(left) : "done").font(.system(size: 13, weight: .semibold).monospacedDigit())
                         .foregroundStyle(timer.running ? .primary : timerColor(timer.color))
@@ -203,6 +228,12 @@ struct TimerRow: View {
                 .buttonStyle(.borderless).foregroundStyle(.secondary).help(timer.running ? "Cancel it" : "Clear it")
         }
         .padding(.leading, 4).padding(.trailing, PT.rowH).padding(.vertical, PT.rowV + 1)
+    }
+
+    private func finish() {
+        guard editing else { return }
+        editing = false
+        timers.rename(timer, to: draft)
     }
 }
 

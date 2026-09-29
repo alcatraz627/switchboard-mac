@@ -50,7 +50,20 @@ struct HoverPreview: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
         .frame(width: 300, alignment: .leading)
+        .background(GlassBackground())
     }
+}
+
+/// A see-through blur behind the card, like the HUDs macOS draws.
+struct GlassBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = .hudWindow
+        v.blendingMode = .behindWindow
+        v.state = .active
+        return v
+    }
+    func updateNSView(_ v: NSVisualEffectView, context: Context) {}
 }
 
 /// Watches the pointer over the status item and shows the preview while it
@@ -71,6 +84,7 @@ final class HoverPeek: NSObject {
         super.init()
         popover.behavior = .applicationDefined   // it follows the pointer, not clicks
         popover.animates = false
+        popover.appearance = NSAppearance(named: .vibrantDark)
         // A tracking area on a status item never reaches a non-view owner, so the
         // pointer is checked against the icon's frame five times a second instead.
         poll = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.check() }
@@ -79,7 +93,9 @@ final class HoverPeek: NSObject {
     private func check() {
         guard let b = button, let win = b.window else { return }
         let frame = win.convertToScreen(b.convert(b.bounds, to: nil))
-        let now = frame.contains(NSEvent.mouseLocation)
+        // The card counts as inside too, so moving onto it keeps it open.
+        let card = popover.isShown ? popover.contentViewController?.view.window?.frame : nil
+        let now = frame.contains(NSEvent.mouseLocation) || (card?.insetBy(dx: -4, dy: -8).contains(NSEvent.mouseLocation) ?? false)
         guard now != inside else { return }
         inside = now
         if now { entered() } else { exited() }
