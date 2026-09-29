@@ -79,6 +79,8 @@ cat > "$STAGE/Contents/Info.plist" <<EOF
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSLocationWhenInUseUsageDescription</key><string>macOS shows the name of your Wi-Fi network only to apps with Location access. Switchboard uses it for that name and nothing else.</string>
+  <key>NSBluetoothAlwaysUsageDescription</key><string>Switchboard lists your paired Bluetooth devices so you can connect and disconnect them from the panel.</string>
 </dict>
 </plist>
 EOF

@@ -7,6 +7,7 @@
 //   --dump-policy [--scope <dir>]
 //   --snapshot <out.png> [--tab agents|usage|system|home|remote|scopes] [--light] [--scope <dir>] [--expand]
 //   --probe-timers          exercise the timed-flip engine on Keep Awake
+//   --probe-controls        write volume, mute and brightness back to themselves
 //   --open                  open the panel shortly after launch
 
 import AppKit
@@ -33,6 +34,11 @@ if args.contains("--dump") {
 }
 if args.contains("--probe-timers") {
     let report = delegate.probeSystemTimers()
+    print(report)
+    exit(report.hasSuffix("all passed") ? 0 : 1)
+}
+if args.contains("--probe-controls") {
+    let report = probeControls()
     print(report)
     exit(report.hasSuffix("all passed") ? 0 : 1)
 }

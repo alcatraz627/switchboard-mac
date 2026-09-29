@@ -14,6 +14,11 @@
 - **Machine > Drives**: every external disk and mounted disk image with its
   format and free space, and Finder, Eject and Disk Utility. The group is
   absent when nothing is attached; the boot disk can never be ejected.
+- **Controls tab**: sound output (pick a device, volume, mute), built-in
+  display brightness, Wi-Fi on/off with the network name (after you allow
+  Location, which macOS requires for it), and Bluetooth on/off with paired
+  devices to connect or disconnect. Turning Wi-Fi or Bluetooth off asks first.
+  `--probe-controls` checks the write paths headlessly.
 
 - Every row button is an icon (play, stop, log, copy, trash, shield…), like
   the timer beside it, with its name in the tooltip. Copy turns into a green

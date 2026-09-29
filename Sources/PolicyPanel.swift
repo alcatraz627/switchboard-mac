@@ -63,13 +63,13 @@ struct SwitchboardConcern: Identifiable {
 enum SwitchboardConcerns {
     /// A concern whose backing tool is not installed is left out, so a fresh
     /// Mac shows fewer tabs rather than an error.
-    static func all(policy: PolicyStore, usage: UsageStore, lights: LightsStore) -> [SwitchboardConcern] {
-        registry(policy: policy, usage: usage, lights: lights)
+    static func all(policy: PolicyStore, usage: UsageStore, lights: LightsStore, controls: ControlsStore) -> [SwitchboardConcern] {
+        registry(policy: policy, usage: usage, lights: lights, controls: controls)
             .filter { $0.id != "agents" || Integrations.policyStore }
             .filter { $0.id != "remote" || Integrations.csync }
     }
 
-    private static func registry(policy: PolicyStore, usage: UsageStore, lights: LightsStore) -> [SwitchboardConcern] {
+    private static func registry(policy: PolicyStore, usage: UsageStore, lights: LightsStore, controls: ControlsStore) -> [SwitchboardConcern] {
         [
             SwitchboardConcern(id: "agents", title: "Agents", subtitle: "What agents may do", icon: "person.badge.shield.checkmark",
                                footer: "Applies to every session at once. Only you can change it.", footerIcon: "bolt.fill",
@@ -87,6 +87,10 @@ enum SwitchboardConcerns {
                                footer: "Talks to the bulbs directly over the LAN.", footerIcon: "wifi",
                                content: AnyView(LightsTabView(lights: lights)),
                                refresh: { lights.discover() }),
+            SwitchboardConcern(id: "controls", title: "Controls", subtitle: "Sound, display, Wi-Fi, Bluetooth", icon: "slider.horizontal.3",
+                               footer: "Talks to macOS directly; nothing to install.", footerIcon: "apple.logo",
+                               content: AnyView(ControlsTabView(controls: controls)),
+                               refresh: { controls.load(devices: true) }),
             SwitchboardConcern(id: "remote", title: "Remote", subtitle: "Machines you drive with csync", icon: "network.badge.shield.half.filled",
                                footer: "Every action is a csync command, recorded in its log.", footerIcon: "terminal",
                                content: AnyView(SystemTabView(store: policy, remote: true)),
@@ -388,6 +392,10 @@ struct GroupHeader: View {
         "Dev servers": "network",
         "Repos": "arrow.triangle.branch",
         "Drives": "externaldrive",
+        "Sound": "speaker.wave.2",
+        "Display": "sun.max",
+        "Wi-Fi": "wifi",
+        "Bluetooth": "dot.radiowaves.left.and.right",
         "Local models": "cpu",
         "Console": "server.rack",
         "Hosts": "laptopcomputer.and.iphone",
@@ -1049,6 +1057,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     let store = PolicyStore()
     let usage = UsageStore()
     let lights = LightsStore()
+    let controls = ControlsStore()
     private var concerns: [SwitchboardConcern] = []
     private let item: NSStatusItem
     private let popover = NSPopover()
@@ -1066,7 +1075,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             b.target = self
             b.action = #selector(toggle(_:))
         }
-        concerns = SwitchboardConcerns.all(policy: store, usage: usage, lights: lights)
+        concerns = SwitchboardConcerns.all(policy: store, usage: usage, lights: lights, controls: controls)
         let host = NSHostingController(rootView: PolicyPanel(concerns: concerns))
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
@@ -1148,6 +1157,10 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     let lights = LightsStore()
     if tab == "usage" { usage.reload() }   // file reads only; never starts Codex
     if tab == "home" { lights.loadForSnapshot() }
+    let controls = ControlsStore()
+    // Paired Bluetooth devices would raise a permission prompt; a snapshot never does.
+    ControlsTabView.loadsOnAppear = false
+    if tab == "controls" { controls.load(devices: false) }
     // --demo-states plants one failure per tab so their look can be checked.
     if CommandLine.arguments.contains("--demo-states") {
         if let k = store.items.first(where: { $0.kind == .toggle })?.key {
@@ -1158,7 +1171,7 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
         }
         usage.demoRefreshFailure("Codex did not answer within 20s (demo failure)")
     }
-    let concerns = SwitchboardConcerns.all(policy: store, usage: usage, lights: lights)
+    let concerns = SwitchboardConcerns.all(policy: store, usage: usage, lights: lights, controls: controls)
 
     let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
     // "scopes" renders the scope picker's list on its own; a popover cannot be
