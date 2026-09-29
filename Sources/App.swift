@@ -39,6 +39,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         policyController = PolicyStatusController(
             liveDirs: { LiveSessions.dirs() },
             requestSystemRefresh: { [weak self] in self?.refreshSnapshot() })
+        policyController?.appHoverLines = { [weak self] chosen in self?.hoverLines(chosen) ?? [] }
         if let store = policyController?.store {
             store.startSystemTimer = { [weak self] k, until in self?.startSystemTimer(k, until: until) }
             store.cancelSystemTimer = { [weak self] k in self?.cancelSystemTimer(k) }
@@ -1496,6 +1497,50 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 self?.refreshSnapshot()
             }
         }
+    }
+}
+
+// ── The hover preview's app-side lines ──────────────────────────────────────
+
+extension SwitchboardApp {
+    /// Problems, timers and services from the last snapshot; nothing is read
+    /// here, so hovering costs nothing. At most three problem lines.
+    func hoverLines(_ chosen: Set<HoverItem>) -> [HoverLine] {
+        let s = sbSnapshot
+        var out: [HoverLine] = []
+        if chosen.contains(.problems) {
+            var problems: [String] = []
+            if !s.probeFailures.isEmpty {
+                problems.append("\(s.probeFailures.count == 1 ? "1 source" : "\(s.probeFailures.count) sources") could not be read: "
+                                + s.probeFailures.keys.sorted().joined(separator: ", "))
+            }
+            for j in s.jobs where j["failing"] as? Bool == true {
+                problems.append("\((j["name"] as? String) ?? "a job") failed (exit \((j["last_exit"] as? Int).map(String.init) ?? "?"))")
+            }
+            let off = s.gates.filter { if case .on = $0.kind { return false }; return true }.count
+            if off > 0 { problems.append(off == 1 ? "1 gate is off" : "\(off) gates are off") }
+            problems.append(contentsOf: timerFailures.map { "\($0.key): \($0.value)" })
+            let unwired = (policyController?.store.catalogs["rules"] ?? []).flatMap(\.rows)
+                .filter { $0.note.hasPrefix("not wired") || $0.note.hasPrefix("missing file") }.count
+            if unwired > 0 { problems.append(unwired == 1 ? "1 hook has no event" : "\(unwired) hooks have no event") }
+            let shown = problems.prefix(3)
+            out += shown.map { .note(icon: "exclamationmark.triangle.fill", text: $0, tint: .orange) }
+            if problems.count > 3 { out.append(.note(icon: "ellipsis", text: "\(problems.count - 3) more in the panel", tint: .secondary)) }
+        }
+        if chosen.contains(.timers) {
+            for (key, t) in systemTimers.sorted(by: { $0.value.until < $1.value.until }) {
+                out.append(.note(icon: "timer", text: "\(key): \(t.restoreOn ? "on" : "off") in \(countdownText(to: t.until, now: Date()))",
+                                 tint: .teal))
+            }
+        }
+        if chosen.contains(.services) {
+            var down: [String] = []
+            if kanbanUp == false { down.append("kanban") }
+            if s.hubReachable == false { down.append("session hub") }
+            if s.brokerUp == false { down.append("ipc broker") }
+            if !down.isEmpty { out.append(.note(icon: "bolt.slash", text: "Down: " + down.joined(separator: ", "), tint: .red)) }
+        }
+        return out
     }
 }
 

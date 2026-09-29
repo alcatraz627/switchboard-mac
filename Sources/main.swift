@@ -15,6 +15,7 @@
 
 import AppKit
 import Foundation
+import SwiftUI
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)   // menu bar only, no Dock icon
@@ -82,6 +83,22 @@ if args.contains("--dump-policy") {
     store.applyForSnapshot(items: r.items, projects: r.projects, error: r.error)
     print(policyDump(store))
     exit(r.error == nil ? 0 : 1)
+}
+if let out = argAfter("--snapshot-hover") {
+    // Every item on, from a real snapshot and the real limits file, plus one waiting push.
+    _ = delegate.panelSystemGroupsFresh()
+    let usage = UsageStore()
+    usage.loadClaude()
+    var lines: [HoverLine] = usage.claude.filter { $0.id == "five_hour" || $0.id == "seven_day" }.map { w in
+        .bar(label: w.id == "five_hour" ? "5h" : "Week", pct: w.pct,
+             color: w.pct >= usage.dangerPct ? .red : w.pct >= usage.warnPct ? .orange : .green,
+             resets: w.resetsAt.map { "in " + countdownText(to: $0, now: Date()) } ?? "")
+    }
+    lines.append(.note(icon: "hand.raised.fill", text: "1 waiting on you: Push switchboard-mac", tint: Color(nsColor: menuYellow)))
+    lines += delegate.hoverLines(Set(HoverItem.allCases))
+    let ok = snapshotHover(lines, to: out, dark: !args.contains("--light"))
+    print(ok ? "wrote \(out)" : "snapshot failed")
+    exit(ok ? 0 : 1)
 }
 if let out = argAfter("--snapshot") {
     let tab = argAfter("--tab") ?? "agents"

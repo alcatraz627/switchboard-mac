@@ -9,6 +9,7 @@
 // action, a pending flip, a changed value).
 
 import AppKit
+import Combine
 import SwiftUI
 
 // ── Type and spacing, one place ─────────────────────────────────────────────
@@ -1279,6 +1280,12 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     private let item: NSStatusItem
     private let popover = NSPopover()
     private var ticker: Timer?
+    private var peek: HoverPeek?
+    private var dot: IconDot?
+    private var dotWatch: AnyCancellable?
+    /// The hover lines only the app can write (problems, timers, services),
+    /// for the items chosen in Settings.
+    var appHoverLines: (Set<HoverItem>) -> [HoverLine] = { _ in [] }
 
     init(liveDirs: @escaping () -> [String], requestSystemRefresh: @escaping () -> Void) {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -1291,6 +1298,14 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             b.toolTip = "Switchboard: agent policy and system switches"
             b.target = self
             b.action = #selector(toggle(_:))
+            // The tooltip would cover the preview; the preview says more.
+            b.toolTip = nil
+            peek = HoverPeek(button: b, lines: { [weak self] in self?.hoverLines() ?? [] },
+                             panelOpen: { [weak self] in self?.popover.isShown ?? false })
+            let d = IconDot(on: b)
+            dot = d
+            dotWatch = store.$needsWaiting.combineLatest(store.$hoverItems)
+                .sink { n, items in d.show(n > 0 && items.contains(.iconDot)) }
         }
         concerns = SwitchboardConcerns.all(policy: store, usage: usage, lights: lights, controls: controls)
         let host = NSHostingController(rootView: PolicyPanel(concerns: concerns, store: store))
@@ -1322,6 +1337,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         // values rarely change between opens, and waiting for pol.sh first is
         // what made the click feel slow.
         guard let b = item.button, !popover.isShown else { return }
+        peek?.hide()
         let t0 = Date()
         popover.show(relativeTo: b.bounds, of: b, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
@@ -1337,6 +1353,28 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             self?.store.reload()
             self?.usage.loadClaude()
         }
+    }
+
+    /// The hover preview's lines, in a fixed order: limits, what waits, then
+    /// what the app knows. Only the items chosen in Settings.
+    func hoverLines() -> [HoverLine] {
+        let chosen = store.hoverItems
+        var out: [HoverLine] = []
+        if chosen.contains(.limits) {
+            usage.loadClaude()   // one small file read, so the bars are current
+            for w in usage.claude where w.id == "five_hour" || w.id == "seven_day" {
+                let color: Color = w.pct >= usage.dangerPct ? .red : w.pct >= usage.warnPct ? .orange : .green
+                out.append(.bar(label: w.id == "five_hour" ? "5h" : "Week", pct: w.pct, color: color,
+                                resets: w.resetsAt.map { "in " + countdownText(to: $0, now: Date()) } ?? ""))
+            }
+        }
+        if chosen.contains(.approvals), store.needsWaiting > 0 {
+            let first = store.needGroups.first?.rows.first?.label ?? ""
+            out.append(.note(icon: "hand.raised.fill",
+                             text: "\(store.needsWaiting) waiting on you" + (first.isEmpty ? "" : ": \(first)"),
+                             tint: Color(nsColor: menuYellow)))
+        }
+        return out + appHoverLines(chosen)
     }
 
     func popoverDidClose(_ notification: Notification) {
