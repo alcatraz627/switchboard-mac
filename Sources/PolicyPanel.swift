@@ -89,7 +89,7 @@ enum SwitchboardConcerns {
 
     /// Tab order (docs/plans/20260929-tabs-plan.md): what needs you, what
     /// agents may do and how much, the gcc's own lists, then this Mac.
-    static let tabOrder = ["agents", "usage", "rules", "ledger", "library", "notes",
+    static let tabOrder = ["agents", "usage", "rules", "ledger", "queue", "library", "notes", "timers",
                            "runtime", "plugins", "system", "controls", "home", "remote", "settings", "approvals"]
 
     private static func registry(policy: PolicyStore, usage: UsageStore, lights: LightsStore, controls: ControlsStore) -> [SwitchboardConcern] {
@@ -136,6 +136,9 @@ enum SwitchboardConcerns {
                                content: AnyView(SystemTabView(store: policy, source: .catalog("plugins"))),
                                refresh: { policy.reloadCatalog("plugins", PluginsCatalog.groups) },
                                pinned: AnyView(ScopedSearch(store: policy, id: "plugins", prompt: "Search plugins and MCP servers"))),
+            SwitchboardConcern(id: "timers", title: "Timers", subtitle: "Countdowns that go off with a sound", icon: "timer",
+                               footer: "A timer keeps running if the app restarts. + adds a minute.", footerIcon: "bell",
+                               content: AnyView(TimersTabView(timers: TimerStore.shared))),
             SwitchboardConcern(id: "notes", title: "Notes", subtitle: "Notes at hand, one file each", icon: "note.text",
                                footer: "Drag the grip to reorder. Each note is a markdown file; the link icon copies its path.",
                                footerIcon: "doc.text",
@@ -145,6 +148,9 @@ enum SwitchboardConcerns {
             catalogTab(policy, id: "rules", title: "Hooks", subtitle: "Rules, gates and hook scripts", icon: "checklist",
                        footer: "Problems sort first: a hook with no event, or one whose file is gone.",
                        search: "Search rules, gates and hooks", read: RulesCatalog.groups),
+            catalogTab(policy, id: "queue", title: "Queue", subtitle: "What gcc has lined up to happen", icon: "tray.full",
+                       footer: "A cron duty whose session has ended cannot fire; those sort first.",
+                       search: "Search schedules, duties, deploys and proposals", read: QueueCatalog.groups),
             catalogTab(policy, id: "ledger", title: "Ledger", subtitle: "Mistakes and the improvement backlog", icon: "list.bullet.clipboard",
                        footer: "Mistakes sort by how often they recur; each row copies its CLI line.",
                        search: "Search mistakes and proposals", read: LedgerCatalog.groups),
@@ -1234,7 +1240,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             let d = IconDot(on: b)
             dot = d
             dotWatch = store.$needsWaiting.combineLatest(store.$hoverItems)
-                .sink { n, items in d.show(n > 0 && items.contains(.iconDot)) }
+                .sink { n, items in d.show(n > 0 && items.contains(.iconDot), color: menuYellow) }
         }
         concerns = SwitchboardConcerns.all(policy: store, usage: usage, lights: lights, controls: controls)
         let host = NSHostingController(rootView: PolicyPanel(concerns: concerns, store: store))
@@ -1293,8 +1299,10 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             usage.loadClaude()   // one small file read, so the bars are current
             for w in usage.claude where w.id == "five_hour" || w.id == "seven_day" {
                 let color: Color = w.pct >= usage.dangerPct ? .red : w.pct >= usage.warnPct ? .orange : .green
+                // The reset time only earns its space when it is close.
+                let soon = w.resetsAt.map { $0.timeIntervalSinceNow < 1800 && $0 > Date() } ?? false
                 out.append(.bar(label: w.id == "five_hour" ? "5h" : "Week", pct: w.pct, color: color,
-                                resets: w.resetsAt.map { "in " + countdownText(to: $0, now: Date()) } ?? ""))
+                                resets: soon ? "resets in " + countdownText(to: w.resetsAt!, now: Date()) : ""))
             }
         }
         if chosen.contains(.approvals), store.needsWaiting > 0 {
@@ -1303,7 +1311,22 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
                              text: "\(store.needsWaiting) waiting on you" + (first.isEmpty ? "" : ": \(first)"),
                              tint: Color(nsColor: menuYellow)))
         }
+        if chosen.contains(.timers) {
+            // At most two countdowns, soonest first, then the next note reminder.
+            for t in TimerStore.shared.running.prefix(2) {
+                out.append(.note(icon: "timer", text: "\(t.label) · \(clock(t.fireAt.timeIntervalSinceNow))", tint: timerColor(t.color)))
+            }
+            if let n = NotesStore.shared.notes.filter({ ($0.remindAt ?? .distantPast) > Date() }).min(by: { $0.remindAt! < $1.remindAt! }) {
+                out.append(.note(icon: "bell", text: "\(n.title) · \(WhenText.describe(n.remindAt!))", tint: .secondary))
+            }
+        }
         return out + appHoverLines(chosen)
+    }
+
+    /// The icon dot: red while something is wrong, yellow while something waits.
+    func updateDot(problems: Bool) {
+        let on = store.hoverItems.contains(.iconDot)
+        dot?.show(on && (problems || store.needsWaiting > 0), color: problems ? .systemRed : menuYellow)
     }
 
     func popoverDidClose(_ notification: Notification) {
@@ -1333,6 +1356,7 @@ let catalogReaders: [String: () -> [SystemGroup]] = [
     "rules": RulesCatalog.groups,
     "ledger": LedgerCatalog.groups,
     "plugins": PluginsCatalog.groups,
+    "queue": QueueCatalog.groups,
 ]
 
 /// Draws the real panel offscreen, so it can be checked in dark and light
@@ -1347,6 +1371,10 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     store.systemGroups = system
     store.remoteGroups = remote
     if let read = catalogReaders[tab] { store.catalogs[tab] = read() }
+    if tab == "timers", CommandLine.arguments.contains("--demo-states"), TimerStore.shared.timers.isEmpty {
+        TimerStore.shared.add(label: "Tea", color: "green", fireAt: Date().addingTimeInterval(245))
+        TimerStore.shared.add(label: "Stand-up", color: "purple", fireAt: Date().addingTimeInterval(1800))
+    }
     if tab == "notes" { NotesStore.remindersOff = true; NotesStore.shared.load(); NoteRow.startOpen = CommandLine.arguments.contains("--expand") }
     if let f = CommandLine.arguments.firstIndex(of: "--filter").flatMap({ $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }) {
         store.queries[tab + "::scope"] = f

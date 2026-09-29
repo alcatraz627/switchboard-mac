@@ -271,7 +271,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 guard let self = self else { return }
                 self.sbSnapshot = s
                 if !self.kanbanBusy { self.kanbanUp = kanban }
-                self.refreshPanel()
+                self.refreshPanel(); self.policyController?.updateDot(problems: !self.problemTexts().isEmpty)
                 let waiters = self.snapshotWaiters
                 self.snapshotWaiters = []
                 waiters.forEach { $0() }
@@ -1509,22 +1509,9 @@ extension SwitchboardApp {
         let s = sbSnapshot
         var out: [HoverLine] = []
         if chosen.contains(.problems) {
-            var problems: [String] = []
-            if !s.probeFailures.isEmpty {
-                problems.append("\(s.probeFailures.count == 1 ? "1 source" : "\(s.probeFailures.count) sources") could not be read: "
-                                + s.probeFailures.keys.sorted().joined(separator: ", "))
-            }
-            for j in s.jobs where j["failing"] as? Bool == true {
-                problems.append("\((j["name"] as? String) ?? "a job") failed (exit \((j["last_exit"] as? Int).map(String.init) ?? "?"))")
-            }
-            let off = s.gates.filter { if case .on = $0.kind { return false }; return true }.count
-            if off > 0 { problems.append(off == 1 ? "1 gate is off" : "\(off) gates are off") }
-            problems.append(contentsOf: timerFailures.map { "\($0.key): \($0.value)" })
-            let unwired = (policyController?.store.catalogs["rules"] ?? []).flatMap(\.rows)
-                .filter { $0.note.hasPrefix("not wired") || $0.note.hasPrefix("missing file") }.count
-            if unwired > 0 { problems.append(unwired == 1 ? "1 hook has no event" : "\(unwired) hooks have no event") }
-            let shown = problems.prefix(3)
-            out += shown.map { .note(icon: "exclamationmark.triangle.fill", text: $0, tint: .orange) }
+            let problems = problemTexts()
+            if problems.isEmpty { out.append(.note(icon: "checkmark.circle", text: "All clear", tint: .green)) }
+            out += problems.prefix(3).map { .note(icon: "exclamationmark.triangle.fill", text: $0, tint: .orange) }
             if problems.count > 3 { out.append(.note(icon: "ellipsis", text: "\(problems.count - 3) more in the panel", tint: .secondary)) }
         }
         if chosen.contains(.timers) {
@@ -1541,6 +1528,28 @@ extension SwitchboardApp {
             if !down.isEmpty { out.append(.note(icon: "bolt.slash", text: "Down: " + down.joined(separator: ", "), tint: .red)) }
         }
         return out
+    }
+
+    /// Everything wrong right now, in a sentence each, from the last snapshot.
+    func problemTexts() -> [String] {
+        let s = sbSnapshot
+        var problems: [String] = []
+        do {
+            if !s.probeFailures.isEmpty {
+                problems.append("\(s.probeFailures.count == 1 ? "1 source" : "\(s.probeFailures.count) sources") could not be read: "
+                                + s.probeFailures.keys.sorted().joined(separator: ", "))
+            }
+            for j in s.jobs where j["failing"] as? Bool == true {
+                problems.append("\((j["name"] as? String) ?? "a job") failed (exit \((j["last_exit"] as? Int).map(String.init) ?? "?"))")
+            }
+            let off = s.gates.filter { if case .on = $0.kind { return false }; return true }.count
+            if off > 0 { problems.append(off == 1 ? "1 gate is off" : "\(off) gates are off") }
+            problems.append(contentsOf: timerFailures.map { "\($0.key): \($0.value)" })
+            let unwired = (policyController?.store.catalogs["rules"] ?? []).flatMap(\.rows)
+                .filter { $0.note.hasPrefix("not wired") || $0.note.hasPrefix("missing file") }.count
+            if unwired > 0 { problems.append(unwired == 1 ? "1 hook has no event" : "\(unwired) hooks have no event") }
+        }
+        return problems
     }
 }
 

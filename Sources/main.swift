@@ -61,6 +61,11 @@ if args.contains("--probe-visibility") {
     print(report)
     exit(report.hasSuffix("all passed") ? 0 : 1)
 }
+if args.contains("--probe-timers-tab") {
+    let report = probeTimers()
+    print(report)
+    exit(report.hasSuffix("all passed") ? 0 : 1)
+}
 if args.contains("--probe-notes") {
     let report = probeNotes()
     print(report)

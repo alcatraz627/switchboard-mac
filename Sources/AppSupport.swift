@@ -196,6 +196,7 @@ enum Visibility {
         "usage": ["Claude", "Codex"],
         "rules": ["Guards", "Rules", "Hook scripts"],
         "ledger": ["Mistakes", "Open proposals", "Closed proposals"],
+        "queue": ["Scheduled", "Cron duties", "Deploy queue", "Open proposals"],
         "library": ["Skills", "Parked skills", "Knowledge", "Personas", "Scripts"],
         "runtime": ["Services", "Dev servers", "Local models", "Schedules"],
         "plugins": ["Plugins", "MCP servers", "Project plugins", "Project MCP servers"],
@@ -235,14 +236,14 @@ enum HoverItem: String, CaseIterable {
         case .limits: return "the 5-hour and weekly bars, coloured by your warn and danger zones"
         case .approvals: return "how many pushes and asks wait, and the oldest"
         case .problems: return "sources that failed to read, failing jobs, hooks with no event"
-        case .timers: return "Keep Awake and other timed flips, with time left"
+        case .timers: return "up to two running timers, timed flips such as Keep Awake, and the next note reminder"
         case .services: return "kanban, the session hub or the ipc broker when down"
-        case .iconDot: return "a small yellow dot on the menu bar icon while something waits on you"
+        case .iconDot: return "a dot on the menu bar icon: yellow while something waits on you, red while something is wrong"
         }
     }
 
     static let key = "switchboard.hoverItems"
-    static let defaults: Set<HoverItem> = [.limits, .approvals, .problems]
+    static let defaults: Set<HoverItem> = [.limits, .approvals, .problems, .timers]
 
     static var chosen: Set<HoverItem> {
         guard let raw = UserDefaults.standard.stringArray(forKey: key) else { return defaults }

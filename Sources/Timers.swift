@@ -1,0 +1,238 @@
+// Timers.swift
+// Countdown timers the owner starts from the panel: several at once, each with
+// a label and a colour, going off as a macOS notification with a sound. The
+// Clock app's timers have no API, so these are Switchboard's own; they are
+// saved, so a restart keeps them running.
+
+import AppKit
+import SwiftUI
+import UserNotifications
+
+struct SBTimer: Codable, Identifiable, Equatable {
+    var id = UUID().uuidString
+    var label: String
+    var color: String
+    var start: Date
+    var fireAt: Date
+    var firedAt: Date?
+
+    var running: Bool { firedAt == nil }
+    var total: TimeInterval { max(1, fireAt.timeIntervalSince(start)) }
+}
+
+/// The colours a timer can wear, by name so they survive in the saved list.
+let timerColors: [(String, Color)] = [("blue", .blue), ("teal", .teal), ("green", .green), ("yellow", .yellow),
+                                      ("orange", .orange), ("red", .red), ("pink", .pink), ("purple", .purple)]
+func timerColor(_ name: String) -> Color { timerColors.first { $0.0 == name }?.1 ?? .blue }
+
+final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
+    static let shared = TimerStore()
+    private static let key = "switchboard.timers.countdowns"
+
+    @Published private(set) var timers: [SBTimer] = []
+    /// Ticks once a second while a timer runs, so countdowns redraw.
+    @Published private(set) var now = Date()
+    private var tick: Timer?
+
+    override init() {
+        super.init()
+        if let d = UserDefaults.standard.data(forKey: Self.key), let t = try? JSONDecoder().decode([SBTimer].self, from: d) {
+            timers = t
+        }
+        if Bundle.main.bundleIdentifier != nil { UNUserNotificationCenter.current().delegate = self }
+        resume()
+    }
+
+    /// A menu bar app counts as in front, and macOS hides a notification from
+    /// the app in front unless asked to show it.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
+        done([.banner, .sound])
+    }
+
+    var running: [SBTimer] { timers.filter(\.running).sorted { $0.fireAt < $1.fireAt } }
+
+    func add(label: String, color: String, fireAt: Date) {
+        let t = SBTimer(label: label.isEmpty ? "Timer" : label, color: color, start: Date(), fireAt: fireAt)
+        timers.insert(t, at: 0)
+        save()
+        askToNotify()
+        resume()
+    }
+
+    func extend(_ t: SBTimer, by seconds: TimeInterval) {
+        guard let i = timers.firstIndex(where: { $0.id == t.id }) else { return }
+        let base = timers[i].running ? timers[i].fireAt : Date()
+        timers[i].fireAt = base.addingTimeInterval(seconds)
+        if !timers[i].running { timers[i].start = Date() }
+        timers[i].firedAt = nil
+        save(); resume()
+    }
+
+    func remove(_ t: SBTimer) {
+        timers.removeAll { $0.id == t.id }
+        save()
+    }
+
+    func move(_ dragged: String, to target: String) {
+        timers = applyOrder(timers, reordered(timers.map(\.id), moving: dragged, to: target))
+    }
+
+    func save() {
+        if let d = try? JSONEncoder().encode(timers) { UserDefaults.standard.set(d, forKey: Self.key) }
+    }
+
+    /// Runs the one-second tick only while something counts down.
+    private func resume() {
+        guard tick == nil, timers.contains(where: \.running) else { return }
+        tick = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.step() }
+    }
+
+    private func step() {
+        now = Date()
+        var changed = false
+        for i in timers.indices where timers[i].running && timers[i].fireAt <= now {
+            timers[i].firedAt = now
+            changed = true
+            fire(timers[i])
+        }
+        if changed { save() }
+        if !timers.contains(where: \.running) { tick?.invalidate(); tick = nil }
+    }
+
+    private func fire(_ t: SBTimer) {
+        NSSound(named: "Glass")?.play()
+        dlog("timer fired: \(t.label)")
+        guard Bundle.main.bundleIdentifier != nil else { return }   // the notification centre needs an app bundle
+        let c = UNMutableNotificationContent()
+        c.title = t.label
+        c.body = "Timer done"
+        c.sound = .default
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: t.id, content: c, trigger: nil))
+    }
+
+    /// Notification access is asked the first time a timer starts, never on launch.
+    private func askToNotify() {
+        guard Bundle.main.bundleIdentifier != nil else { return }   // headless runs have no bundle
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+}
+
+// ── The tab ─────────────────────────────────────────────────────────────────
+
+struct TimersTabView: View {
+    @ObservedObject var timers: TimerStore
+    @State private var label = ""
+    @State private var color = "blue"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PT.gap) {
+            // New timer: a name, a colour, then when.
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    TextField("Label, e.g. Tea", text: $label).textFieldStyle(.roundedBorder).font(PT.label)
+                    WhenButton(title: "Start a timer for", presets: WhenPreset.timer,
+                               onPick: { d, _ in timers.add(label: label, color: color, fireAt: d); label = "" }) {
+                        Label("Start", systemImage: "timer").font(.system(size: 11.5, weight: .medium))
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(Capsule().fill(timerColor(color).opacity(0.25)))
+                    }
+                    .help("Pick how long; the timer starts at once")
+                }
+                HStack(spacing: 7) {
+                    ForEach(timerColors, id: \.0) { name, c in
+                        Circle().fill(c).frame(width: 14, height: 14)
+                            .overlay(Circle().strokeBorder(Color.primary.opacity(color == name ? 0.8 : 0), lineWidth: 2))
+                            .onTapGesture { color = name }
+                            .help(name)
+                    }
+                }
+            }
+            .padding(.horizontal, 4)
+            if timers.timers.isEmpty {
+                Text("No timers. Name one, pick a colour, press Start.").font(PT.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+            } else {
+                Card {
+                    ReorderStack(items: timers.timers, move: { timers.move($0, to: $1) }, commit: { timers.save() }) { i, t, grip in
+                        VStack(spacing: 0) {
+                            if i > 0 { Divider().padding(.leading, PT.rowH) }
+                            TimerRow(timer: t, timers: timers, grip: grip)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(PT.gap)
+    }
+}
+
+struct TimerRow: View {
+    let timer: SBTimer
+    @ObservedObject var timers: TimerStore
+    let grip: AnyView
+
+    var body: some View {
+        let left = timer.fireAt.timeIntervalSince(timers.now)
+        HStack(spacing: 8) {
+            grip
+            Circle().fill(timerColor(timer.color)).frame(width: 9, height: 9)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(timer.label).font(PT.label)
+                    Spacer()
+                    Text(timer.running ? clock(left) : "done").font(.system(size: 13, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(timer.running ? .primary : timerColor(timer.color))
+                }
+                if timer.running {
+                    GeometryReader { g in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.primary.opacity(0.08))
+                            Capsule().fill(timerColor(timer.color))
+                                .frame(width: g.size.width * CGFloat(max(0, min(1, 1 - left / timer.total))))
+                        }
+                    }
+                    .frame(height: 4)
+                } else if let f = timer.firedAt {
+                    Text("went off " + age(f)).font(PT.caption).foregroundStyle(.secondary)
+                }
+            }
+            Button { timers.extend(timer, by: 60) } label: { Image(systemName: "plus.circle").font(.system(size: 11)) }
+                .buttonStyle(.borderless).foregroundStyle(.secondary).help(timer.running ? "One more minute" : "Start again for a minute")
+            Button { timers.remove(timer) } label: { Image(systemName: "xmark.circle").font(.system(size: 11)) }
+                .buttonStyle(.borderless).foregroundStyle(.secondary).help(timer.running ? "Cancel it" : "Clear it")
+        }
+        .padding(.leading, 4).padding(.trailing, PT.rowH).padding(.vertical, PT.rowV + 1)
+    }
+}
+
+/// Starts a one-second timer, lets it go off, extends and clears it, and
+/// leaves the saved list as it found it.
+func probeTimers() -> String {
+    let key = "switchboard.timers.countdowns"
+    let before = UserDefaults.standard.data(forKey: key)
+    defer { UserDefaults.standard.set(before, forKey: key) }
+    UserDefaults.standard.removeObject(forKey: key)
+    let s = TimerStore()
+    var lines: [String] = []
+    func check(_ name: String, _ ok: Bool) { lines.append("\(ok ? "ok  " : "FAIL") \(name)") }
+    s.add(label: "Tea", color: "green", fireAt: Date().addingTimeInterval(1))
+    check("a new timer runs", s.running.count == 1)
+    let until = Date().addingTimeInterval(3)
+    while Date() < until && !s.running.isEmpty { RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.1)) }
+    check("it goes off at its time", s.running.isEmpty && s.timers.first?.firedAt != nil)
+    check("the fired state is saved", TimerStore().timers.first?.firedAt != nil)
+    s.extend(s.timers[0], by: 60)
+    check("+ restarts a finished timer for a minute", s.running.count == 1 && abs(s.running[0].fireAt.timeIntervalSinceNow - 60) < 2)
+    s.remove(s.timers[0])
+    check("clearing removes it", s.timers.isEmpty)
+    check("clock reads minutes and hours", clock(65) == "1:05" && clock(3725) == "1:02:05")
+    lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
+    return lines.joined(separator: "\n")
+}
+
+/// "4:05" under an hour, "1:02:30" over.
+func clock(_ seconds: TimeInterval) -> String {
+    let s = max(0, Int(seconds.rounded(.up)))
+    return s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60) : String(format: "%d:%02d", s / 60, s % 60)
+}

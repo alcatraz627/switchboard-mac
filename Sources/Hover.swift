@@ -137,5 +137,8 @@ final class IconDot {
         dot.autoresizingMask = [.minXMargin, .minYMargin]
     }
 
-    func show(_ on: Bool) { dot.isHidden = !on }
+    func show(_ on: Bool, color: NSColor) {
+        dot.isHidden = !on
+        dot.layer?.backgroundColor = color.cgColor
+    }
 }

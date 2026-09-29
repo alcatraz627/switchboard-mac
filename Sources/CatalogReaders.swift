@@ -438,6 +438,81 @@ func probeToggles() -> [String] {
     return lines
 }
 
+// ── Queue: what gcc has lined up to happen later ────────────────────────────
+
+enum QueueCatalog {
+    static func groups() -> [SystemGroup] {
+        Catalog.sections("queue", [("Scheduled", scheduled), ("Cron duties", cronDuties),
+                                   ("Deploy queue", deployQueue),
+                                   ("Open proposals", { try LedgerCatalog.proposals().filter { $0.tag?.hasPrefix("open") == true } })])
+    }
+
+    /// gcc-schedule's registry: one-shots and adopted launchd jobs.
+    static func scheduled() throws -> [CatalogEntry] {
+        let path = gcc + "/scheduled/registry.json"
+        guard let d = FileManager.default.contents(atPath: path),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else {
+            throw CatalogError("\(abbreviateHome(path)) could not be read")
+        }
+        return o.compactMap { name, v -> CatalogEntry? in
+            guard let r = v as? [String: Any] else { return nil }
+            let when = (r["fire_at"] as? String) ?? "?"
+            let about = (r["description"] as? String) ?? ""
+            var details: [(String, String)] = [("When", when == "custom-schedule" ? "its own launchd schedule" : when)]
+            if !about.isEmpty { details.append(("About", about)) }
+            if let c = r["command"] as? String { details.append(("Runs", c)) }
+            if let l = r["label"] as? String { details.append(("launchd label", l)) }
+            let cmd = "bash ~/.claude/scripts/schedule/schedule.sh list"
+            return CatalogEntry(name: name, summary: about, details: details, path: r["plist"] as? String,
+                                tag: when == "custom-schedule" ? "recurring" : "at " + when,
+                                actions: [RowButton(label: "Copy", kind: .copy(cmd), help: "Copy: \(cmd)")])
+        }
+        .sorted { $0.name < $1.name }
+    }
+
+    /// Cron duties armed by sessions. One whose session has ended cannot fire,
+    /// so it is flagged and sorted first.
+    static func cronDuties() throws -> [CatalogEntry] {
+        let dir = gcc + "/cron-duties"
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else {
+            throw CatalogError("\(abbreviateHome(dir)) could not be read")
+        }
+        let ranked: [(Bool, CatalogEntry)] = files.filter { $0.hasSuffix(".json") }.compactMap { f in
+            guard let d = FileManager.default.contents(atPath: dir + "/" + f),
+                  let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
+            // No session recorded (a pm2 resident, say) means nothing to outlive.
+            let pid = (o["harness_pid"] as? Int).map { Int32($0) }
+            let alive = pid.map { kill($0, 0) == 0 } ?? true
+            let sched = (o["schedule"] as? String) ?? "?"
+            let head = (o["prompt_head"] as? String) ?? ""
+            let details: [(String, String)] = [("Schedule", sched), ("Does", head.isEmpty ? "?" : head),
+                                               ("Session", (o["sid"] as? String) ?? "?"),
+                                               ("Armed", (o["armed_at"] as? String) ?? "?"),
+                                               ("State", pid == nil ? "not tied to a session" : alive ? "its session is running" : "its session has ended, so it will not fire")]
+            let e = CatalogEntry(name: (o["slug"] as? String) ?? f, summary: head, details: details, path: dir + "/" + f,
+                                 tag: (alive ? "" : "session ended · ") + sched, off: !alive)
+            return (!alive, e)
+        }
+        return ranked.sorted { $0.0 != $1.0 ? $0.0 : $0.1.name < $1.1.name }.map { $0.1 }
+    }
+
+    /// Deploys waiting, running, then the last few done.
+    static func deployQueue() throws -> [CatalogEntry] {
+        let root = gcc + "/deployq"
+        guard FileManager.default.fileExists(atPath: root) else { throw CatalogError("~/.claude/deployq is not there") }
+        var out: [CatalogEntry] = []
+        for (state, limit) in [("running", 50), ("pending", 50), ("done", 5)] {
+            let files = ((try? FileManager.default.contentsOfDirectory(atPath: root + "/" + state)) ?? [])
+                .filter { !$0.hasPrefix(".") }.sorted().reversed().prefix(limit)
+            for f in files {
+                let path = root + "/" + state + "/" + f
+                out.append(CatalogEntry(name: f, summary: "", details: [("State", state)], path: path, tag: state))
+            }
+        }
+        return out
+    }
+}
+
 // ── Ledger: mistakes and proposals ──────────────────────────────────────────
 
 enum LedgerCatalog {
