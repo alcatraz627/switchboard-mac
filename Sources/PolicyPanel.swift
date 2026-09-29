@@ -110,6 +110,9 @@ enum SwitchboardConcerns {
             catalogTab(policy, id: "rules", title: "Rules & Hooks", subtitle: "Rules, gates and hook scripts", icon: "checklist",
                        footer: "Problems sort first: a hook with no event, or one whose file is gone.",
                        search: "Search rules, gates and hooks", read: RulesCatalog.groups),
+            catalogTab(policy, id: "ledger", title: "Ledger", subtitle: "Mistakes and the improvement backlog", icon: "list.bullet.clipboard",
+                       footer: "Mistakes sort by how often they recur; each row copies its CLI line.",
+                       search: "Search mistakes and proposals", read: LedgerCatalog.groups),
             catalogTab(policy, id: "library", title: "Library", subtitle: "Skills, docs, personas, scripts", icon: "books.vertical",
                        footer: "Open a row for its details; the path copies on click.",
                        search: "Search skills, docs, personas and scripts", read: LibraryCatalog.groups),
@@ -494,6 +497,11 @@ struct GroupHeader: View {
         "Local models": "cpu",
         "Skills": "wand.and.stars",
         "Parked skills": "shippingbox",
+        "Rules": "checklist",
+        "Hook scripts": "link",
+        "Mistakes": "exclamationmark.bubble",
+        "Open proposals": "lightbulb",
+        "Closed proposals": "archivebox",
         "Knowledge": "book.closed",
         "Personas": "theatermasks",
         "Scripts": "terminal",
@@ -621,7 +629,7 @@ struct SystemRowView: View {
     private var mainLine: some View {
         HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(row.label).font(PT.label).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                Text(row.label).font(PT.label).fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(row.enabled || !row.isSwitch ? .primary : .secondary)
                 if let t = row.timer, let key = row.timerKey {
                     HStack(spacing: 4) {
@@ -643,7 +651,11 @@ struct SystemRowView: View {
             if let p = pendingFlip { PendingMark(since: p.since) }
             else if busyButton != nil { PendingMark(since: busySince) }
             else if let key = row.timerKey { timerMenu(key).frame(width: 18) }
-            ForEach(row.buttons.indices, id: \.self) { i in rowButton(row.buttons[i]) }
+            // Fixed size: long wrapping text beside them must never squeeze a button out.
+            HStack(spacing: 8) {
+                ForEach(row.buttons.indices, id: \.self) { i in rowButton(row.buttons[i]) }
+            }
+            .fixedSize()
             if let link = row.link, let url = URL(string: link) {
                 Button { NSWorkspace.shared.open(url) } label: {
                     Image(systemName: "arrow.up.right.square").font(.system(size: 12))
@@ -1287,6 +1299,7 @@ func switchboardGlyph() -> NSImage {
 let catalogReaders: [String: () -> [SystemGroup]] = [
     "library": LibraryCatalog.groups,
     "rules": RulesCatalog.groups,
+    "ledger": LedgerCatalog.groups,
 ]
 
 /// Draws the real panel offscreen, so it can be checked in dark and light

@@ -149,6 +149,96 @@ enum RulesCatalog {
     }
 }
 
+// ── Ledger: mistakes and proposals ──────────────────────────────────────────
+
+enum LedgerCatalog {
+    static func groups() -> [SystemGroup] {
+        let props = Result { try proposals() }
+        func part(_ open: Bool) -> () throws -> [CatalogEntry] {
+            { try props.get().filter { ($0.tag?.hasPrefix("open") ?? false) == open } }
+        }
+        return [Catalog.section("Mistakes", mistakes),
+                Catalog.section("Open proposals", part(true)),
+                Catalog.section("Closed proposals", part(false))]
+    }
+
+    /// One JSON object per line; a line that does not parse is skipped.
+    static func jsonLines(_ path: String) throws -> [[String: Any]] {
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else {
+            throw CatalogError("\(abbreviateHome(path)) could not be read")
+        }
+        return text.split(separator: "\n").compactMap {
+            try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+        }
+    }
+
+    /// Mistakes grouped by pattern: how often, how bad at worst, when last,
+    /// and the check that would have caught it. Most frequent first.
+    static func mistakes() throws -> [CatalogEntry] {
+        let events = try jsonLines(gcc + "/atone/events.jsonl")
+        let bySlug = Dictionary(grouping: events) { ($0["slug"] as? String) ?? "unnamed" }
+        return bySlug.map { slug, evs -> (Int, String, CatalogEntry) in
+            let sorted = evs.sorted { (($0["ts"] as? String) ?? "") > (($1["ts"] as? String) ?? "") }
+            let latest = sorted[0]
+            let sevs = evs.compactMap { $0["severity"] as? String }
+            let worst = sevs.max() ?? "?"
+            let last = String(((latest["ts"] as? String) ?? "").prefix(10))
+            let precheck = sorted.lazy.compactMap { $0["precheck"] as? String }.first { !$0.isEmpty }
+            let whatNot = sorted.lazy.compactMap { $0["what_not_to_do"] as? String }.first { !$0.isEmpty }
+            var details: [(String, String)] = []
+            if let p = precheck { details.append(("Check before", p)) }
+            if let w = whatNot { details.append(("Never again", w)) }
+            let counts = ["S3", "S2", "S1"].compactMap { s -> String? in
+                let n = sevs.filter { $0 == s }.count
+                return n > 0 ? "\(n) \(s)" : nil
+            }
+            details.append(("Times", "\(evs.count) (\(counts.joined(separator: ", "))), last on \(last)"))
+            details.append(("Recent", sorted.prefix(3).map {
+                "\(String((($0["ts"] as? String) ?? "").prefix(10))): \(($0["title"] as? String) ?? "")"
+            }.joined(separator: "\n")))
+            let rca = sorted.lazy.compactMap { $0["rca_id"] as? String }
+                .map { gcc + "/atone/rca/\($0).md" }.first { FileManager.default.fileExists(atPath: $0) }
+            let tint: NSColor = worst == "S3" ? .systemRed : worst == "S2" ? .systemOrange : .systemGray
+            let cmd = "bash ~/.claude/scripts/atone.sh list --slug \(slug)"
+            let entry = CatalogEntry(name: slug, summary: (latest["title"] as? String) ?? "", details: details, path: rca,
+                                     tag: "\(worst) · last \(last)", count: (evs.count, tint),
+                                     actions: [RowButton(label: "Copy", kind: .copy(cmd), help: "Copy: \(cmd)")])
+            return (evs.count, last, entry)
+        }
+        .sorted { $0.0 != $1.0 ? $0.0 > $1.0 : $0.1 > $1.1 }
+        .map { $0.2 }
+    }
+
+    /// The improvement backlog, newest first, each tagged with its state.
+    static func proposals() throws -> [CatalogEntry] {
+        try jsonLines(gcc + "/proposals.jsonl").map { p -> (String, CatalogEntry) in
+            let id = (p["id"] as? String) ?? "?"
+            let status = (p["status"] as? String) ?? "open"
+            let ts = String(((p["ts"] as? String) ?? "").prefix(10))
+            let body = (p["body"] as? String) ?? ""
+            var details: [(String, String)] = [("Proposal", body.isEmpty ? "No body." : body)]
+            if let r = p["reason"] as? String, !r.isEmpty { details.append(("Closed because", r)) }
+            let meta = [p["category"] as? String, p["effort"] as? String, p["tier"] as? String].compactMap { $0 }
+            if !meta.isEmpty { details.append(("Kind", meta.joined(separator: " · "))) }
+            if let tags = p["tags"] as? [String], !tags.isEmpty { details.append(("Tags", tags.joined(separator: ", "))) }
+            if let links = p["links"] as? [String], !links.isEmpty { details.append(("Links", links.joined(separator: ", "))) }
+            if let ups = p["updates"] as? [[String: Any]], !ups.isEmpty {
+                details.append(("Updates", ups.suffix(3).map {
+                    "\(String((($0["ts"] as? String) ?? "").prefix(10))): \(($0["note"] as? String) ?? "")"
+                }.joined(separator: "\n")))
+            }
+            details.append(("Filed", "\(ts) as \(id)"))
+            let cmd = "bash ~/.claude/scripts/propose.sh show \(id)"
+            let entry = CatalogEntry(name: (p["title"] as? String) ?? id, summary: Catalog.firstSentence(body),
+                                     details: details, tag: "\(status) · \(ts)" + ((p["effort"] as? String).map { " · \($0)" } ?? ""),
+                                     actions: [RowButton(label: "Copy", kind: .copy(cmd), help: "Copy: \(cmd)")])
+            return ((p["ts"] as? String) ?? "", entry)
+        }
+        .sorted { $0.0 > $1.0 }
+        .map { $0.1 }
+    }
+}
+
 // ── Library: skills, parked skills, knowledge, personas, scripts ────────────
 
 enum LibraryCatalog {

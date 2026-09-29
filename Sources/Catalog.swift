@@ -46,8 +46,16 @@ enum Catalog {
         }
     }
 
+    /// Longest summary under a name; the whole text is one click away in the details.
+    static let summaryChars = 180
+
     static func row(_ e: CatalogEntry, key: String) -> SystemRow {
-        let note = [e.tag, e.summary.isEmpty ? nil : e.summary].compactMap { $0 }.joined(separator: " · ")
+        var summary = e.summary.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "\n", with: " ")
+        if summary.count > summaryChars {
+            let cut = summary.prefix(summaryChars)
+            summary = String(cut[..<(cut.lastIndex(of: " ") ?? cut.endIndex)]) + "…"
+        }
+        let note = [e.tag, summary.isEmpty ? nil : summary].compactMap { $0 }.joined(separator: " · ")
         let state: SystemRow.State = e.count.map { .count($0.0, $0.1) } ?? .off
         var r = SystemRow(label: e.name, state: state, note: note, tip: e.summary)
         r.key = key + "::" + (e.path ?? e.name)
