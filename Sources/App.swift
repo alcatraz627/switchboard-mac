@@ -312,19 +312,25 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 case .muted(let m):
                     var r = SystemRow(label: g.name, state: .off,
                                       note: m.mutedAt.map { "muted since \(f.string(from: $0))" } ?? "muted",
-                                      tip: "Switched off by ~/.claude/\(m.sentinel). Re-arm deletes that file; muting again stays a deliberate act in a shell.",
-                                      action: { [weak self] in Guards.rearm(m); self?.refreshSnapshot() })
-                    r.buttonLabel = "Re-arm"
+                                      tip: "Switched off by ~/.claude/\(m.sentinel). Re-arm deletes that file; muting again stays a deliberate act in a shell.")
+                    r.key = "gate-muted-" + g.name
+                    r.buttons = [RowButton(label: "Re-arm", kind: .run({ [weak self] in
+                        let ok = Guards.rearm(m)
+                        self?.refreshSnapshot()
+                        return ok ? nil : "~/.claude/\(m.sentinel) could not be removed"
+                    }), help: "Re-arm: delete ~/.claude/\(m.sentinel)", doing: "re-arm it")]
                     return r
                 case .snoozed(let z):
                     var r = SystemRow(label: g.name, state: .off,
                                       note: "snoozed" + (z.until.map { " until \(f.string(from: $0))" } ?? "")
                                           + (z.scope == "global" ? "" : " · \(z.scope)"),
-                                      tip: z.reason.isEmpty ? "Snoozed through hook-snooze.sh." : z.reason,
-                                      action: { [weak self] in
-                                          DispatchQueue.global(qos: .userInitiated).async { HookSnoozes.lift(z); self?.refreshSnapshot() }
-                                      })
-                    r.buttonLabel = "Lift"
+                                      tip: z.reason.isEmpty ? "Snoozed through hook-snooze.sh." : z.reason)
+                    r.key = "gate-snoozed-" + z.id
+                    r.buttons = [RowButton(label: "Lift", kind: .run({ [weak self] in
+                        let ok = HookSnoozes.lift(z)
+                        self?.refreshSnapshot()
+                        return ok ? nil : "the snooze is still in force after hook-snooze.sh lift"
+                    }), help: "Lift the snooze now", doing: "lift it")]
                     return r
                 }
             }

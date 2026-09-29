@@ -7,6 +7,148 @@ import Foundation
 
 private var gcc: String { SwitchboardPaths.gccRoot }
 
+// ── Rules & Hooks: behavioural rules and every hook script ──────────────────
+
+enum RulesCatalog {
+    static func groups() -> [SystemGroup] {
+        [Catalog.section("Rules", rules), Catalog.section("Hook scripts", hooks)]
+    }
+
+    /// Each rule's brief, whether every session loads it or only when a
+    /// matching file is touched (a `paths:` block), and what else triggers it.
+    static func rules() throws -> [CatalogEntry] {
+        try Catalog.markdownFiles(in: gcc + "/rules").compactMap { path -> CatalogEntry? in
+            let name = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+            guard name != "README", name != "00-index",
+                  let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+            let f = Catalog.frontmatter(text)
+            let brief = f["brief"] ?? ""
+            let scoped = f["paths"].map { !$0.isEmpty } ?? false
+            var details: [(String, String)] = [("What it says", brief.isEmpty ? "No brief in its frontmatter." : brief),
+                                               ("Loads", scoped ? "only when a file matching its paths is touched: \(f["paths"]!)" : "in every session")]
+            if let t = f["triggers"], !t.isEmpty { details.append(("Also triggered by", t)) }
+            if let r = f["related"], !r.isEmpty { details.append(("Related", r)) }
+            let bytes = text.utf8.count
+            details.append(("Size", "\(bytes) bytes" + (!scoped && bytes > 2200 ? ", over the 2,200 cap for an always-loaded rule" : "")))
+            return CatalogEntry(name: name, summary: Catalog.firstSentence(brief), details: details, path: path,
+                                tag: scoped ? "scoped" : "always")
+        }
+    }
+
+    /// Where a hook script runs from: an event in settings.json, a line in a
+    /// hook-orchestrator tasks file (muted when it starts "# DISABLED"), or
+    /// another hook that calls it.
+    struct Wiring { var events: [String] = []; var muted: [String] = []; var usedBy: [String] = [] }
+
+    static func hooks() throws -> [CatalogEntry] {
+        let hookDir = gcc + "/scripts/hooks"
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: hookDir) else {
+            throw CatalogError("\(abbreviateHome(hookDir)) could not be read")
+        }
+        var wiring: [String: Wiring] = [:]
+        for (event, command) in settingsHooks() {
+            for p in scriptPaths(in: command) { wiring[p, default: Wiring()].events.append(event) }
+        }
+        let orch = gcc + "/scripts/hook-orchestrator"
+        for file in (try? FileManager.default.contentsOfDirectory(atPath: orch)) ?? [] where file.hasSuffix(".tasks") {
+            let event = String(file.dropLast(".tasks".count))
+            for line in ((try? String(contentsOfFile: orch + "/" + file, encoding: .utf8)) ?? "").components(separatedBy: "\n") {
+                let t = line.trimmingCharacters(in: .whitespaces)
+                if t.hasPrefix("# DISABLED ") {
+                    for p in scriptPaths(in: String(t.dropFirst("# DISABLED ".count))) { wiring[p, default: Wiring()].muted.append(event) }
+                } else if !t.isEmpty, !t.hasPrefix("#") {
+                    for p in scriptPaths(in: t) { wiring[p, default: Wiring()].events.append(event + " (orchestrator)") }
+                }
+            }
+        }
+        let files = names.filter { ($0.hasSuffix(".sh") || $0.hasSuffix(".py")) && !$0.contains(".test.") && !$0.hasPrefix("test-") }
+            .map { hookDir + "/" + $0 }
+        // A script another script runs is in use even with no event of its
+        // own. Comment lines and test folders do not count as a call.
+        let bodies = liveScriptBodies(gcc + "/scripts")
+        for path in files {
+            let base = (path as NSString).lastPathComponent
+            let users = bodies.filter { $0.0 != path && $0.1.contains(base) }.map { ($0.0 as NSString).lastPathComponent }
+            if !users.isEmpty { wiring[path, default: Wiring()].usedBy = users.sorted() }
+        }
+        let all = Set(files).union(wiring.keys)
+        let ranked: [(Bool, CatalogEntry)] = all.map { path -> (Bool, CatalogEntry) in
+            let w = wiring[path] ?? Wiring()
+            let exists = FileManager.default.fileExists(atPath: path)
+            let events = Array(Set(w.events)).sorted()
+            let tag: String
+            if !exists { tag = "missing file" }
+            else if !events.isEmpty { tag = events.joined(separator: ", ") }
+            else if !w.muted.isEmpty { tag = "muted in " + w.muted.joined(separator: ", ") }
+            else if let first = w.usedBy.first { tag = "run by " + first + (w.usedBy.count > 1 ? " +\(w.usedBy.count - 1)" : "") }
+            else { tag = "not wired" }
+            var details: [(String, String)] = []
+            let about = exists ? Catalog.scriptSummary(path) : ""
+            details.append(("What it says it does", exists ? (about.isEmpty ? "No header comment." : about)
+                                                           : "The file is gone, but a hook still names it."))
+            details.append(("Runs on", events.isEmpty ? "no event" : events.joined(separator: ", ")))
+            if !w.muted.isEmpty { details.append(("Muted", "commented out with # DISABLED in " + w.muted.joined(separator: ", "))) }
+            if !w.usedBy.isEmpty { details.append(("Called by", w.usedBy.joined(separator: ", "))) }
+            let broken = !exists || tag == "not wired"
+            let name: String = path.hasPrefix(hookDir + "/") ? (path as NSString).lastPathComponent
+                : abbreviateHome(path).replacingOccurrences(of: "~/.claude/scripts/", with: "")
+            let entry = CatalogEntry(name: name, summary: about, details: details, path: exists ? path : nil, tag: tag)
+            return (broken, entry)
+        }
+        // Problems first, then by name.
+        return ranked.sorted { a, b in a.0 != b.0 ? a.0 : a.1.name.lowercased() < b.1.name.lowercased() }.map { $0.1 }
+    }
+
+    /// Each script under a folder with its comment lines removed, skipping
+    /// tests, fixtures and replay corpora.
+    static func liveScriptBodies(_ root: String) -> [(String, String)] {
+        guard let walker = FileManager.default.enumerator(atPath: root) else { return [] }
+        var out: [(String, String)] = []
+        while let rel = walker.nextObject() as? String {
+            let leaf = (rel as NSString).lastPathComponent
+            if ["tests", "test", "fixtures", "replay", "node_modules", "__pycache__"].contains(leaf) || leaf.hasPrefix(".") {
+                walker.skipDescendants(); continue
+            }
+            guard rel.hasSuffix(".sh") || rel.hasSuffix(".py"), !rel.contains(".test."), !leaf.hasPrefix("test-"),
+                  (walker.fileAttributes?[.type] as? FileAttributeType) != .typeSymbolicLink,
+                  let text = try? String(contentsOfFile: root + "/" + rel, encoding: .utf8) else { continue }
+            let code = text.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("#") }
+                .joined(separator: "\n")
+            out.append((root + "/" + rel, code))
+        }
+        return out
+    }
+
+    /// Every (event, command) pair in settings.json and settings.local.json.
+    static func settingsHooks() -> [(String, String)] {
+        var out: [(String, String)] = []
+        for file in ["settings.json", "settings.local.json"] {
+            guard let d = FileManager.default.contents(atPath: gcc + "/" + file),
+                  let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  let hooks = o["hooks"] as? [String: Any] else { continue }
+            for (event, v) in hooks {
+                for block in v as? [[String: Any]] ?? [] {
+                    for h in block["hooks"] as? [[String: Any]] ?? [] {
+                        if let c = h["command"] as? String { out.append((event, c)) }
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    /// Script files a command line runs, with ~ and $HOME expanded.
+    static func scriptPaths(in command: String) -> [String] {
+        command.split(separator: " ").map(String.init).compactMap { tok in
+            guard tok.hasSuffix(".sh") || tok.hasSuffix(".py"), tok.contains("/") else { return nil }
+            var p = tok.trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if p.hasPrefix("~/") { p = NSHomeDirectory() + p.dropFirst(1) }
+            p = p.replacingOccurrences(of: "$HOME", with: NSHomeDirectory())
+            return (p as NSString).standardizingPath
+        }
+    }
+}
+
 // ── Library: skills, parked skills, knowledge, personas, scripts ────────────
 
 enum LibraryCatalog {

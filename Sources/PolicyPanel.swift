@@ -107,6 +107,9 @@ enum SwitchboardConcerns {
                                footer: "Every action is a csync command, recorded in its log.", footerIcon: "terminal",
                                content: AnyView(SystemTabView(store: policy, source: .remote)),
                                refresh: { policy.requestSystemRefresh() }),
+            catalogTab(policy, id: "rules", title: "Rules & Hooks", subtitle: "Rules, gates and hook scripts", icon: "checklist",
+                       footer: "Problems sort first: a hook with no event, or one whose file is gone.",
+                       search: "Search rules, gates and hooks", read: RulesCatalog.groups),
             catalogTab(policy, id: "library", title: "Library", subtitle: "Skills, docs, personas, scripts", icon: "books.vertical",
                        footer: "Open a row for its details; the path copies on click.",
                        search: "Search skills, docs, personas and scripts", read: LibraryCatalog.groups),
@@ -361,14 +364,21 @@ struct SystemTabView: View {
     enum Source: Equatable { case machine, remote, approvals, catalog(String) }
     var source: Source = .machine
 
+    /// Machine groups that live on another tab now, by that tab's id. The
+    /// snapshot still builds them; only where they are drawn changes.
+    static let groupHome: [String: String] = [
+        "Guards": "rules",
+    ]
+
     private var groups: [SystemGroup] {
         switch source {
-        case .machine: return store.systemGroups
+        case .machine: return store.systemGroups.filter { SystemTabView.groupHome[$0.title] == nil }
         case .remote: return store.remoteGroups
         case .approvals: return store.needGroups
         case .catalog(let id):
             let q = store.queries[id] ?? ""
-            let all = Catalog.filter(store.catalogs[id] ?? [], q)
+            let moved = store.systemGroups.filter { SystemTabView.groupHome[$0.title] == id }
+            let all = Catalog.filter(moved + (store.catalogs[id] ?? []), q)
             return q.isEmpty ? all.map { Catalog.preview($0, tab: id, store: store) } : all
         }
     }
@@ -1276,6 +1286,7 @@ func switchboardGlyph() -> NSImage {
 /// Each list tab's reader, for drawing it offscreen without the panel's refresh.
 let catalogReaders: [String: () -> [SystemGroup]] = [
     "library": LibraryCatalog.groups,
+    "rules": RulesCatalog.groups,
 ]
 
 /// Draws the real panel offscreen, so it can be checked in dark and light

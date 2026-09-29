@@ -40,6 +40,7 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   check "a clean, failed, hung and missing command are told apart" "$BIN" --probe-shell
   check "list tabs: parsing, a failing source, preview and search" "$BIN" --probe-catalog
   check "the Library tab renders" "$BIN" --snapshot "$WORK/library.png" --tab library
+  check "the Rules & Hooks tab renders" "$BIN" --snapshot "$WORK/rules.png" --tab rules
   # A helper that fails shows its group with the reason instead of dropping it.
   BADLIB="$WORK/badlib"; cp -Rf "$ROOT/Resources/lib" "$BADLIB"
   printf 'import sys\nsys.stderr.write("diskutil is not answering\\n")\nsys.exit(2)\n' > "$BADLIB/drives.py"

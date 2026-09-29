@@ -72,9 +72,11 @@ if let out = argAfter("--snapshot") {
     let tab = argAfter("--tab") ?? "agents"
     BulbRow.startExpanded = args.contains("--expand")
     SystemRowView.startExpanded = args.contains("--expand")
-    let fresh = tab == "system" || tab == "remote" ? delegate.panelSystemGroupsFresh() : []
+    // Tabs that draw Machine groups, their own or ones moved to them, need the probe.
+    let usesSystem = tab == "system" || tab == "remote" || SystemTabView.groupHome.values.contains(tab)
+    let fresh = usesSystem ? delegate.panelSystemGroupsFresh() : []
     let ok = snapshotPolicyPanel(to: out, dark: !args.contains("--light"), scopeDir: argAfter("--scope"), tab: tab,
-                                 system: tab == "system" ? fresh : [],
+                                 system: tab == "remote" ? [] : fresh,
                                  remote: tab == "remote" ? delegate.panelRemoteGroups() : [])
     print(ok ? "wrote \(out)" : "snapshot failed")
     exit(ok ? 0 : 1)
