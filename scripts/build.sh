@@ -87,7 +87,11 @@ cat > "$STAGE/Contents/Info.plist" <<EOF
 </plist>
 EOF
 # Ad-hoc signature: enough to run locally; see docs/releasing.md for Gatekeeper.
-/usr/bin/codesign --sign - --force --deep "$STAGE" >/dev/null
+# By default an ad-hoc signature is pinned to this exact binary's hash, and
+# macOS files a Bluetooth or Reminders grant under it, so every rebuild was
+# asked again. Naming the bundle id as the requirement keeps a grant across builds.
+/usr/bin/codesign --sign - --force --deep \
+  -r="designated => identifier \"$BUNDLE_ID\"" "$STAGE" >/dev/null
 [[ -d "$BUILD_APP" ]] && discard "$BUILD_APP"
 mv -f "$STAGE" "$BUILD_APP"
 src_hash > "$ROOT/build/.src-hash"
