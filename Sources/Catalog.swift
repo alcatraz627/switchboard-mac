@@ -22,6 +22,8 @@ struct CatalogEntry {
     var count: (Int, NSColor)? = nil
     /// Buttons on the row itself, such as copying the command that restores it.
     var actions: [RowButton] = []
+    /// Turned off: drawn struck through and dimmed.
+    var off = false
 }
 
 /// A reader could not read its source; the message is shown to the owner.
@@ -69,6 +71,7 @@ enum Catalog {
         r.showsBadge = e.count != nil
         r.noteLines = 0
         r.buttons = e.actions
+        r.struck = e.off
         var kids: [SystemRow] = e.details.enumerated().map { i, d in
             var c = SystemRow(label: d.0, state: .off, note: d.1, tip: d.1)
             c.key = r.key! + "-d\(i)"
@@ -100,6 +103,10 @@ enum Catalog {
             return rows.isEmpty ? nil : SystemGroup(title: g.title, rows: rows, status: nil)
         }
     }
+
+    /// Re-reads one list tab after a row changed what it lists (a plugin
+    /// turned off). The panel sets it; headless runs leave it a no-op.
+    static var reload: (String) -> Void = { _ in }
 
     /// How many rows a section shows before "Show all".
     static let previewRows = 6

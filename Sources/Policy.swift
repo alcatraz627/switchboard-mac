@@ -237,6 +237,9 @@ struct SystemRow: Identifiable {
     /// False for a row that is only a thing to act on (a saved device), where
     /// an on/off badge would claim a state nobody measured.
     var showsBadge = true
+    /// Turned off (a disabled plugin, an expired note): the name is struck
+    /// through and the row dimmed, but it stays listed so it can come back.
+    var struck = false
 
     var id: String { key ?? label }
     /// A plain on/off with a single action renders as a switch.

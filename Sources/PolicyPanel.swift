@@ -70,6 +70,9 @@ enum SwitchboardConcerns {
     /// A concern whose backing tool is not installed is left out, so a fresh
     /// Mac shows fewer tabs rather than an error.
     static func all(policy: PolicyStore, usage: UsageStore, lights: LightsStore, controls: ControlsStore) -> [SwitchboardConcern] {
+        Catalog.reload = { id in
+            DispatchQueue.main.async { if let read = catalogReaders[id] { policy.reloadCatalog(id, read) } }
+        }
         let tabs = registry(policy: policy, usage: usage, lights: lights, controls: controls)
             .filter { $0.id != "agents" || Integrations.policyStore }
             .filter { $0.id != "remote" || Integrations.csync }
@@ -128,7 +131,7 @@ enum SwitchboardConcerns {
                                                                          set: { policy.queries["runtime"] = $0 }),
                                                            prompt: "Search services, ports, models and jobs"))),
             SwitchboardConcern(id: "plugins", title: "Claude MCP", subtitle: "Plugins and MCP servers", icon: "puzzlepiece.extension",
-                               footer: "Read-only. MCP keys and tokens are never shown; env lists names only.", footerIcon: "lock",
+                               footer: "On and off apply to new sessions. MCP keys and tokens are never shown.", footerIcon: "lock",
                                content: AnyView(SystemTabView(store: policy, source: .catalog("plugins"))),
                                refresh: { policy.reloadCatalog("plugins", PluginsCatalog.groups) },
                                pinned: AnyView(ScopedSearch(store: policy, id: "plugins", prompt: "Search plugins and MCP servers"))),
@@ -683,7 +686,8 @@ struct SystemRowView: View {
         HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.label).font(PT.label).fixedSize(horizontal: false, vertical: true)
-                    .foregroundStyle(row.enabled || !row.isSwitch ? .primary : .secondary)
+                    .strikethrough(row.struck)
+                    .foregroundStyle(row.struck ? .secondary : row.enabled || !row.isSwitch ? .primary : .secondary)
                 if let t = row.timer, let key = row.timerKey {
                     HStack(spacing: 4) {
                         Text("→ \(t.restoreOn ? "On" : "Off") in \(countdown(to: t.until, now: store.now))")
@@ -700,6 +704,7 @@ struct SystemRowView: View {
                         .lineLimit(row.noteLines == 0 ? nil : row.noteLines).fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .opacity(row.struck ? 0.55 : 1)
             Spacer(minLength: 6)
             if let p = pendingFlip { PendingMark(since: p.since) }
             else if busyButton != nil { PendingMark(since: busySince) }

@@ -199,9 +199,14 @@ enum PluginsCatalog {
             details.append(("Source", "\(market) · version \((rec["version"] as? String) ?? "?")"))
             if let p = project { details.append(("Project", abbreviateHome(p))) }
             details.append(("State", on ? "enabled in settings.json" : "installed but turned off in settings.json"))
+            let flip = RowButton(label: on ? "Disable" : "Enable", kind: .run({
+                setPlugin(id, on: !on)
+            }), help: on ? "Turn \(name) off for new sessions" : "Turn \(name) on for new sessions",
+               doing: on ? "turn \(name) off" : "turn \(name) on")
             return CatalogEntry(name: name, summary: Catalog.firstSentence(about), details: details,
                                 path: dir.isEmpty ? nil : dir + "/.claude-plugin/plugin.json",
-                                tag: (on ? "on" : "off") + " · \(market)" + (project.map { " · project \(($0 as NSString).lastPathComponent)" } ?? ""))
+                                tag: (on ? "on" : "off") + " · \(market)" + (project.map { " · project \(($0 as NSString).lastPathComponent)" } ?? ""),
+                                actions: [flip], off: !on)
         }
         .sorted { ($0.tag?.hasPrefix("on") == true ? 0 : 1, $0.name) < ($1.tag?.hasPrefix("on") == true ? 0 : 1, $1.name) }
     }
@@ -212,7 +217,13 @@ enum PluginsCatalog {
               let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else {
             throw CatalogError("~/.claude.json could not be read")
         }
-        var out = servers(o["mcpServers"] as? [String: Any] ?? [:], file: path, project: nil)
+        // Claude Code documents no everywhere-off switch for these; only a per-project
+        // list inside ~/.claude.json, which also holds the login, so the panel leaves it be.
+        var out = servers(o["mcpServers"] as? [String: Any] ?? [:], file: path, project: nil).map { e -> CatalogEntry in
+            var e = e
+            e.details.append(("Turning it off", "Claude Code has no everywhere-off switch for these. /mcp in a session turns one off for that project; `claude mcp remove \(e.name)` removes it."))
+            return e
+        }
         for (dir, p) in o["projects"] as? [String: Any] ?? [:] {
             out += servers((p as? [String: Any])?["mcpServers"] as? [String: Any] ?? [:], file: path, project: dir)
         }
@@ -231,7 +242,19 @@ enum PluginsCatalog {
                   let d = FileManager.default.contents(atPath: root + "/" + rel),
                   let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
             let dir = root + "/" + (rel as NSString).deletingLastPathComponent
-            out += servers(o["mcpServers"] as? [String: Any] ?? [:], file: root + "/" + rel, project: dir)
+            let approval = mcpjsonApproval(dir)
+            out += servers(o["mcpServers"] as? [String: Any] ?? [:], file: root + "/" + rel, project: dir).map { e in
+                var e = e
+                let state = approval(e.name)
+                e.tag = "\(state.word) · " + (e.tag ?? "")
+                e.off = state == .off
+                e.actions = [RowButton(label: state == .off ? "Enable" : "Disable", kind: .run({
+                    setMcpjson(e.name, in: dir, on: state == .off)
+                }), help: state == .off ? "Allow \(e.name) in \(projectName(dir))" : "Turn \(e.name) off in \(projectName(dir))",
+                   doing: state == .off ? "turn \(e.name) on" : "turn \(e.name) off")]
+                e.details.append(("State", state.detail))
+                return e
+            }
         }
         return out.sorted { ($0.name, $0.tag ?? "") < ($1.name, $1.tag ?? "") }
     }
@@ -283,6 +306,78 @@ enum PluginsCatalog {
         return token && !a.contains("/") ? "•••" : a
     }
 
+    /// Whether Claude Code loads a project's .mcp.json server: listed as
+    /// enabled (or all enabled), listed as disabled, or not yet approved, in
+    /// which case it asks on the first session there.
+    enum McpjsonState {
+        case on, off, asks
+        var word: String { self == .on ? "on" : self == .off ? "off" : "asks first" }
+        var detail: String {
+            switch self {
+            case .on: return "allowed in this project's settings"
+            case .off: return "turned off in this project's .claude/settings.local.json"
+            case .asks: return "not approved yet; Claude Code asks the first time a session starts here"
+            }
+        }
+    }
+
+    /// Reads the approval lists from the user's and the project's settings;
+    /// a disable anywhere wins over an enable.
+    static func mcpjsonApproval(_ project: String) -> (String) -> McpjsonState {
+        let files = [gcc + "/settings.json", project + "/.claude/settings.json", project + "/.claude/settings.local.json"]
+        let objs = files.compactMap { FileManager.default.contents(atPath: $0) }
+            .compactMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        let enabled = Set(objs.flatMap { $0["enabledMcpjsonServers"] as? [String] ?? [] })
+        let disabled = Set(objs.flatMap { $0["disabledMcpjsonServers"] as? [String] ?? [] })
+        let all = objs.contains { $0["enableAllProjectMcpServers"] as? Bool == true }
+        return { name in disabled.contains(name) ? .off : (all || enabled.contains(name)) ? .on : .asks }
+    }
+
+    /// Turn a project's .mcp.json server on or off in that project's
+    /// .claude/settings.local.json, the per-user file Claude Code keeps out of
+    /// commits. Creates the file with just these keys if it is not there.
+    static func setMcpjson(_ name: String, in project: String, on: Bool) -> String? {
+        let dir = project + "/.claude", path = dir + "/settings.local.json"
+        var obj: [String: Any] = [:]
+        if let d = FileManager.default.contents(atPath: path) {
+            guard let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else {
+                return "\(abbreviateHome(path)) is not valid JSON, so it was left alone"
+            }
+            obj = o
+        }
+        var enabled = obj["enabledMcpjsonServers"] as? [String] ?? []
+        var disabled = obj["disabledMcpjsonServers"] as? [String] ?? []
+        enabled.removeAll { $0 == name }
+        disabled.removeAll { $0 == name }
+        if on { enabled.append(name) } else { disabled.append(name) }
+        obj["enabledMcpjsonServers"] = enabled
+        obj["disabledMcpjsonServers"] = disabled
+        do {
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            let data = try JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        } catch {
+            return "\(abbreviateHome(path)) could not be written: \(error.localizedDescription)"
+        }
+        Catalog.reload("plugins")
+        let now = mcpjsonApproval(project)(name)
+        return now == (on ? .on : .off) ? nil : "it still reads as \(now.word)"
+    }
+
+    /// Turn a plugin on or off in settings.json's enabledPlugins, the switch
+    /// Claude Code reads when a session starts. Returns what went wrong, or nil.
+    static func setPlugin(_ id: String, on: Bool) -> String? {
+        var plugins = (settingsJSON()?["enabledPlugins"] as? [String: Any]) ?? [:]
+        plugins[id] = on
+        guard Settings.write(key: "enabledPlugins", value: plugins) else {
+            return "~/.claude/settings.json could not be written"
+        }
+        // Read it back rather than trust the write.
+        let now = (settingsJSON()?["enabledPlugins"] as? [String: Bool])?[id]
+        Catalog.reload("plugins")
+        return now == on ? nil : "settings.json still has it \(on ? "off" : "on")"
+    }
+
     private static func settingsJSON() -> [String: Any]? {
         FileManager.default.contents(atPath: gcc + "/settings.json")
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
@@ -304,6 +399,43 @@ func probeRedaction() -> [String] {
         let got = PluginsCatalog.redact(raw)
         return "\(got == want ? "ok  " : "FAIL") redacts \(raw.prefix(24))\(got == want ? "" : " (got: \(got))")"
     }
+}
+
+/// Turns a plugin and a project MCP server off and on in a scratch folder
+/// (never ~/.claude or a real repo) and reads each write back.
+func probeToggles() -> [String] {
+    let fm = FileManager.default
+    let dir = NSTemporaryDirectory() + "sb-toggle-probe-\(getpid())"
+    let project = dir + "/repo"
+    try? fm.createDirectory(atPath: project, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(atPath: dir) }
+    let realRoot = SwitchboardPaths.gccRoot
+    SwitchboardPaths.gccRoot = dir
+    defer { SwitchboardPaths.gccRoot = realRoot }
+    fm.createFile(atPath: dir + "/settings.json", contents: Data(#"{"enabledPlugins": {"demo@market": true}, "model": "x"}"#.utf8))
+
+    var lines: [String] = []
+    func check(_ name: String, _ ok: Bool, _ got: String = "") {
+        lines.append("\(ok ? "ok  " : "FAIL") \(name)\(ok || got.isEmpty ? "" : " (got: \(got))")")
+    }
+    check("turning a plugin off reports success", PluginsCatalog.setPlugin("demo@market", on: false) == nil)
+    let s = (try? JSONSerialization.jsonObject(with: fm.contents(atPath: dir + "/settings.json") ?? Data())) as? [String: Any]
+    check("settings.json has it off and kept every other key",
+          (s?["enabledPlugins"] as? [String: Bool])?["demo@market"] == false && s?["model"] as? String == "x")
+
+    let ask = PluginsCatalog.mcpjsonApproval(project)("srv")
+    check("a server nobody approved reads as asks first", ask == .asks, ask.word)
+    check("turning a project server off reports success", PluginsCatalog.setMcpjson("srv", in: project, on: false) == nil)
+    check("it now reads as off", PluginsCatalog.mcpjsonApproval(project)("srv") == .off)
+    check("turning it back on reports success", PluginsCatalog.setMcpjson("srv", in: project, on: true) == nil)
+    check("it now reads as on", PluginsCatalog.mcpjsonApproval(project)("srv") == .on)
+    let local = project + "/.claude/settings.local.json"
+    fm.createFile(atPath: local, contents: Data("{broken".utf8))
+    let refused = PluginsCatalog.setMcpjson("srv", in: project, on: false)
+    check("a broken settings.local.json is refused and left as it was",
+          refused?.contains("not valid JSON") == true && String(decoding: fm.contents(atPath: local) ?? Data(), as: UTF8.self) == "{broken",
+          refused ?? "nil")
+    return lines
 }
 
 // ── Ledger: mistakes and proposals ──────────────────────────────────────────
