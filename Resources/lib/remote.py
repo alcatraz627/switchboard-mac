@@ -18,6 +18,7 @@ csync records them in its audit log.
 """
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -37,6 +38,26 @@ def csync(*args, timeout=60):
         return r.returncode, json.loads(r.stdout or "{}")
     except ValueError:
         return r.returncode, {"error": (r.stderr or r.stdout).strip()[-300:]}
+
+
+TERM_VERBS = ("info", "logs", "recipes")
+SSH_CONFIG = os.path.expanduser("~/.config/csync/ssh_config")
+
+
+def chat_command(name):
+    """A terminal chat with csync-assist on the host: each line you type is one ask."""
+    # No single quotes inside, so the copied line stays readable: ssh -t ... '<loop>'.
+    loop = ('test -x ~/.local/bin/csync-assist || { echo "csync-assist is not installed on this host"; exit 1; }; '
+            'echo "Chatting with csync-assist. Ctrl-D to leave."; '
+            # printf then read, not read -p: the host's shell may be zsh, where -p means something else.
+            'while printf "you> " && read -r m; do ~/.local/bin/csync-assist ask "$m"; echo; done')
+    return f"ssh -t -F {shlex.quote(SSH_CONFIG)} csync-{shlex.quote(name)} '{loop}'"
+
+
+def ghostty(command):
+    r = subprocess.run(["open", "-na", "Ghostty.app", "--args", "-e", "/bin/bash", "-lc", command],
+                       capture_output=True, text=True)
+    return r.returncode, {"error": r.stderr.strip() or "could not open Ghostty"}
 
 
 def state():
@@ -71,7 +92,8 @@ def answer(code, obj, extra=None):
     ok = code == 0 and obj.get("ok", True) is not False
     err = obj.get("error")
     if isinstance(err, dict):
-        err = err.get("message") or err.get("detail") or json.dumps(err)
+        fix = err.get("fix")
+        err = (err.get("message") or err.get("detail") or json.dumps(err)) + (f" Fix: {fix}" if fix else "")
     out = {"ok": ok, "error": None if ok else (err or "csync failed")}
     out.update(extra or {})
     print(json.dumps(out))
@@ -87,12 +109,30 @@ def main():
     if not CSYNC:
         answer(1, {"error": "csync is not installed"})
     if cmd == "shot" and len(a) == 2:
-        answer(*csync("shot", a[1], "--open", timeout=60))
+        code, obj = csync("shot", a[1], "--open", timeout=25)
+        err = str(obj.get("error") or "")
+        if "took longer" in err:
+            # csync counts a host online while its tunnel process lives, even if the machine sleeps.
+            obj["error"] = (f"{a[1]} did not answer within 25 s. It may be asleep or its connection dropped, "
+                            "even though csync still shows it online.")
+        elif "open X server" in err or "cannot open display" in err.lower():
+            obj["error"] = f"{a[1]} has no screen to capture: it runs without a display."
+        answer(code, obj)
     elif cmd == "shell" and len(a) == 2:
         # Ghostty runs the command in a new window; csync sh is interactive, so it needs a terminal.
         r = subprocess.run(["open", "-na", "Ghostty.app", "--args", "-e", CSYNC, "sh", a[1]],
                            capture_output=True, text=True)
         answer(r.returncode, {"error": r.stderr.strip() or "could not open Ghostty"})
+    elif cmd == "chatcmd" and len(a) == 2:
+        answer(0, {}, {"command": chat_command(a[1])})
+    elif cmd == "chat" and len(a) == 2:
+        answer(*ghostty(chat_command(a[1])))
+    elif cmd == "term" and len(a) >= 3 and a[2] in TERM_VERBS:
+        # Read verbs print to a terminal; the window stays open until a key is pressed.
+        line = " ".join(shlex.quote(x) for x in [CSYNC, *a[2:], a[1]])
+        answer(*ghostty(f"{line}; echo; read -n 1 -s -r -p 'Press any key to close'"))
+    elif cmd == "persist" and len(a) == 3 and a[2] in ("on", "off"):
+        answer(*csync("persist", a[1], a[2], timeout=60))
     elif cmd == "teardown" and len(a) == 2:
         answer(*csync("--yes", "teardown", a[1], timeout=120))
     elif cmd == "forget" and len(a) == 2:

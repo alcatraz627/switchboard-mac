@@ -514,7 +514,7 @@ struct SystemRowView: View {
     private var mainLine: some View {
         HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(row.label).font(PT.label).lineLimit(1)
+                Text(row.label).font(PT.label).lineLimit(3).fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(row.enabled || !row.isSwitch ? .primary : .secondary)
                 if let t = row.timer, let key = row.timerKey {
                     HStack(spacing: 4) {
@@ -528,7 +528,7 @@ struct SystemRowView: View {
                     }
                     .font(PT.caption).foregroundStyle(snoozeTint)
                 } else if !row.note.isEmpty {
-                    Text(row.note).font(PT.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(row.note).font(PT.caption).foregroundStyle(.secondary).lineLimit(3).fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 6)
@@ -583,6 +583,9 @@ struct SystemRowView: View {
         case "Prune": return "scissors"
         case "Eject": return "eject.fill"
         case "Disk Utility": return "internaldrive"
+        case "Kill": return "xmark.octagon"
+        case "Disable": return "nosign"
+        case "Enable": return "checkmark.circle"
         default: return "circle"
         }
     }
@@ -598,7 +601,29 @@ struct SystemRowView: View {
         .help(tip)
     }
 
-    private func rowButton(_ b: RowButton) -> some View {
+    @ViewBuilder private func rowButton(_ b: RowButton) -> some View {
+        if case .menu(let items) = b.kind {
+            Menu {
+                ForEach(items.indices, id: \.self) { i in
+                    if let work = items[i].run {
+                        Button(items[i].title) { runWork(b, items[i].title, work) }
+                    } else {
+                        Divider()
+                    }
+                }
+            } label: {
+                Image(systemName: b.icon ?? "ellipsis.circle").font(.system(size: 12)).frame(width: 18, height: 16)
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .foregroundStyle(.secondary)
+            .disabled(busyButton != nil)
+            .help(b.help.isEmpty ? b.label : b.help)
+        } else {
+            plainRowButton(b)
+        }
+    }
+
+    private func plainRowButton(_ b: RowButton) -> some View {
         let copied = copiedButton == b.label
         return iconButton(copied ? "checkmark" : (b.icon ?? Self.symbol(for: b.label)),
                           tip: copied ? "Copied" : (b.help.isEmpty ? b.label : "\(b.label): \(b.help)"),
@@ -622,6 +647,8 @@ struct SystemRowView: View {
             // A menu bar app only takes keystrokes once it is the active app.
             NSApp.activate(ignoringOtherApps: true)
             DispatchQueue.main.async { askFocused = true }
+        case .menu:
+            break
         case .run(let work):
             if let question = b.confirm {
                 let a = NSAlert()
@@ -632,16 +659,23 @@ struct SystemRowView: View {
                 NSApp.activate(ignoringOtherApps: true)
                 guard a.runModal() == .alertFirstButtonReturn else { return }
             }
-            busyButton = b.label
-            busySince = Date()
-            DispatchQueue.global(qos: .userInitiated).async {
-                let err = work()
-                DispatchQueue.main.async {
-                    busyButton = nil
-                    if let err = err {
-                        failure = "Couldn't \(b.doing ?? "\(b.label.lowercased()) \(row.label)"): \(err)"
-                        dwarn("row button failed: \(b.label) \(row.label): \(err)")
-                    }
+            runWork(b, b.doing ?? "\(b.label.lowercased()) \(row.label)", work)
+        }
+    }
+
+    /// Run one action off the main thread with the row's spinner, and turn
+    /// what it reports into the row's failure line.
+    private func runWork(_ b: RowButton, _ doing: String, _ work: @escaping () -> String?) {
+        failure = nil
+        busyButton = b.label
+        busySince = Date()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let err = work()
+            DispatchQueue.main.async {
+                busyButton = nil
+                if let err = err {
+                    failure = "Couldn't \(doing): \(err)"
+                    dwarn("row button failed: \(doing): \(err)")
                 }
             }
         }
@@ -843,7 +877,7 @@ struct PolicyRowView: View {
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 5) {
-                        Text(item.label).font(PT.label).lineLimit(1)
+                        Text(item.label).font(PT.label).lineLimit(3).fixedSize(horizontal: false, vertical: true)
                         if !item.isDefault {
                             Circle().fill(changedTint).frame(width: 5, height: 5)
                                 .help("Changed from the default (\(item.defaultValue.cli))")

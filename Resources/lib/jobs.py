@@ -11,6 +11,8 @@ never Apple's or third-party installers'.
   jobs.py start <label>   load it if unloaded, then start it; JSON {ok}
   jobs.py stop <label>    stop it; an always-running job is unloaded, since
                           launchd would restart a merely killed one; JSON {ok}
+  jobs.py disable <label> stop it and keep it off across logins; JSON {ok}
+  jobs.py enable <label>  undo disable and load it again; JSON {ok}
 """
 import glob
 import json
@@ -64,8 +66,22 @@ def describe_schedule(p):
     return "on demand"
 
 
+def disabled_labels():
+    """Labels launchctl disable has switched off (they stay off across logins)."""
+    out = subprocess.run(["launchctl", "print-disabled", f"gui/{UID}"], capture_output=True, text=True).stdout
+    off = set()
+    for line in out.splitlines():
+        line = line.strip()
+        if "=>" in line and line.startswith('"'):
+            label, state = line.split("=>", 1)
+            if state.strip() in ("disabled", "true"):
+                off.add(label.strip().strip('"'))
+    return off
+
+
 def jobs():
     loaded = launchctl_list()
+    switched_off = disabled_labels()
     result = []
     for path in sorted(glob.glob(os.path.join(AGENTS, "*.plist"))):
         try:
@@ -90,7 +106,8 @@ def jobs():
             "running": pid is not None,
             "last_exit": status,
             "failing": status not in (None, 0) and pid is None,
-            "disabled": bool(p.get("Disabled")),
+            "disabled": bool(p.get("Disabled")) or label in switched_off,
+            "pid": pid,
             "program": os.path.basename(script or prog or ""),
             "plist": path,
             "log": log if log and os.path.exists(os.path.expanduser(log)) else None,
@@ -142,16 +159,42 @@ def stop(label):
     return launchctl("kill", "SIGTERM", f"gui/{UID}/{label}")
 
 
+def disable(label):
+    j = find(label)
+    if j is None:
+        return False, "no such job"
+    ok, err = launchctl("disable", f"gui/{UID}/{label}")
+    if not ok:
+        return False, err
+    if j["loaded"]:
+        return launchctl("bootout", f"gui/{UID}/{label}")
+    return True, None
+
+
+def enable(label):
+    j = find(label)
+    if j is None:
+        return False, "no such job"
+    ok, err = launchctl("enable", f"gui/{UID}/{label}")
+    if not ok:
+        return False, err
+    # Load it only: an always-on job starts by itself, and a scheduled one waits
+    # for its time rather than running now.
+    if not j["loaded"]:
+        return launchctl("bootstrap", f"gui/{UID}", j["plist"])
+    return True, None
+
+
 def main():
     args = sys.argv[1:]
     cmd = args[0] if args else "help"
     if cmd == "list":
         print(json.dumps(jobs()))
-    elif cmd in ("run", "start", "stop") and len(args) == 2:
+    elif cmd in ("run", "start", "stop", "disable", "enable") and len(args) == 2:
         if cmd == "run":
             ok, err = launchctl("kickstart", f"gui/{UID}/{args[1]}")
         else:
-            ok, err = (start if cmd == "start" else stop)(args[1])
+            ok, err = {"start": start, "stop": stop, "disable": disable, "enable": enable}[cmd](args[1])
         print(json.dumps({"ok": ok, "error": None if ok else err}))
         sys.exit(0 if ok else 1)
     else:

@@ -96,6 +96,9 @@ check "gitscan.py list reports repos and a clean count" python3 -c "import json,
 eq "gitscan.py refuses a path outside ~/Code" 1 "$(rc python3 Resources/lib/gitscan.py prune /tmp)"
 check "drives.py list emits a JSON array" python3 -c "import json,subprocess;assert isinstance(json.loads(subprocess.run(['python3','Resources/lib/drives.py','list'],capture_output=True,text=True,timeout=60).stdout),list)"
 eq "drives.py refuses to eject the boot disk" 1 "$(rc python3 Resources/lib/drives.py eject disk0)"
+eq "jobs.py disable of an unknown label fails" 1 "$(rc python3 Resources/lib/jobs.py disable com.example.no-such-job)"
+eq "devservers.py kill of a quiet port fails" 1 "$(rc python3 Resources/lib/devservers.py kill 6499)"
+check "remote.py chat command is one ssh line" python3 -c "import json,subprocess;c=json.loads(subprocess.run(['python3','Resources/lib/remote.py','chatcmd','somehost'],capture_output=True,text=True).stdout)['command'];assert c.startswith('ssh -t -F ') and 'csync-somehost' in c and 'read -p' not in c,c"
 eq "wol.py refuses a malformed MAC"         2 "$(rc python3 Resources/lib/wol.py wake not-a-mac)"
 eq "wol.py sends to a well-formed MAC"      0 "$(rc python3 Resources/lib/wol.py wake 02:00:00:00:00:01)"
 python3 Resources/lib/wol.py add "Test box" 02:00:00:00:00:02 >/dev/null

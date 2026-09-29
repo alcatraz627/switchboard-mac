@@ -357,8 +357,8 @@ struct ControlsTabView: View {
         HStack(spacing: 8) {
             Image(systemName: icon).font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 18)
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(SBStyle.label).lineLimit(1)
-                Text(caption).font(SBStyle.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(title).font(SBStyle.label).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                Text(caption).font(SBStyle.caption).foregroundStyle(.secondary).lineLimit(3).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 6)
             trailing()

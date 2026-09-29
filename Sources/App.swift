@@ -600,10 +600,23 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                               tip: (s["note"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Claimed in the port ledger",
                               link: on ? "http://localhost:\(port)" : nil)
             r.key = "dev-\(port)"
+            let owner = s["launchd"] as? String
             if pm2 == "online" {
                 r.buttons = [RowButton(label: "Stop", kind: .run(act("stop", name)), help: "pm2 stop \(name)")]
             } else if pm2 != nil && !on {
                 r.buttons = [RowButton(label: "Start", kind: .run(act("start", name)), help: "pm2 start \(name)")]
+            } else if on, let owner = owner {
+                // Killing a launchd job's server only makes launchd start it again.
+                r.buttons = [RowButton(label: "Disable", kind: .run({ [weak self] in
+                    let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", AppPaths.lib("jobs.py"), "disable", owner], timeout: 20))
+                    self?.refreshSnapshot()
+                    return err
+                }), help: "Stop it and keep it off: launchd runs it as \(owner)", doing: "disable \(owner)",
+                   confirm: "Stop \(name) and keep it off? launchd runs it as \(owner), so it would come back after a kill. Enable it again under Schedules.")]
+            } else if on {
+                r.buttons = [RowButton(label: "Kill", kind: .run(act("kill", "\(port)")),
+                                       help: "Stop the process listening on :\(port)", doing: "stop \(name)",
+                                       confirm: "Stop \(name) on :\(port)? Nothing restarts it.")]
             }
             return r
         }
@@ -873,6 +886,42 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         return rows
     }
 
+    /// The "…" menu on an online host: chat with its agent, read-only verbs in
+    /// a terminal, keep-connected, and copyable lines for verbs that need more.
+    private func hostMenu(_ name: String, script: String,
+                          act: @escaping ([String]) -> () -> String?) -> [(title: String, run: (() -> String?)?)] {
+        func copy(_ text: String) -> () -> String? {
+            { DispatchQueue.main.async {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }; return nil }
+        }
+        let chatCommand: () -> String? = {
+            let out = Services.shell("/usr/bin/env", ["python3", script, "chatcmd", name])
+            guard let d = out.data(using: .utf8),
+                  let cmd = (try? JSONSerialization.jsonObject(with: d) as? [String: Any])?["command"] as? String
+            else { return "could not build the chat command" }
+            return copy(cmd)()
+        }
+        return [
+            ("Chat with csync-assist", act(["chat", name])),
+            ("Copy the chat command", chatCommand),
+            ("", nil),
+            ("Info in a terminal", act(["term", name, "info"])),
+            ("Logs in a terminal", act(["term", name, "logs"])),
+            ("Recipes in a terminal", act(["term", name, "recipes"])),
+            ("", nil),
+            ("Keep connected across reboots", act(["persist", name, "on"])),
+            ("Stop keeping connected", act(["persist", name, "off"])),
+            ("", nil),
+            ("Copy: run a command", copy("csync run \(name) -- ")),
+            ("Copy: send a file", copy("csync push \(name) ")),
+            ("Copy: fetch a file", copy("csync pull \(name) ")),
+            ("Copy: show a message on it", copy("csync say \(name) \"\"")),
+            ("Copy: open an app on it", copy("csync open \(name) ")),
+        ]
+    }
+
     // ── Remote: machines driven through csync ────────────────────────────────
 
     /// The Remote tab: csync's console health, then each host with the actions
@@ -935,6 +984,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                               help: "Take a screenshot of \(name) and open it", doing: "screenshot \(name)"),
                     RowButton(label: "Shell", kind: .run(act(["shell", name])),
                               help: "Open a Ghostty window with a shell on \(name)", doing: "open a shell on \(name)"),
+                    RowButton(label: "More", kind: .menu(hostMenu(name, script: script, act: act)),
+                              help: "Chat with its agent, and the other csync commands"),
                     RowButton(label: "Teardown", kind: .run(act(["teardown", name])),
                               help: "End the session and clean csync off \(name)", doing: "tear down \(name)",
                               confirm: "Tear down \(name)? It ends the session and removes csync from that machine. Reconnecting needs a new invite."),
@@ -1019,7 +1070,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         let exit = (j["last_exit"] as? NSNumber)?.intValue
         let failing = j["failing"] as? Bool ?? false
         let state: SystemRow.State = running ? .on(menuGreen) : failing ? .count(exit ?? 1, menuRed) : .off
-        let status = running ? "running" : !loaded ? "not loaded" : failing ? "last run failed (exit \(exit ?? 1))"
+        let status = (j["disabled"] as? Bool ?? false) ? "disabled" : running ? "running" : !loaded ? "not loaded" : failing ? "last run failed (exit \(exit ?? 1))"
             : exit == 0 ? "last run ok" : "idle"
         // This app's own agent gets no Start or Stop: Stop would quit the
         // panel mid-click, Start would launch a second copy.
@@ -1045,6 +1096,16 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         } else {
             r.buttons.append(RowButton(label: "Start", kind: .run(act("start")),
                                        help: loaded ? "Run it now" : "Load it into launchd and run it"))
+        }
+        if !isSelf {
+            if j["disabled"] as? Bool ?? false {
+                r.buttons = [RowButton(label: "Enable", kind: .run(act("enable")),
+                                       help: "Let it run again, at login and on its schedule")]
+            } else {
+                r.buttons.append(RowButton(label: "Disable", kind: .run(act("disable")),
+                                           help: "Stop it and keep it off, even after a restart, until you enable it",
+                                           confirm: "Disable \(r.label)? It stops now and stays off after restarts until you press Enable."))
+            }
         }
         let log = j["log"] as? String, plist = j["plist"] as? String
         if log != nil || plist != nil {

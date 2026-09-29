@@ -254,6 +254,8 @@ struct RowButton {
         case run(() -> String?)
         /// Asks for one line of text inside the row, then runs with it.
         case ask(placeholder: String, (String) -> String?)
+        /// A short menu of further actions; an item with no action is a divider.
+        case menu([(title: String, run: (() -> String?)?)])
     }
     let label: String
     let kind: Kind

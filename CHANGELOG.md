@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Remote**: each online host has a "…" menu: chat with its csync-assist in
+  a terminal (or copy that command), Info, Logs and Recipes in a terminal,
+  keep connected on or off, and copyable lines for run, push, pull, say and
+  open. Screenshot says plainly when a host has no screen, and gives up after
+  25 s on a machine that is asleep.
+- **Dev servers**: a running server you did not start with pm2 can be
+  stopped. One that launchd runs (claudebook) offers Disable, since a kill
+  would only bring it back; others offer Kill. Both ask first.
+- **Schedules**: Disable and Enable per job. Disabled jobs stay off across
+  restarts; Enable loads a job again without running it now.
+- Row names and notes wrap to a second line instead of ending in "…".
+
 - **Remote tab** (when csync is installed): console health with Fix
   (`csync doctor --fix`), each host with Screenshot, Shell (a Ghostty window)
   and Teardown (asks first), Forget for expired invites and offline hosts, and
