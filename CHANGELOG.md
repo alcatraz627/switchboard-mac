@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Approve a held push in one click** from the Needs-you strip. It writes the
+  same single-use approval the typed `approve push <nonce>` writes, and tells
+  the waiting session over claude-ipc to run the push. Policy asks still copy
+  their approve line. `--probe-approve` checks it in a scratch folder.
+
 - **Copy, don't launch**: Shell, the host menu's chat, info, logs and recipes,
   and Repos' Terminal now copy a ready command instead of opening Ghostty.
   csync commands carry `CSYNC_ACTOR=human` and csync's full path, so they work

@@ -3,12 +3,11 @@
 // push to a protected branch, an action behind an "ask" policy), shown above
 // the tabs only while something waits.
 //
-// The panel never approves. Approving stays a line the owner types into the
-// session, because an approval must be something no agent can actuate, and a
-// button in a GUI app can be pressed by anything that drives the GUI (see the
-// push gate's header in ~/.claude/scripts/hooks/guard-git-push.sh). The strip
-// copies that line, and offers Cancel, which is safe for anyone to press: it
-// only ever denies.
+// A held push has a one-click Approve: it writes the same single-use file the
+// typed "approve push <nonce>" writes, then nudges the session over claude-ipc
+// to retry. Owner ruling 2026-09-29, knowing an agent that drives the GUI could
+// press it: "No fingerprint, single click only. pushing isn't so sensitive right
+// now." Policy asks keep copy-the-line only; Cancel is safe for anyone to press.
 
 import AppKit
 import SwiftUI
@@ -28,7 +27,9 @@ struct NeedItem: Identifiable {
 }
 
 enum NeedsYou {
-    private static var root: String { SwitchboardPaths.gccRoot }
+    /// Where the gate files live; a probe points it at a scratch folder.
+    static var rootOverride: String?
+    private static var root: String { rootOverride ?? SwitchboardPaths.gccRoot }
 
     /// Everything waiting, oldest first.
     static func items() -> [NeedItem] {
@@ -78,6 +79,36 @@ enum NeedsYou {
         return out.sorted { ($0.since ?? .distantPast) < ($1.since ?? .distantPast) }
     }
 
+    /// Approve a held push: write the single-use file the push gate consumes,
+    /// the same one the typed line writes. Returns what went wrong, or nil.
+    static func approve(_ item: NeedItem) -> String? {
+        guard item.kind == .push else { return "only a push can be approved here" }
+        let sentinel = root + "/.push-approved-" + item.sessionID
+        guard FileManager.default.createFile(atPath: sentinel, contents: Data()) else {
+            return "could not write \(sentinel)"
+        }
+        _ = Services.shell("/bin/bash", [root + "/scripts/hooks/warn-log.sh", "--hook", "push-gate",
+                                         "--action", "panel-approved", "--heeded", "yes"], timeout: 5)
+        nudge(item)
+        return nil
+    }
+
+    /// Tell the waiting session its push is approved, so it retries without
+    /// waiting for the owner's next message. Best effort: the gate trusts the
+    /// file, never this message, and the session's next prompt also says so.
+    private static func nudge(_ item: NeedItem) {
+        let peers = Services.shell("/bin/zsh", ["-lc", "claude-ipc peers --by-session"], timeout: 8)
+        guard let d = peers.data(using: .utf8),
+              let list = (try? JSONSerialization.jsonObject(with: d) as? [String: Any])?["peers"] as? [[String: Any]],
+              let alias = (list.first { ($0["sessionId"] as? String) == item.sessionID }?["aliases"] as? [String])?.first
+        else { dlog("approve: no ipc mailbox for \(item.sessionID); it will see the approval on its next prompt"); return }
+        _ = Services.shell("/bin/zsh", ["-lc", "claude-ipc register switchboard-panel --service >/dev/null 2>&1"], timeout: 8)
+        let msg = "[push-gate] the owner approved \(item.title.lowercased()) from the Switchboard panel; the single-use approval is written. Re-run the same git push now."
+        _ = Services.shell("/bin/zsh", ["-lc", "claude-ipc send --to \(shellQuote(alias)) --from switchboard-panel --kind inform --no-reply-expected \(shellQuote(msg))"], timeout: 10)
+    }
+
+    private static func shellQuote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+
     /// Cancel: what typing "cancel push" or "deny <key>" does. Returns what
     /// went wrong, or nil.
     static func cancel(_ item: NeedItem) -> String? {
@@ -122,7 +153,13 @@ enum NeedsYou {
                               tip: item.approveLine.map { "To approve, paste into that session: \($0)" } ?? "")
             r.key = item.id
             r.showsBadge = false
-            if let line = item.approveLine, item.sessionDir != nil {
+            if item.kind == .push, item.sessionDir != nil {
+                r.buttons.append(RowButton(label: "Approve", kind: .run({
+                    let err = approve(item)
+                    DispatchQueue.main.async(execute: refresh)
+                    return err
+                }), help: "Approve this one push. The session is told to run it now.", doing: "approve the push"))
+            } else if let line = item.approveLine, item.sessionDir != nil {
                 r.buttons.append(RowButton(label: "Copy", kind: .copy(line),
                                            help: "Copy \"\(line)\" to paste into that session. Only a line you type approves."))
             }
@@ -162,4 +199,34 @@ struct NeedsStrip: View {
             .padding(.horizontal, PT.gap).padding(.top, PT.gap - 4)
         }
     }
+}
+
+// ── Headless probe ──────────────────────────────────────────────────────────
+
+/// Plants a held push in a scratch folder, approves it the way the button does,
+/// and checks the approval file lands where the push gate reads it. Never
+/// touches ~/.claude, so it cannot approve a real push.
+func probeApprove() -> String {
+    let fm = FileManager.default
+    let dir = NSTemporaryDirectory() + "sb-approve-probe-\(getpid())"
+    try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(atPath: dir) }
+    NeedsYou.rootOverride = dir
+    defer { NeedsYou.rootOverride = nil }
+    let sid = "probe-session-0001"
+    let nonce = #"{"nonce":"abcd1234","target":"/tmp/some-repo","why":"push targets main","ts":1}"#
+    fm.createFile(atPath: dir + "/.push-nonce-" + sid, contents: Data(nonce.utf8))
+    var lines: [String] = []
+    func check(_ name: String, _ ok: Bool) { lines.append("\(ok ? "ok  " : "FAIL") \(name)") }
+    let items = NeedsYou.items()
+    check("the held push is listed", items.count == 1 && items.first?.kind == .push)
+    check("an ended session gets no Approve button",
+          NeedsYou.rows(items) {}.first?.children.first?.buttons.contains { $0.label == "Approve" } == false)
+    if let item = items.first {
+        check("approve reports success", NeedsYou.approve(item) == nil)
+        check("the approval file the gate reads exists", fm.fileExists(atPath: dir + "/.push-approved-" + sid))
+        check("the held push itself is left for the gate to clear", fm.fileExists(atPath: dir + "/.push-nonce-" + sid))
+    }
+    lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
+    return lines.joined(separator: "\n")
 }

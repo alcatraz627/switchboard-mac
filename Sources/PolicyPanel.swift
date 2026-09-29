@@ -590,6 +590,7 @@ struct SystemRowView: View {
         case "Disable": return "nosign"
         case "Enable": return "checkmark.circle"
         case "Cancel": return "xmark.circle"
+        case "Approve": return "checkmark.seal.fill"
         default: return "circle"
         }
     }

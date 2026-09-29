@@ -36,6 +36,7 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   [[ "$out" == *"SESSION"* && "$out" == *"Keep Awake"* ]] && ok "Session group always present" || bad "Session group missing"
   [[ "$out" == *"lib=$ROOT/Resources/lib"* ]] && ok "SWITCHBOARD_LIB points the helpers at the source tree" || bad "lib override ignored"
   check "headless snapshot renders" "$BIN" --snapshot "$WORK/home.png" --tab home
+  check "Approve writes the file the push gate reads (scratch folder)" "$BIN" --probe-approve
   if [[ "${SWITCHBOARD_PROBE_TIMERS:-}" == 1 ]]; then
     check "timed flips on Keep Awake (real power assertion)" "$BIN" --probe-timers
   else

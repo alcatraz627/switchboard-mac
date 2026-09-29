@@ -106,10 +106,12 @@ touch live gates.
    `osascript` through System Events read Switchboard's menu bar item by name
    (`menu bar 1 of process "Switchboard"` → "Switchboard"), so an agent can
    open the panel and press any button in it. A one-click Approve would be an
-   approval an agent can actuate, which the push gate forbids. Ruling: the
-   strip shows, copies the approve line and cancels; it never approves.
-   Revisit only if the approving action moves out of reach of Accessibility
-   (for example Touch ID via LocalAuthentication, which no script can answer).
+   approval an agent can actuate, which the push gate forbids.
+   **Owner ruling 2026-09-29, overriding that for pushes:** "No fingerprint,
+   single click only. pushing isn't so sensitive right now." Held pushes get a
+   one-click Approve that writes the same `.push-approved-<session>` file the
+   typed line writes, then nudges the session over claude-ipc. Policy asks keep
+   copy-the-line only. Touch ID was offered and declined.
 5. Notifications group, if still wanted.
 
 ## Checks for done

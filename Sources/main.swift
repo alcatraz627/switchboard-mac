@@ -8,6 +8,7 @@
 //   --snapshot <out.png> [--tab agents|usage|system|home|remote|scopes] [--light] [--scope <dir>] [--expand]
 //   --probe-timers          exercise the timed-flip engine on Keep Awake
 //   --probe-controls        write volume, mute and brightness back to themselves
+//   --probe-approve         approve a planted push in a scratch folder, never ~/.claude
 //   --open                  open the panel shortly after launch
 
 import AppKit
@@ -34,6 +35,11 @@ if args.contains("--dump") {
 }
 if args.contains("--probe-timers") {
     let report = delegate.probeSystemTimers()
+    print(report)
+    exit(report.hasSuffix("all passed") ? 0 : 1)
+}
+if args.contains("--probe-approve") {
+    let report = probeApprove()
     print(report)
     exit(report.hasSuffix("all passed") ? 0 : 1)
 }
