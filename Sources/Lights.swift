@@ -117,10 +117,22 @@ final class LightsStore: ObservableObject {
                 // it could not be refreshed and how old it is.
                 if let e = r.err { self.error = e; dwarn("bulb scan failed: \(e)"); return }
                 self.error = nil
-                self.bulbs = list
+                self.bulbs = applyOrder(list, self.order)
             }
         }
     }
+
+    /// The owner's arrangement, by MAC; a bulb not in it goes at the end.
+    private static let orderKey = "switchboard.bulbOrder"
+    private var order: [String] { UserDefaults.standard.stringArray(forKey: Self.orderKey) ?? [] }
+
+    /// Move a bulb while it is dragged; `saveOrder` keeps it on the drop.
+    func move(_ dragged: String, to target: String) {
+        let ids = reordered(bulbs.map(\.id), moving: dragged, to: target)
+        bulbs = applyOrder(bulbs, ids)
+    }
+
+    func saveOrder() { UserDefaults.standard.set(bulbs.map(\.id), forKey: Self.orderKey) }
 
     /// Send one change to one bulb. The row shows the change at once; the
     /// bulb's own report replaces it, or the old state comes back on failure.
@@ -224,7 +236,7 @@ final class LightsStore: ObservableObject {
 
     func loadForSnapshot() {
         let r = WizCLI.run(["discover"])
-        bulbs = (r.json as? [[String: Any]])?.compactMap(Bulb.init) ?? []
+        bulbs = applyOrder((r.json as? [[String: Any]])?.compactMap(Bulb.init) ?? [], order)
         error = r.err
         lastScan = Date()
     }
@@ -279,9 +291,14 @@ struct LightsTabView: View {
                             .font(SBStyle.caption).foregroundStyle(.secondary)
                             .padding(.horizontal, SBStyle.rowH).padding(.vertical, 8)
                     }
-                    ForEach(Array(lights.bulbs.enumerated()), id: \.element.id) { i, b in
-                        if i > 0 { Divider().padding(.leading, SBStyle.rowH) }
-                        BulbRow(bulb: b, lights: lights)
+                    ReorderStack(items: lights.bulbs, move: { lights.move($0, to: $1) }, commit: { lights.saveOrder() }) { i, b, grip in
+                        VStack(spacing: 0) {
+                            if i > 0 { Divider().padding(.leading, SBStyle.rowH) }
+                            HStack(spacing: 0) {
+                                grip.padding(.leading, 4)
+                                BulbRow(bulb: b, lights: lights)
+                            }
+                        }
                     }
                 }
             }
