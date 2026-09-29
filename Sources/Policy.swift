@@ -298,10 +298,14 @@ final class PolicyStore: ObservableObject {
     @Published var systemGroups: [SystemGroup] = []
     /// The Remote tab's rows (csync hosts), built by the same snapshot.
     @Published var remoteGroups: [SystemGroup] = []
-    /// The Skills tab's rows: every skill under ~/.claude/skills.
-    @Published var skillGroups: [SystemGroup] = []
-    /// What the Skills tab's search field holds.
-    @Published var skillQuery = ""
+    /// Each list tab's sections (Library, Rules & Hooks, Ledger…), by tab id.
+    @Published var catalogs: [String: [SystemGroup]] = [:]
+    /// What each list tab's search field holds, by tab id.
+    @Published var queries: [String: String] = [:]
+    /// List tabs being re-read right now; they keep showing the last read.
+    @Published var catalogReading: Set<String> = []
+    /// List sections the owner opened past their first few rows, as "tab::section".
+    @Published var shownInFull: Set<String> = []
     /// The Needs-you strip's rows: pushes and asks waiting on the owner.
     @Published var needs: [SystemRow] = []
     /// The same items as the Approvals tab's sections.
@@ -314,11 +318,17 @@ final class PolicyStore: ObservableObject {
     /// Asks the bar to re-probe its services; results arrive via systemGroups.
     var requestSystemRefresh: () -> Void = {}
 
-    /// Re-read ~/.claude/skills off the main thread; about 80 small files.
-    func reloadSkills() {
+    /// Re-read one list tab off the main thread. The tab keeps its last
+    /// sections until the new ones arrive, and one read runs at a time.
+    func reloadCatalog(_ tab: String, _ read: @escaping () -> [SystemGroup]) {
+        guard !catalogReading.contains(tab) else { return }
+        catalogReading.insert(tab)
         DispatchQueue.global(qos: .userInitiated).async {
-            let groups = SkillsIndex.groups()
-            DispatchQueue.main.async { self.skillGroups = groups }
+            let groups = read()
+            DispatchQueue.main.async {
+                self.catalogs[tab] = groups
+                self.catalogReading.remove(tab)
+            }
         }
     }
     /// Flip a system switch now and back at a time; cancel keeps the current

@@ -107,14 +107,23 @@ enum SwitchboardConcerns {
                                footer: "Every action is a csync command, recorded in its log.", footerIcon: "terminal",
                                content: AnyView(SystemTabView(store: policy, source: .remote)),
                                refresh: { policy.requestSystemRefresh() }),
-            SwitchboardConcern(id: "skills", title: "Skills", subtitle: "Every skill in ~/.claude", icon: "wand.and.stars",
-                               footer: "Open a skill for its description; the path copies on click.", footerIcon: "doc.on.doc",
-                               content: AnyView(SystemTabView(store: policy, source: .skills)),
-                               refresh: { policy.reloadSkills() },
-                               pinned: AnyView(SearchField(text: Binding(get: { policy.skillQuery },
-                                                                         set: { policy.skillQuery = $0 }),
-                                                           prompt: "Search skills by name or description"))),
+            catalogTab(policy, id: "library", title: "Library", subtitle: "Skills, docs, personas, scripts", icon: "books.vertical",
+                       footer: "Open a row for its details; the path copies on click.",
+                       search: "Search skills, docs, personas and scripts", read: LibraryCatalog.groups),
         ]
+    }
+
+    /// A list tab on the catalog machinery: sections read off the main
+    /// thread, a pinned search across all of them, rows that open and copy.
+    static func catalogTab(_ policy: PolicyStore, id: String, title: String, subtitle: String, icon: String,
+                           footer: String, search: String, read: @escaping () -> [SystemGroup]) -> SwitchboardConcern {
+        SwitchboardConcern(id: id, title: title, subtitle: subtitle, icon: icon,
+                           footer: footer, footerIcon: "doc.on.doc",
+                           content: AnyView(SystemTabView(store: policy, source: .catalog(id))),
+                           refresh: { policy.reloadCatalog(id, read) },
+                           pinned: AnyView(SearchField(text: Binding(get: { policy.queries[id] ?? "" },
+                                                                     set: { policy.queries[id] = $0 }),
+                                                       prompt: search)))
     }
 }
 
@@ -134,7 +143,8 @@ struct PolicyPanel: View {
     /// The chosen tab, or the first other one when the chosen tab is hidden,
     /// so Approvals emptying out never leaves the panel on a blank tab.
     private var current: SwitchboardConcern {
-        let id = forcedTab ?? storedTab
+        // The Skills tab became Library > Skills.
+        let id = (forcedTab ?? storedTab) == "skills" ? "library" : (forcedTab ?? storedTab)
         let tabs = shown
         return tabs.first { $0.id == id } ?? tabs.first { $0.id != "approvals" } ?? concerns[0]
     }
@@ -247,7 +257,7 @@ struct AgentsTabView: View {
                     .padding(.horizontal, 4)
             }
             if store.scopeIsProject, case .project(let root) = store.scope {
-                Text("Overrides for \(abbreviate(root)). A row with no override follows the Everywhere value.")
+                Text("Overrides for \(abbreviateHome(root)). A row with no override follows the Everywhere value.")
                     .font(PT.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 4)
@@ -324,7 +334,7 @@ private struct ScopeRow: View {
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
-                .help("Open \(abbreviate(root)) in Finder")
+                .help("Open \(abbreviateHome(root)) in Finder")
             }
         }
         .padding(.horizontal, 8).padding(.vertical, 5)
@@ -338,7 +348,7 @@ private struct ScopeRow: View {
     private var subtitle: String {
         switch scope {
         case .global: return "All projects, unless one overrides"
-        case .project(let root): return abbreviate(root)
+        case .project(let root): return abbreviateHome(root)
         }
     }
 }
@@ -348,39 +358,36 @@ private struct ScopeRow: View {
 struct SystemTabView: View {
     @ObservedObject var store: PolicyStore
     /// Which of the store's group lists this tab draws with the shared rows.
-    enum Source { case machine, remote, skills, approvals }
+    enum Source: Equatable { case machine, remote, approvals, catalog(String) }
     var source: Source = .machine
 
     private var groups: [SystemGroup] {
         switch source {
         case .machine: return store.systemGroups
         case .remote: return store.remoteGroups
-        case .skills: return SystemTabView.filter(store.skillGroups, store.skillQuery)
         case .approvals: return store.needGroups
+        case .catalog(let id):
+            let q = store.queries[id] ?? ""
+            let all = Catalog.filter(store.catalogs[id] ?? [], q)
+            return q.isEmpty ? all.map { Catalog.preview($0, tab: id, store: store) } : all
         }
     }
 
-    /// Rows whose name, note or opened details contain every word of the query.
-    static func filter(_ groups: [SystemGroup], _ query: String) -> [SystemGroup] {
-        let words = query.lowercased().split(separator: " ").map(String.init)
-        guard !words.isEmpty else { return groups }
-        return groups.map { g in
-            SystemGroup(title: g.title, rows: g.rows.filter { r in
-                let hay = ([r.label, r.note] + r.children.map { $0.note }).joined(separator: " ").lowercased()
-                return words.allSatisfy { hay.contains($0) }
-            }, status: g.status)
+    /// Words for an empty tab: nothing waiting, no search match, or still reading.
+    @ViewBuilder private var emptyLine: some View {
+        switch source {
+        case .approvals:
+            Text("Nothing is waiting on you.").font(PT.caption).foregroundStyle(.secondary)
+        case .catalog(let id) where store.catalogs[id] != nil:
+            Text("Nothing matches \u{201C}\(store.queries[id] ?? "")\u{201D}.").font(PT.caption).foregroundStyle(.secondary)
+        default:
+            ReadingStatus(state: .loading)
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: PT.gap) {
-            if groups.isEmpty {
-                if source == .approvals {
-                    Text("Nothing is waiting on you.").font(PT.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
-                } else {
-                    ReadingStatus(state: .loading).padding(.horizontal, 4)
-                }
-            }
+            if groups.isEmpty { emptyLine.padding(.horizontal, 4) }
             ForEach(groups) { g in
                 VStack(alignment: .leading, spacing: 5) {
                     GroupHeader(name: g.title)
@@ -476,6 +483,10 @@ struct GroupHeader: View {
         "Bluetooth": "dot.radiowaves.left.and.right",
         "Local models": "cpu",
         "Skills": "wand.and.stars",
+        "Parked skills": "shippingbox",
+        "Knowledge": "book.closed",
+        "Personas": "theatermasks",
+        "Scripts": "terminal",
         "Pushes": "arrow.up.circle",
         "Policy asks": "questionmark.bubble",
         "Left by ended sessions": "moon.zzz",
@@ -547,6 +558,8 @@ struct SystemRowView: View {
                     else if let menu = row.menu { menu().popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil) }
                     // A row whose one action is a copy (a file path) copies anywhere it is clicked.
                     else if row.buttons.count == 1, case .copy = row.buttons[0].kind { press(row.buttons[0]) }
+                    // So does a row whose one action is a labelled button ("Show all").
+                    else if row.buttonLabel != nil, row.buttons.isEmpty, let a = row.action { a() }
                 }
             if picking, let key = row.timerKey { timePicker(key) }
             if let b = asking, case .ask(let placeholder, _) = b.kind {
@@ -645,6 +658,8 @@ struct SystemRowView: View {
     static func symbol(for label: String) -> String {
         switch label {
         case "Copy": return "doc.on.doc"
+        case "All": return "chevron.down"
+        case "Fewer": return "chevron.up"
         case "Transcript": return "text.bubble"
         case "Start": return "play.fill"
         case "Stop": return "stop.fill"
@@ -1167,11 +1182,6 @@ private func countdown(to date: Date, now: Date) -> String {
     return "\(m)m"
 }
 
-private func abbreviate(_ path: String) -> String {
-    let home = NSHomeDirectory()
-    return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
-}
-
 // ── The menu bar icon that opens the panel ─────────────────────────────────
 
 final class PolicyStatusController: NSObject, NSPopoverDelegate {
@@ -1263,6 +1273,11 @@ func switchboardGlyph() -> NSImage {
 
 // ── Headless: render the panel to a PNG, in a chosen appearance and scope ──
 
+/// Each list tab's reader, for drawing it offscreen without the panel's refresh.
+let catalogReaders: [String: () -> [SystemGroup]] = [
+    "library": LibraryCatalog.groups,
+]
+
 /// Draws the real panel offscreen, so it can be checked in dark and light
 /// without opening anything on the owner's screen. Returns false on failure.
 @discardableResult
@@ -1274,8 +1289,8 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     store.applyForSnapshot(items: r.items, projects: r.projects, error: r.error)
     store.systemGroups = system
     store.remoteGroups = remote
-    if tab == "skills" { store.skillGroups = SkillsIndex.groups() }
-    if let q = CommandLine.arguments.firstIndex(of: "--query").flatMap({ $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }) { store.skillQuery = q }
+    if let read = catalogReaders[tab] { store.catalogs[tab] = read() }
+    if let q = CommandLine.arguments.firstIndex(of: "--query").flatMap({ $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }) { store.queries[tab] = q }
     var needs = NeedsYou.items()
     if CommandLine.arguments.contains("--demo-states") {
         var push = NeedItem(id: "demo-push", kind: .push, title: "Push switchboard-mac",
