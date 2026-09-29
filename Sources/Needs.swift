@@ -3,11 +3,11 @@
 // push to a protected branch, an action behind an "ask" policy), shown above
 // the tabs only while something waits.
 //
-// A held push has a one-click Approve: it writes the same single-use file the
-// typed "approve push <nonce>" writes, then nudges the session over claude-ipc
-// to retry. Owner ruling 2026-09-29, knowing an agent that drives the GUI could
-// press it: "No fingerprint, single click only. pushing isn't so sensitive right
-// now." Policy asks keep copy-the-line only; Cancel is safe for anyone to press.
+// Every item gets Approve, Copy, Cancel and details that open below the row.
+// Approve writes the same single-use file the typed approve line writes, then
+// nudges the session over claude-ipc to retry. Owner ruling 2026-09-29, knowing
+// an agent that drives the GUI could press it: "No fingerprint, single click
+// only", and "everything should get a click to approve + copy + cancel + info".
 
 import AppKit
 import SwiftUI
@@ -24,6 +24,12 @@ struct NeedItem: Identifiable {
     let approveLine: String?
     /// Files whose removal cancels it, the same ones the typed cancel removes.
     let files: [String]
+    /// Approved and waiting for its session to take a turn and run it.
+    var approved = false
+    /// The single-use file its gate consumes; Approve writes it.
+    var approvedFile: String? = nil
+    /// Everything known about it, for the details below the row.
+    var details: [(String, String)] = []
 }
 
 enum NeedsYou {
@@ -48,11 +54,18 @@ enum NeedsYou {
             let path = root + "/" + f, sid = String(f.dropFirst(".push-nonce-".count))
             guard let o = json(path), let nonce = o["nonce"] as? String else { continue }
             let repo = ((o["target"] as? String) ?? "?") as NSString
-            out.append(NeedItem(id: path, kind: .push,
+            var item = NeedItem(id: path, kind: .push,
                                 title: "Push \(repo.lastPathComponent)",
                                 sessionID: sid, sessionDir: live[sid], since: since(o, path),
                                 approveLine: "approve push \(nonce)",
-                                files: [path, root + "/.push-approved-" + sid]))
+                                files: [path, root + "/.push-approved-" + sid])
+            item.approvedFile = root + "/.push-approved-" + sid
+            item.approved = fm.fileExists(atPath: item.approvedFile!)
+            item.details = [("Repository", (o["target"] as? String) ?? "?"), ("Why it is held", (o["why"] as? String) ?? ""),
+                            ("Session", sid), ("Session folder", live[sid] ?? "ended"),
+                            ("Held since", since(o, path).map(fullDate) ?? ""), ("Approve line", "approve push \(nonce)"),
+                            ("Cancel line", "cancel push")].filter { !$0.1.isEmpty }
+            out.append(item)
         }
 
         let askDir = root + "/.policy-ask"
@@ -63,18 +76,26 @@ enum NeedsYou {
             let sid = f.components(separatedBy: "--").first ?? ""
             let base = String(path.dropLast(".nonce".count))
             let what = (o["what"] as? String) ?? key
-            out.append(NeedItem(id: path, kind: .ask,
+            var item = NeedItem(id: path, kind: .ask,
                                 title: what.prefix(1).uppercased() + what.dropFirst(),
                                 sessionID: sid, sessionDir: live[sid], since: since(o, path),
                                 approveLine: "approve \(key) \(nonce)",
-                                files: [path, base + ".approved"]))
+                                files: [path, base + ".approved"])
+            item.approvedFile = base + ".approved"
+            item.approved = fm.fileExists(atPath: base + ".approved")
+            item.details = [("Action", what), ("Policy", key), ("Session", sid), ("Session folder", live[sid] ?? "ended"),
+                            ("Held since", since(o, path).map(fullDate) ?? ""), ("Approve line", "approve \(key) \(nonce)"),
+                            ("Cancel line", "deny \(key)")].filter { !$0.1.isEmpty }
+            out.append(item)
         }
 
         // Approvals already typed whose session ended before using them.
         for a in PushApprovals.armed(liveSessionIDs: Set(live.keys)) where !a.sessionIsLive {
             out.append(NeedItem(id: root + "/" + a.file, kind: .armedApproval,
                                 title: "Unused push approval", sessionID: a.sessionID, sessionDir: nil,
-                                since: a.armedAt, approveLine: nil, files: [root + "/" + a.file]))
+                                since: a.armedAt, approveLine: nil, files: [root + "/" + a.file],
+                                details: [("Session", a.sessionID), ("Typed", a.armedAt.map(fullDate) ?? "?"),
+                                          ("File", root + "/" + a.file)]))
         }
         return out.sorted { ($0.since ?? .distantPast) < ($1.since ?? .distantPast) }
     }
@@ -82,19 +103,20 @@ enum NeedsYou {
     /// Approve a held push: write the single-use file the push gate consumes,
     /// the same one the typed line writes. Returns what went wrong, or nil.
     static func approve(_ item: NeedItem) -> String? {
-        guard item.kind == .push else { return "only a push can be approved here" }
-        let sentinel = root + "/.push-approved-" + item.sessionID
+        guard let sentinel = item.approvedFile else { return "there is nothing to approve here" }
         guard FileManager.default.createFile(atPath: sentinel, contents: Data()) else {
             return "could not write \(sentinel)"
         }
-        _ = Services.shell("/bin/bash", [root + "/scripts/hooks/warn-log.sh", "--hook", "push-gate",
+        _ = Services.shell("/bin/bash", [root + "/scripts/hooks/warn-log.sh", "--hook", item.kind == .push ? "push-gate" : "policy-ask",
                                          "--action", "panel-approved", "--heeded", "yes"], timeout: 5)
         nudge(item)
         return nil
     }
 
-    /// Tell the waiting session its push is approved, so it retries without
-    /// waiting for the owner's next message. Best effort: the gate trusts the
+    /// Tell the waiting session it is approved, so it retries without waiting
+    /// for the owner's next message. Sent as a request because the ipc inbox
+    /// monitor wakes an idle session only for requests, queries and responses;
+    /// an inform would sit until the next turn. Best effort: the gate trusts the
     /// file, never this message, and the session's next prompt also says so.
     private static func nudge(_ item: NeedItem) {
         let peers = Services.shell("/bin/zsh", ["-lc", "claude-ipc peers --by-session"], timeout: 8)
@@ -103,8 +125,10 @@ enum NeedsYou {
               let alias = (list.first { ($0["sessionId"] as? String) == item.sessionID }?["aliases"] as? [String])?.first
         else { dlog("approve: no ipc mailbox for \(item.sessionID); it will see the approval on its next prompt"); return }
         _ = Services.shell("/bin/zsh", ["-lc", "claude-ipc register switchboard-panel --service >/dev/null 2>&1"], timeout: 8)
-        let msg = "[push-gate] the owner approved \(item.title.lowercased()) from the Switchboard panel; the single-use approval is written. Re-run the same git push now."
-        _ = Services.shell("/bin/zsh", ["-lc", "claude-ipc send --to \(shellQuote(alias)) --from switchboard-panel --kind inform --no-reply-expected \(shellQuote(msg))"], timeout: 10)
+        let msg = item.kind == .push
+            ? "[push-gate] the owner approved \(item.title.lowercased()) from the Switchboard panel; the single-use approval is written. Re-run the same git push now."
+            : "[policy-ask] the owner approved \(item.title.lowercased()) from the Switchboard panel; the single-use approval is written. Run the same call again now; it covers that one call."
+        _ = Services.shell("/bin/zsh", ["-lc", "claude-ipc send --to \(shellQuote(alias)) --from switchboard-panel --kind request --reply-by none \(shellQuote(msg))"], timeout: 10)
     }
 
     private static func shellQuote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
@@ -146,22 +170,32 @@ enum NeedsYou {
             let when = item.since.map { " · " + age($0) } ?? ""
             let note: String
             switch item.kind {
-            case .push, .ask: note = where_ + when
+            case .push, .ask:
+                note = item.approved ? "approved · runs when that session next takes a turn" : where_ + when
             case .armedApproval: note = "typed, never used; the session ended" + when
             }
-            var r = SystemRow(label: item.title, state: item.sessionDir == nil ? .off : .on(menuYellow), note: note,
+            var r = SystemRow(label: item.title,
+                              state: item.approved ? .ok : item.sessionDir == nil ? .off : .on(menuYellow), note: note,
                               tip: item.approveLine.map { "To approve, paste into that session: \($0)" } ?? "")
             r.key = item.id
             r.showsBadge = false
-            if item.kind == .push, item.sessionDir != nil {
+            if item.approvedFile != nil, item.sessionDir != nil, !item.approved {
                 r.buttons.append(RowButton(label: "Approve", kind: .run({
                     let err = approve(item)
                     DispatchQueue.main.async(execute: refresh)
                     return err
-                }), help: "Approve this one push. The session is told to run it now.", doing: "approve the push"))
-            } else if let line = item.approveLine, item.sessionDir != nil {
+                }), help: "Approve this one \(item.kind == .push ? "push" : "call"). The session is told to run it now.",
+                   doing: "approve it"))
+            }
+            if let line = item.approveLine {
                 r.buttons.append(RowButton(label: "Copy", kind: .copy(line),
-                                           help: "Copy \"\(line)\" to paste into that session. Only a line you type approves."))
+                                           help: "Copy \"\(line)\" to paste into that session"))
+            }
+            r.children = item.details.enumerated().map { i, d in
+                var c = SystemRow(label: d.0, state: .off, note: d.1, tip: d.1)
+                c.key = item.id + "-detail-\(i)"
+                c.showsBadge = false
+                return c
             }
             r.buttons.append(RowButton(label: "Cancel", kind: .run({
                 let err = cancel(item)
@@ -218,8 +252,19 @@ func probeApprove() -> String {
     fm.createFile(atPath: dir + "/.push-nonce-" + sid, contents: Data(nonce.utf8))
     var lines: [String] = []
     func check(_ name: String, _ ok: Bool) { lines.append("\(ok ? "ok  " : "FAIL") \(name)") }
-    let items = NeedsYou.items()
-    check("the held push is listed", items.count == 1 && items.first?.kind == .push)
+    let ask = #"{"nonce":"ef567890","key":"slack.post","what":"posting to Slack","ts":1}"#
+    try? fm.createDirectory(atPath: dir + "/.policy-ask", withIntermediateDirectories: true)
+    fm.createFile(atPath: dir + "/.policy-ask/" + sid + "--slack.post.nonce", contents: Data(ask.utf8))
+    let all = NeedsYou.items()
+    check("the held ask is listed", all.contains { $0.kind == .ask })
+    check("every item carries details", all.allSatisfy { !$0.details.isEmpty })
+    if let askItem = all.first(where: { $0.kind == .ask }) {
+        check("approving the ask reports success", NeedsYou.approve(askItem) == nil)
+        check("the ask's approval file the guard reads exists",
+              fm.fileExists(atPath: dir + "/.policy-ask/" + sid + "--slack.post.approved"))
+    }
+    let items = all.filter { $0.kind == .push }
+    check("the held push is listed", items.count == 1)
     check("an ended session gets no Approve button",
           NeedsYou.rows(items) {}.first?.children.first?.buttons.contains { $0.label == "Approve" } == false)
     if let item = items.first {
@@ -229,4 +274,10 @@ func probeApprove() -> String {
     }
     lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
     return lines.joined(separator: "\n")
+}
+
+/// "Tue 29 Sep, 7:45 AM", for the details below a row.
+func fullDate(_ d: Date) -> String {
+    let f = DateFormatter(); f.dateFormat = "EEE d MMM, h:mm a"
+    return f.string(from: d)
 }

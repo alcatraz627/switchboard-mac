@@ -2,10 +2,13 @@
 
 ## Unreleased
 
-- **Approve a held push in one click** from the Needs-you strip. It writes the
-  same single-use approval the typed `approve push <nonce>` writes, and tells
-  the waiting session over claude-ipc to run the push. Policy asks still copy
-  their approve line. `--probe-approve` checks it in a scratch folder.
+- **Needs you: Approve, Copy, Cancel and details on every item**, pushes and
+  policy asks alike. Approve writes the same single-use file the typed approve
+  line writes, then wakes the waiting session with a claude-ipc request so it
+  runs at once (an inform would wait for its next turn). An approved item says
+  so until its session runs it. Each row opens to its repository or action,
+  session, folder, time and lines. `--probe-approve` checks both kinds in a
+  scratch folder.
 
 - **Copy, don't launch**: Shell, the host menu's chat, info, logs and recipes,
   and Repos' Terminal now copy a ready command instead of opening Ghostty.
