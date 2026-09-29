@@ -6,6 +6,11 @@
   (`csync doctor --fix`), each host with Screenshot, Shell (a Ghostty window)
   and Teardown (asks first), Forget for expired invites and offline hosts, and
   Invite, which asks for a name in the row and copies the paste line.
+- **Machine > Repos**: git repositories under ~/Code that need attention,
+  folded into unpushed commits, uncommitted changes and worktrees to tidy,
+  each with Finder, Terminal, Editor and Fetch, and Prune (asks first) where a
+  worktree record is stale. Nothing commits, pushes or resets. Scanned in
+  parallel and cached for two minutes.
 
 - Every row button is an icon (play, stop, log, copy, trash, shield…), like
   the timer beside it, with its name in the tooltip. Copy turns into a green

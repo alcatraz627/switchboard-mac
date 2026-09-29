@@ -92,6 +92,8 @@ check "models.py list reports pressure and mem-guard" python3 -c "import json,su
 eq "models.py refuses an unknown verb"      64 "$(rc python3 Resources/lib/models.py warm sideways)"
 check "remote.py list reports hosts and checks" python3 -c "import json,subprocess;d=json.loads(subprocess.run(['python3','Resources/lib/remote.py','list'],capture_output=True,text=True,timeout=90).stdout);assert isinstance(d['hosts'],list) and isinstance(d['checks'],list)"
 eq "remote.py refuses an unknown host"     1 "$(rc python3 Resources/lib/remote.py shot no-such-host-xyz)"
+check "gitscan.py list reports repos and a clean count" python3 -c "import json,subprocess;d=json.loads(subprocess.run(['python3','Resources/lib/gitscan.py','list'],capture_output=True,text=True,timeout=120).stdout);assert isinstance(d['repos'],list) and d['clean']>=0"
+eq "gitscan.py refuses a path outside ~/Code" 1 "$(rc python3 Resources/lib/gitscan.py prune /tmp)"
 eq "wol.py refuses a malformed MAC"         2 "$(rc python3 Resources/lib/wol.py wake not-a-mac)"
 eq "wol.py sends to a well-formed MAC"      0 "$(rc python3 Resources/lib/wol.py wake 02:00:00:00:00:01)"
 python3 Resources/lib/wol.py add "Test box" 02:00:00:00:00:02 >/dev/null

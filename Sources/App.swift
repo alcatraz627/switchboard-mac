@@ -152,6 +152,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var devServers: [[String: Any]] = []
         var models: [String: Any] = [:]
         var remote: [String: Any] = [:]
+        var git: [String: Any] = [:]
     }
 
     /// Refresh the slow half off the main thread. The panel shows whatever
@@ -198,6 +199,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 as? [[String: Any]]) ?? []
             let models = Services.shell("/usr/bin/env", ["python3", AppPaths.lib("models.py"), "list"], timeout: 15)
             s.models = (try? JSONSerialization.jsonObject(with: Data(models.utf8)) as? [String: Any]) ?? [:]
+            let g = Services.shell("/usr/bin/env", ["python3", AppPaths.lib("gitscan.py"), "list"], timeout: 90)
+            s.git = (try? JSONSerialization.jsonObject(with: Data(g.utf8)) as? [String: Any]) ?? [:]
             if Integrations.csync {
                 let r = Services.shell("/usr/bin/env", ["python3", AppPaths.lib("remote.py"), "list"], timeout: 70)
                 s.remote = (try? JSONSerialization.jsonObject(with: Data(r.utf8)) as? [String: Any]) ?? [:]
@@ -511,6 +514,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         }
         let dev = devServerRows()
         if !dev.isEmpty { out.append(SystemGroup(title: "Dev servers", rows: dev)) }
+        let code = gitRows()
+        if !code.isEmpty { out.append(SystemGroup(title: "Repos", rows: code)) }
         let models = modelRows()
         if !models.isEmpty { out.append(SystemGroup(title: "Local models", rows: models)) }
         let schedules = scheduleRows()
@@ -734,6 +739,92 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             j.key = "models-mlx"
             rows.append(j)
         }
+        return rows
+    }
+
+    // ── Code: git repositories under ~/Code ──────────────────────────────────
+
+    /// Repositories that need attention, folded by what needs doing: commits
+    /// not pushed, changes not committed, and detached or prunable checkouts.
+    private func gitRows() -> [SystemRow] {
+        let g = sbSnapshot.git
+        guard let repos = g["repos"] as? [[String: Any]] else { return [] }
+        let script = AppPaths.lib("gitscan.py")
+        let editor = ["/Applications/Zed.app", "/Applications/Visual Studio Code.app", "/Applications/Cursor.app"]
+            .first { FileManager.default.fileExists(atPath: $0) }
+        func repoRow(_ r: [String: Any]) -> SystemRow {
+            let path = r["path"] as? String ?? ""
+            let ahead = r["ahead"] as? Int ?? 0, behind = r["behind"] as? Int ?? 0, dirty = r["dirty"] as? Int ?? 0
+            let prunable = r["prunable"] as? Int ?? 0, stashes = r["stashes"] as? Int ?? 0
+            let bits: [String?] = [
+                (r["detached"] as? Bool ?? false) ? "detached" : r["branch"] as? String,
+                ahead > 0 ? "\(ahead) unpushed" : nil,
+                behind > 0 ? "\(behind) behind" : nil,
+                dirty > 0 ? "\(dirty) changed" : nil,
+                stashes > 0 ? "\(stashes) stashed" : nil,
+                prunable > 0 ? "\(prunable) prunable worktree\(prunable == 1 ? "" : "s")" : nil,
+                r["error"] as? String,
+            ]
+            var row = SystemRow(label: r["name"] as? String ?? path, state: .off,
+                                note: bits.compactMap { $0 }.joined(separator: " · "), tip: path)
+            row.key = "repo-" + path
+            row.showsBadge = false
+            row.buttons = [
+                RowButton(label: "Finder", kind: .run({
+                    DispatchQueue.main.async { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+                    return nil
+                }), help: "Open in Finder"),
+                RowButton(label: "Terminal", kind: .run({
+                    let out = Services.shell("/usr/bin/open", ["-na", "Ghostty.app", "--args", "--working-directory=\(path)"])
+                    return out.isEmpty ? nil : out
+                }), help: "Open a Ghostty window here"),
+            ]
+            if let editor = editor {
+                row.buttons.append(RowButton(label: "Editor", kind: .run({
+                    let out = Services.shell("/usr/bin/open", ["-a", editor, path])
+                    return out.isEmpty ? nil : out
+                }), help: "Open in \((editor as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: ""))"))
+            }
+            row.buttons.append(RowButton(label: "Fetch", kind: .run({ [weak self] in
+                let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script, "fetch", path], timeout: 70))
+                self?.refreshSnapshot()
+                return err
+            }), help: "git fetch: see what the remote has, without changing your files", doing: "fetch"))
+            if prunable > 0 {
+                row.buttons.append(RowButton(label: "Prune", kind: .run({ [weak self] in
+                    let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script, "prune", path], timeout: 70))
+                    self?.refreshSnapshot()
+                    return err
+                }), help: "git worktree prune: forget worktrees whose folders are gone", doing: "prune worktrees",
+                   confirm: "Prune \(prunable) worktree record\(prunable == 1 ? "" : "s") in \(row.label)? Only records whose folders no longer exist are removed."))
+            }
+            return row
+        }
+        func bucket(_ label: String, _ items: [[String: Any]], tint: NSColor, tip: String) -> SystemRow? {
+            guard !items.isEmpty else { return nil }
+            var b = SystemRow(label: label, state: .count(items.count, tint),
+                              note: items.prefix(3).compactMap { ($0["name"] as? String).map { ($0 as NSString).lastPathComponent } }
+                                  .joined(separator: ", ") + (items.count > 3 ? " +\(items.count - 3)" : ""),
+                              tip: tip)
+            b.key = "git-" + label
+            b.children = items.map(repoRow)
+            return b
+        }
+        let unpushed = repos.filter { ($0["ahead"] as? Int ?? 0) > 0 }
+        let changed = repos.filter { ($0["ahead"] as? Int ?? 0) == 0 && ($0["dirty"] as? Int ?? 0) > 0 }
+        let other = repos.filter { ($0["ahead"] as? Int ?? 0) == 0 && ($0["dirty"] as? Int ?? 0) == 0 }
+        var rows = [
+            bucket("Unpushed commits", unpushed, tint: menuYellow, tip: "Commits on a branch that its own remote branch does not have yet."),
+            bucket("Uncommitted changes", changed, tint: menuTeal, tip: "Files changed and not committed."),
+            bucket("Worktrees to tidy", other, tint: menuTeal, tip: "Detached checkouts and worktree records whose folders are gone."),
+        ].compactMap { $0 }
+        let clean = g["clean"] as? Int ?? 0
+        let scanned = (g["scanned_at"] as? Double).map { age(Date(timeIntervalSince1970: $0)) } ?? "not yet"
+        var summary = SystemRow(label: "\(clean) clean", state: .ok, note: "~/Code, 3 levels deep · scanned \(scanned)",
+                                tip: "Repositories with nothing to commit, push or tidy.")
+        summary.key = "git-clean"
+        summary.showsBadge = false
+        rows.append(summary)
         return rows
     }
 
