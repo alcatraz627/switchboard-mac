@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Notes**: a compose bar (Enter saves, or save from the clipboard, or save
+  and copy the path), one markdown file per note, copy path / content / title,
+  tags, an expiry that dims a note into a collapsed Expired section, reminders
+  in macOS Reminders once or on a repeat, and drag to reorder.
+- **Settings**: show or hide any tab and any section; hidden ones are not read
+  at all. Choose what the hover preview shows.
+- **Hover preview**: rest the pointer on the menu bar icon for the Claude
+  limits, what waits on you and problems; optional timers, services and a dot
+  on the icon.
+- **Claude MCP** (was Plugins & MCP): turn plugins and project MCP servers on
+  and off; off ones are struck through. **Hooks** (was Rules & Hooks).
+- **Approvals** moved to the last tab and the Needs-you strip is gone. An
+  approved item waits in its own section and no longer counts in the badge.
+- Bulbs reorder by drag. Search waits 250 ms after typing, and every text field
+  takes ⌘A, ⌘X, ⌘C, ⌘V and ⌘Z.
+
 - **Twelve tabs**, in this order: Approvals, Agents, Usage, Rules & Hooks,
   Ledger, Library, Runtime, Plugins & MCP, Machine, Controls, Home, Remote.
   The list tabs share one search, rows that open to their details, and paths
