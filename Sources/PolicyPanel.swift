@@ -66,6 +66,7 @@ enum SwitchboardConcerns {
     static func all(policy: PolicyStore, usage: UsageStore, lights: LightsStore) -> [SwitchboardConcern] {
         registry(policy: policy, usage: usage, lights: lights)
             .filter { $0.id != "agents" || Integrations.policyStore }
+            .filter { $0.id != "remote" || Integrations.csync }
     }
 
     private static func registry(policy: PolicyStore, usage: UsageStore, lights: LightsStore) -> [SwitchboardConcern] {
@@ -86,6 +87,10 @@ enum SwitchboardConcerns {
                                footer: "Talks to the bulbs directly over the LAN.", footerIcon: "wifi",
                                content: AnyView(LightsTabView(lights: lights)),
                                refresh: { lights.discover() }),
+            SwitchboardConcern(id: "remote", title: "Remote", subtitle: "Machines you drive with csync", icon: "network.badge.shield.half.filled",
+                               footer: "Every action is a csync command, recorded in its log.", footerIcon: "terminal",
+                               content: AnyView(SystemTabView(store: policy, remote: true)),
+                               refresh: { policy.requestSystemRefresh() }),
         ]
     }
 }
@@ -307,13 +312,17 @@ private struct ScopeRow: View {
 
 struct SystemTabView: View {
     @ObservedObject var store: PolicyStore
+    /// The Remote tab draws its csync groups with the same rows.
+    var remote = false
+
+    private var groups: [SystemGroup] { remote ? store.remoteGroups : store.systemGroups }
 
     var body: some View {
         VStack(alignment: .leading, spacing: PT.gap) {
-            if store.systemGroups.isEmpty {
+            if groups.isEmpty {
                 ReadingStatus(state: .loading).padding(.horizontal, 4)
             }
-            ForEach(store.systemGroups) { g in
+            ForEach(groups) { g in
                 VStack(alignment: .leading, spacing: 5) {
                     GroupHeader(name: g.title)
                     Card {
@@ -378,6 +387,8 @@ struct GroupHeader: View {
         "Services": "server.rack",
         "Dev servers": "network",
         "Local models": "cpu",
+        "Console": "server.rack",
+        "Hosts": "laptopcomputer.and.iphone",
         "Schedules": "calendar.badge.clock",
         "Session": "cup.and.saucer",
         "Feed": "arrow.triangle.2.circlepath",
@@ -413,6 +424,10 @@ struct SystemRowView: View {
     @State private var busyButton: String?
     @State private var busySince = Date()
     @State private var copiedButton: String?
+    /// An ask button waiting for its line of text.
+    @State private var asking: RowButton?
+    @State private var askDraft = ""
+    @FocusState private var askFocused: Bool
     var indent: CGFloat = 0
 
     init(row: SystemRow, store: PolicyStore, indent: CGFloat = 0) {
@@ -440,6 +455,17 @@ struct SystemRowView: View {
                     else if let menu = row.menu { menu().popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil) }
                 }
             if picking, let key = row.timerKey { timePicker(key) }
+            if let b = asking, case .ask(let placeholder, _) = b.kind {
+                HStack(spacing: 6) {
+                    TextField(placeholder, text: $askDraft)
+                        .textFieldStyle(.roundedBorder).controlSize(.small)
+                        .focused($askFocused)
+                        .onSubmit { submitAsk(b) }
+                        .onExitCommand { asking = nil }
+                    Button("Cancel") { asking = nil }.controlSize(.small)
+                }
+                .padding(.leading, PT.rowH + indent).padding(.trailing, PT.rowH).padding(.bottom, PT.rowV + 2)
+            }
             if opens && expanded {
                 VStack(spacing: 0) {
                     ForEach(row.children) { child in
@@ -535,6 +561,11 @@ struct SystemRowView: View {
         case "Forget": return "minus.circle"
         case "Add…": return "plus.circle"
         case "Re-arm", "Lift": return "checkmark.shield"
+        case "Fix": return "wrench.and.screwdriver"
+        case "Screenshot": return "camera"
+        case "Shell": return "terminal"
+        case "Teardown": return "xmark.circle"
+        case "Invite": return "person.badge.plus"
         default: return "circle"
         }
     }
@@ -568,6 +599,12 @@ struct SystemRowView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 if copiedButton == b.label { copiedButton = nil }
             }
+        case .ask:
+            askDraft = ""
+            asking = b
+            // A menu bar app only takes keystrokes once it is the active app.
+            NSApp.activate(ignoringOtherApps: true)
+            DispatchQueue.main.async { askFocused = true }
         case .run(let work):
             if let question = b.confirm {
                 let a = NSAlert()
@@ -587,6 +624,31 @@ struct SystemRowView: View {
                     if let err = err {
                         failure = "Couldn't \(b.doing ?? "\(b.label.lowercased()) \(row.label)"): \(err)"
                         dwarn("row button failed: \(b.label) \(row.label): \(err)")
+                    }
+                }
+            }
+        }
+    }
+
+    private func submitAsk(_ b: RowButton) {
+        guard case .ask(_, let work) = b.kind else { return }
+        let text = askDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        asking = nil
+        failure = nil
+        busyButton = b.label
+        busySince = Date()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let err = work(text)
+            DispatchQueue.main.async {
+                busyButton = nil
+                if let err = err {
+                    failure = "Couldn't \(b.doing ?? b.label.lowercased()): \(err)"
+                    dwarn("row ask failed: \(b.label) \(text): \(err)")
+                } else {
+                    copiedButton = b.label
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        if copiedButton == b.label { copiedButton = nil }
                     }
                 }
             }
@@ -1066,12 +1128,13 @@ func switchboardGlyph() -> NSImage {
 /// without opening anything on the owner's screen. Returns false on failure.
 @discardableResult
 func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
-                         tab: String = "agents", system: [SystemGroup] = []) -> Bool {
+                         tab: String = "agents", system: [SystemGroup] = [], remote: [SystemGroup] = []) -> Bool {
     let store = PolicyStore()
     if let d = scopeDir, let root = PolicyCLI.root(of: d) { store.scope = .project(root) }
     let r = PolicyCLI.load(store.scope)
     store.applyForSnapshot(items: r.items, projects: r.projects, error: r.error)
     store.systemGroups = system
+    store.remoteGroups = remote
     let usage = UsageStore()
     let lights = LightsStore()
     if tab == "usage" { usage.reload() }   // file reads only; never starts Codex

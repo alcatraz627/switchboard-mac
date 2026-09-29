@@ -151,6 +151,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var wolTargets: [[String: Any]] = []
         var devServers: [[String: Any]] = []
         var models: [String: Any] = [:]
+        var remote: [String: Any] = [:]
     }
 
     /// Refresh the slow half off the main thread. The panel shows whatever
@@ -197,6 +198,10 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 as? [[String: Any]]) ?? []
             let models = Services.shell("/usr/bin/env", ["python3", AppPaths.lib("models.py"), "list"], timeout: 15)
             s.models = (try? JSONSerialization.jsonObject(with: Data(models.utf8)) as? [String: Any]) ?? [:]
+            if Integrations.csync {
+                let r = Services.shell("/usr/bin/env", ["python3", AppPaths.lib("remote.py"), "list"], timeout: 70)
+                s.remote = (try? JSONSerialization.jsonObject(with: Data(r.utf8)) as? [String: Any]) ?? [:]
+            }
             DispatchQueue.main.async {
                 self?.sbSnapshot = s
                 if self?.kanbanBusy == false { self?.kanbanUp = kanban }
@@ -477,6 +482,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.policyController?.store.systemGroups = self.panelSystemGroups()
+            self.policyController?.store.remoteGroups = self.panelRemoteGroups()
         }
     }
 
@@ -515,7 +521,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
 
     /// The Machine tab as text, for checking the rows without a screen.
     func dumpSwitchboard() -> String {
-        let groups = panelSystemGroupsFresh()
+        let groups = panelSystemGroupsFresh() + panelRemoteGroups().map { SystemGroup(title: "Remote · " + $0.title, rows: $0.rows) }
         var out = ["SWITCHBOARD DUMP"]
         for g in groups {
             out.append("\n\(g.title.uppercased())")
@@ -729,6 +735,102 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             rows.append(j)
         }
         return rows
+    }
+
+    // ── Remote: machines driven through csync ────────────────────────────────
+
+    /// The Remote tab: csync's console health, then each host with the actions
+    /// its state allows, then a row to invite a new one.
+    func panelRemoteGroups() -> [SystemGroup] {
+        let m = sbSnapshot.remote
+        guard m["installed"] as? Bool == true else { return [] }
+        let script = AppPaths.lib("remote.py")
+        let act: ([String]) -> () -> String? = { [weak self] args in {
+            let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script] + args, timeout: 130))
+            self?.refreshSnapshot()
+            return err
+        } }
+        var groups: [SystemGroup] = []
+
+        let checks = m["checks"] as? [[String: Any]] ?? []
+        if !checks.isEmpty {
+            let failing = checks.filter { !($0["ok"] as? Bool ?? false) }
+            var health = SystemRow(label: "Console health",
+                                   state: failing.isEmpty ? .ok : .count(failing.count, menuRed),
+                                   note: failing.isEmpty ? "relay, Tailscale and Funnel all good"
+                                       : failing.compactMap { $0["check"] as? String }.joined(separator: ", ") + " failing",
+                                   tip: "csync doctor: what this Mac needs to reach the other machines. Click to open.")
+            health.key = "remote-health"
+            // Failing checks first; they are the only ones worth reading.
+            health.children = (failing + checks.filter { $0["ok"] as? Bool ?? false }).map { c in
+                let ok = c["ok"] as? Bool ?? false
+                var r = SystemRow(label: c["check"] as? String ?? "?", state: ok ? .ok : .off,
+                                  note: (ok ? "" : "failing · ") + (c["detail"] as? String ?? ""),
+                                  tip: (c["fix"] as? String).map { "Fix: \($0)" } ?? "")
+                r.key = "check-" + r.label
+                return r
+            }
+            if !failing.isEmpty {
+                health.buttons = [RowButton(label: "Fix", kind: .run(act(["fix"])),
+                                            help: "csync doctor --fix", doing: "fix the console")]
+            }
+            groups.append(SystemGroup(title: "Console", rows: [health]))
+        }
+
+        let hosts = m["hosts"] as? [[String: Any]] ?? []
+        var rows: [SystemRow] = hosts.map { h in
+            let name = h["name"] as? String ?? "?", status = h["status"] as? String ?? "?"
+            let os = (h["os"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            let seen = (h["last_seen"] as? Double).map { age(Date(timeIntervalSince1970: $0)) }
+            let expires = (h["expires"] as? Double).map { countdownText(to: Date(timeIntervalSince1970: $0), now: Date()) }
+            let note: String
+            switch status {
+            case "online": note = [os, "online"].compactMap { $0 }.joined(separator: " · ")
+            case "invited": note = "invited, waiting for the paste" + (expires.map { " · expires in \($0)" } ?? "")
+            case "expired": note = "invite expired"
+            default: note = [os, "offline" + (seen.map { ", last seen \($0)" } ?? "")].compactMap { $0 }.joined(separator: " · ")
+            }
+            var r = SystemRow(label: name, state: status == "online" ? .on(menuGreen) : .off, note: note,
+                              tip: [h["user"] as? String, (h["route"] as? String).map { "route \($0)" }].compactMap { $0 }.joined(separator: " · "))
+            r.key = "host-" + name
+            if status == "online" {
+                r.buttons = [
+                    RowButton(label: "Screenshot", kind: .run(act(["shot", name])),
+                              help: "Take a screenshot of \(name) and open it", doing: "screenshot \(name)"),
+                    RowButton(label: "Shell", kind: .run(act(["shell", name])),
+                              help: "Open a Ghostty window with a shell on \(name)", doing: "open a shell on \(name)"),
+                    RowButton(label: "Teardown", kind: .run(act(["teardown", name])),
+                              help: "End the session and clean csync off \(name)", doing: "tear down \(name)",
+                              confirm: "Tear down \(name)? It ends the session and removes csync from that machine. Reconnecting needs a new invite."),
+                ]
+            } else {
+                r.buttons = [RowButton(label: "Forget", kind: .run(act(["forget", name])),
+                                       help: status == "invited" ? "Cancel the invite" : "Drop it from the list",
+                                       doing: "forget \(name)",
+                                       confirm: status == "invited" ? "Cancel the invite for \(name)?" : nil)]
+            }
+            return r
+        }
+        var invite = SystemRow(label: "Invite a machine", state: .off, note: "copies the line to paste on it",
+                               tip: "csync invite: mints the one line to paste on the other machine's terminal.")
+        invite.key = "host-invite"
+        invite.showsBadge = false
+        invite.buttons = [RowButton(label: "Invite", kind: .ask(placeholder: "A name for it, like studio-mac") { [weak self] name in
+            let out = Services.shell("/usr/bin/env", ["python3", script, "invite", name], timeout: 70)
+            if let err = Self.helperError(out) { return err }
+            guard let d = out.data(using: .utf8),
+                  let paste = (try? JSONSerialization.jsonObject(with: d) as? [String: Any])?["paste"] as? String
+            else { return "csync gave no line to paste" }
+            DispatchQueue.main.async {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(paste, forType: .string)
+            }
+            self?.refreshSnapshot()
+            return nil
+        }, help: "Name the machine; the paste line lands on your clipboard", doing: "invite that machine")]
+        rows.append(invite)
+        groups.append(SystemGroup(title: "Hosts", rows: rows))
+        return groups
     }
 
     // ── Schedules: launchd jobs ──────────────────────────────────────────────

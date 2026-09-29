@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Remote tab** (when csync is installed): console health with Fix
+  (`csync doctor --fix`), each host with Screenshot, Shell (a Ghostty window)
+  and Teardown (asks first), Forget for expired invites and offline hosts, and
+  Invite, which asks for a name in the row and copies the paste line.
+
 - Every row button is an icon (play, stop, log, copy, trash, shield…), like
   the timer beside it, with its name in the tooltip. Copy turns into a green
   check for a moment.

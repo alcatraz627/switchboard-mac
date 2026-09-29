@@ -252,6 +252,8 @@ struct RowButton {
     enum Kind {
         case copy(String)
         case run(() -> String?)
+        /// Asks for one line of text inside the row, then runs with it.
+        case ask(placeholder: String, (String) -> String?)
     }
     let label: String
     let kind: Kind
@@ -287,6 +289,8 @@ final class PolicyStore: ObservableObject {
     @Published private(set) var busyKey: String?
     @Published var now = Date()
     @Published var systemGroups: [SystemGroup] = []
+    /// The Remote tab's rows (csync hosts), built by the same snapshot.
+    @Published var remoteGroups: [SystemGroup] = []
 
     /// Repositories the owner is working in right now, from the live sessions.
     var liveDirs: () -> [String] = { [] }

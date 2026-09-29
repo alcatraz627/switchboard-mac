@@ -140,6 +140,10 @@ enum Integrations {
     static var ipcBroker: Bool {
         !Services.shell("/bin/zsh", ["-lc", "command -v claude-ipc"]).isEmpty
     }
+    /// csync, the owner's tool for driving other machines; the Remote tab shows only with it.
+    static var csync: Bool {
+        [AppPaths.home + "/Code/Claude/csync/bin/csync", AppPaths.home + "/.local/bin/csync"].contains(where: exists)
+    }
 }
 
 // ── Preferences carried over from the claude-instances bar ──────────────────

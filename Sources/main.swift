@@ -5,7 +5,7 @@
 //
 //   --dump                  print every Machine-tab row
 //   --dump-policy [--scope <dir>]
-//   --snapshot <out.png> [--tab agents|usage|system|home|scopes] [--light] [--scope <dir>] [--expand]
+//   --snapshot <out.png> [--tab agents|usage|system|home|remote|scopes] [--light] [--scope <dir>] [--expand]
 //   --probe-timers          exercise the timed-flip engine on Keep Awake
 //   --open                  open the panel shortly after launch
 
@@ -48,8 +48,10 @@ if let out = argAfter("--snapshot") {
     let tab = argAfter("--tab") ?? "agents"
     BulbRow.startExpanded = args.contains("--expand")
     SystemRowView.startExpanded = args.contains("--expand")
+    let fresh = tab == "system" || tab == "remote" ? delegate.panelSystemGroupsFresh() : []
     let ok = snapshotPolicyPanel(to: out, dark: !args.contains("--light"), scopeDir: argAfter("--scope"), tab: tab,
-                                 system: tab == "system" ? delegate.panelSystemGroupsFresh() : [])
+                                 system: tab == "system" ? fresh : [],
+                                 remote: tab == "remote" ? delegate.panelRemoteGroups() : [])
     print(ok ? "wrote \(out)" : "snapshot failed")
     exit(ok ? 0 : 1)
 }
