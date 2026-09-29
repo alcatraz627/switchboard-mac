@@ -861,13 +861,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                     DispatchQueue.main.async { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
                     return nil
                 }), help: "Open in Finder"),
-                RowButton(label: "Terminal", kind: .run({
-                    // open reports a missing app on stderr, which is not captured; check first.
-                    guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.mitchellh.ghostty") != nil
-                    else { return "Ghostty is not installed" }
-                    let out = Services.shell("/usr/bin/open", ["-na", "Ghostty.app", "--args", "--working-directory=\(path)"])
-                    return out.isEmpty ? nil : out
-                }), help: "Open a Ghostty window here"),
+                RowButton(label: "Terminal", kind: .copy("cd '\(path.replacingOccurrences(of: "'", with: "'\\''"))'"),
+                          help: "Copy a cd to this repository, to paste in your terminal"),
             ]
             if let editor = editor {
                 row.buttons.append(RowButton(label: "Editor", kind: .run({
@@ -918,6 +913,14 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         return rows
     }
 
+    /// A csync command to paste in a terminal: full path, since csync is often
+    /// not on the PATH, and marked as the owner's, since csync refuses writes
+    /// it takes for an agent's.
+    static func csyncLine(_ verb: String, _ host: String) -> String {
+        let bin = Integrations.csyncPath.map { $0.contains(" ") ? "'\($0)'" : $0 } ?? "csync"
+        return "CSYNC_ACTOR=human \(bin) \(verb) \(host)"
+    }
+
     /// The "…" menu on an online host: chat with its agent, read-only verbs in
     /// a terminal, keep-connected, and copyable lines for verbs that need more.
     private func hostMenu(_ name: String, script: String,
@@ -936,21 +939,20 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             return copy(cmd)()
         }
         return [
-            ("Chat with csync-assist", act(["chat", name])),
-            ("Copy the chat command", chatCommand),
+            ("Copy: chat with csync-assist", chatCommand),
             ("", nil),
-            ("Info in a terminal", act(["term", name, "info"])),
-            ("Logs in a terminal", act(["term", name, "logs"])),
-            ("Recipes in a terminal", act(["term", name, "recipes"])),
+            ("Copy: info", copy(Self.csyncLine("info", name))),
+            ("Copy: logs", copy(Self.csyncLine("logs", name))),
+            ("Copy: recipes", copy(Self.csyncLine("recipes", name))),
             ("", nil),
             ("Keep connected across reboots", act(["persist", name, "on"])),
             ("Stop keeping connected", act(["persist", name, "off"])),
             ("", nil),
-            ("Copy: run a command", copy("csync run \(name) -- ")),
-            ("Copy: send a file", copy("csync push \(name) ")),
-            ("Copy: fetch a file", copy("csync pull \(name) ")),
-            ("Copy: show a message on it", copy("csync say \(name) \"\"")),
-            ("Copy: open an app on it", copy("csync open \(name) ")),
+            ("Copy: run a command", copy(Self.csyncLine("run", name) + " -- ")),
+            ("Copy: send a file", copy(Self.csyncLine("push", name) + " ")),
+            ("Copy: fetch a file", copy(Self.csyncLine("pull", name) + " ")),
+            ("Copy: show a message on it", copy(Self.csyncLine("say", name) + " \"\"")),
+            ("Copy: open an app on it", copy(Self.csyncLine("open", name) + " ")),
         ]
     }
 
@@ -1014,8 +1016,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 r.buttons = [
                     RowButton(label: "Screenshot", kind: .run(act(["shot", name])),
                               help: "Take a screenshot of \(name) and open it", doing: "screenshot \(name)"),
-                    RowButton(label: "Shell", kind: .run(act(["shell", name])),
-                              help: "Open a Ghostty window with a shell on \(name)", doing: "open a shell on \(name)"),
+                    RowButton(label: "Shell", kind: .copy(Self.csyncLine("sh", name)),
+                              help: "Copy the command for a shell on \(name), to paste in your terminal"),
                     RowButton(label: "More", kind: .menu(hostMenu(name, script: script, act: act)),
                               help: "Chat with its agent, and the other csync commands"),
                     RowButton(label: "Teardown", kind: .run(act(["teardown", name])),

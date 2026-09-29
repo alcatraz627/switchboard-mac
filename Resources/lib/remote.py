@@ -10,7 +10,8 @@ csync records them in its audit log.
 
   remote.py list                 JSON {installed, checks, hosts}
   remote.py shot <name>          take a screenshot and open it
-  remote.py shell <name>         open a Ghostty window with csync sh <name>
+  remote.py chatcmd <name>       the ssh line for a chat with its csync-assist; JSON {command}
+  remote.py persist <name> on|off keep the host connected across reboots
   remote.py teardown <name>      end the session and clean the host
   remote.py forget <name>        drop a host or a pending invite
   remote.py invite <name>        mint an invite; JSON {ok, paste}
@@ -40,7 +41,6 @@ def csync(*args, timeout=60):
         return r.returncode, {"error": (r.stderr or r.stdout).strip()[-300:]}
 
 
-TERM_VERBS = ("info", "logs", "recipes")
 SSH_CONFIG = os.path.expanduser("~/.config/csync/ssh_config")
 
 
@@ -52,14 +52,6 @@ def chat_command(name):
             # printf then read, not read -p: the host's shell may be zsh, where -p means something else.
             'while printf "you> " && read -r m; do ~/.local/bin/csync-assist ask "$m"; echo; done')
     return f"ssh -t -F {shlex.quote(SSH_CONFIG)} csync-{shlex.quote(name)} '{loop}'"
-
-
-def ghostty(command):
-    if not os.path.isdir("/Applications/Ghostty.app"):
-        return 1, {"error": "Ghostty is not installed"}
-    r = subprocess.run(["open", "-na", "Ghostty.app", "--args", "-e", "/bin/bash", "-lc", command],
-                       capture_output=True, text=True)
-    return r.returncode, {"error": r.stderr.strip() or "could not open Ghostty"}
 
 
 def state():
@@ -125,19 +117,8 @@ def main():
         elif "open X server" in err or "cannot open display" in err.lower():
             obj["error"] = f"{a[1]} has no screen to capture: it runs without a display."
         answer(code, obj)
-    elif cmd == "shell" and len(a) == 2:
-        # Ghostty runs the command in a new window; csync sh is interactive, so it needs a terminal.
-        r = subprocess.run(["open", "-na", "Ghostty.app", "--args", "-e", CSYNC, "sh", a[1]],
-                           capture_output=True, text=True)
-        answer(r.returncode, {"error": r.stderr.strip() or "could not open Ghostty"})
     elif cmd == "chatcmd" and len(a) == 2:
         answer(0, {}, {"command": chat_command(a[1])})
-    elif cmd == "chat" and len(a) == 2:
-        answer(*ghostty(chat_command(a[1])))
-    elif cmd == "term" and len(a) >= 3 and a[2] in TERM_VERBS:
-        # Read verbs print to a terminal; the window stays open until a key is pressed.
-        line = " ".join(shlex.quote(x) for x in [CSYNC, *a[2:], a[1]])
-        answer(*ghostty(f"{line}; echo; read -n 1 -s -r -p 'Press any key to close'"))
     elif cmd == "persist" and len(a) == 3 and a[2] in ("on", "off"):
         answer(*csync("persist", a[1], a[2], timeout=60))
     elif cmd == "teardown" and len(a) == 2:

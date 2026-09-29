@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Copy, don't launch**: Shell, the host menu's chat, info, logs and recipes,
+  and Repos' Terminal now copy a ready command instead of opening Ghostty.
+  csync commands carry `CSYNC_ACTOR=human` and csync's full path, so they work
+  when pasted anywhere; opened from the panel, csync had refused them as an
+  agent's.
+- `scripts/build.sh` starts the build copy with a clean environment, as launchd
+  does for the installed app, instead of passing on the caller's variables.
+
 - **Faster panel**: a full refresh takes about 1.5 s instead of about 12. The
   probes run side by side, one refresh runs at a time (opening the panel used
   to start two), and the git scan answers from its last result while it

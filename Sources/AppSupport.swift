@@ -141,8 +141,10 @@ enum Integrations {
         !Services.shell("/bin/zsh", ["-lc", "command -v claude-ipc"]).isEmpty
     }
     /// csync, the owner's tool for driving other machines; the Remote tab shows only with it.
-    static var csync: Bool {
-        [AppPaths.home + "/Code/Claude/csync/bin/csync", AppPaths.home + "/.local/bin/csync"].contains(where: exists)
+    static var csync: Bool { csyncPath != nil }
+    /// Full path, since csync is often not on the PATH a pasted command gets.
+    static var csyncPath: String? {
+        [AppPaths.home + "/Code/Claude/csync/bin/csync", AppPaths.home + "/.local/bin/csync"].first(where: exists)
     }
 }
 

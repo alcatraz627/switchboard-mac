@@ -124,7 +124,9 @@ EOF
     ;;
   *)
     stop_running
-    open "$BUILD_APP"
+    # A clean environment, like launchd gives the installed app: open passes the
+    # caller's on, and from an agent session that means its variables and tokens.
+    env -i HOME="$HOME" USER="$USER" LOGNAME="$USER" SHELL="${SHELL:-/bin/zsh}" PATH=/usr/bin:/bin:/usr/sbin:/sbin open "$BUILD_APP"
     sleep 1
     pgrep -x "$APP_NAME" >/dev/null && echo "  running (pid $(pgrep -x "$APP_NAME" | head -1))" \
       || echo "  did not start, see: scripts/build.sh --logs"
