@@ -101,6 +101,8 @@ enum SwitchboardConcerns {
 
 struct PolicyPanel: View {
     let concerns: [SwitchboardConcern]
+    /// Feeds the Needs-you strip above the tabs; nil draws no strip.
+    var store: PolicyStore? = nil
     /// Fixed-height rendering for snapshots, where a ScrollView would clip.
     var unbounded = false
     /// Pins a tab for snapshots; nil follows the owner's last choice.
@@ -117,6 +119,7 @@ struct PolicyPanel: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if let store = store { NeedsStrip(store: store) }
             if unbounded {
                 current.content
             } else {
@@ -586,6 +589,7 @@ struct SystemRowView: View {
         case "Kill": return "xmark.octagon"
         case "Disable": return "nosign"
         case "Enable": return "checkmark.circle"
+        case "Cancel": return "xmark.circle"
         default: return "circle"
         }
     }
@@ -1110,7 +1114,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             b.action = #selector(toggle(_:))
         }
         concerns = SwitchboardConcerns.all(policy: store, usage: usage, lights: lights, controls: controls)
-        let host = NSHostingController(rootView: PolicyPanel(concerns: concerns))
+        let host = NSHostingController(rootView: PolicyPanel(concerns: concerns, store: store))
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
         popover.behavior = .transient
@@ -1187,6 +1191,16 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     store.applyForSnapshot(items: r.items, projects: r.projects, error: r.error)
     store.systemGroups = system
     store.remoteGroups = remote
+    var needs = NeedsYou.items()
+    if CommandLine.arguments.contains("--demo-states") {
+        needs.append(NeedItem(id: "demo-push", kind: .push, title: "Push switchboard-mac (push targets main)",
+                              sessionID: "demo", sessionDir: NSHomeDirectory() + "/Code/Claude/switchboard-mac",
+                              since: Date().addingTimeInterval(-240), approveLine: "approve push 0000demo", files: []))
+        needs.append(NeedItem(id: "demo-ask", kind: .ask, title: "Posting to Slack",
+                              sessionID: "gone", sessionDir: nil, since: Date().addingTimeInterval(-7200),
+                              approveLine: "approve slack.post 1111demo", files: []))
+    }
+    store.needs = NeedsYou.rows(needs) {}
     let usage = UsageStore()
     let lights = LightsStore()
     if tab == "usage" { usage.reload() }   // file reads only; never starts Codex
@@ -1214,7 +1228,7 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
         ? AnyView(VStack(alignment: .leading, spacing: 0) {
               ForEach(store.scopes, id: \.self) { s in ScopeRow(scope: s, selected: s == store.scope) {} }
           }.padding(6).frame(width: 300))
-        : AnyView(PolicyPanel(concerns: concerns, unbounded: true, forcedTab: tab))
+        : AnyView(PolicyPanel(concerns: concerns, store: store, unbounded: true, forcedTab: tab))
     let host = NSHostingView(rootView: root.background(Color(nsColor: .windowBackgroundColor)))
     host.appearance = appearance
     host.safeAreaRegions = []

@@ -293,6 +293,8 @@ final class PolicyStore: ObservableObject {
     @Published var systemGroups: [SystemGroup] = []
     /// The Remote tab's rows (csync hosts), built by the same snapshot.
     @Published var remoteGroups: [SystemGroup] = []
+    /// The Needs-you strip's rows: pushes and asks waiting on the owner.
+    @Published var needs: [SystemRow] = []
 
     /// Repositories the owner is working in right now, from the live sessions.
     var liveDirs: () -> [String] = { [] }

@@ -154,6 +154,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var remote: [String: Any] = [:]
         var git: [String: Any] = [:]
         var drives: [[String: Any]] = []
+        var needs: [NeedItem] = []
     }
 
     /// Refresh the slow half off the main thread. The panel shows whatever
@@ -166,6 +167,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 s.gates = Guards.all()
             }
             s.approvals = PushApprovals.armed(liveSessionIDs: LiveSessions.ids())
+            s.needs = NeedsYou.items()
             if Integrations.claudeCode {
                 for f in SettingsFlag.allCases { s.prompts[f] = Settings.bool(f) }
                 s.connectorsOn = ContextSwitches.connectorsOn()
@@ -243,7 +245,6 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
     private func guardRows() -> [SBRow] {
         guard Integrations.guardHooks || Integrations.claudeCode else { return [] }
         let s = sbSnapshot
-        let stale = s.approvals.filter { !$0.sessionIsLive }
         let f = DateFormatter(); f.dateFormat = "d MMM"
         var rows: [SBRow] = []
 
@@ -309,23 +310,9 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                               tip: "Claude Code's confirmation prompts. Click to open.",
                               children: children))
         }
-        if !stale.isEmpty {
-            rows.append(SBRow(label: "Push approvals", badge: .count(stale.count, menuYellow),
-                              note: approvalNote(stale.first),
-                              onClick: { [weak self] in
-                                  stale.forEach { PushApprovals.clear($0) }
-                                  self?.refreshSnapshot()
-                              },
-                              tip: "Push approvals armed by sessions that are no longer live. Click to revoke them."))
-        }
         return rows
     }
 
-    private func approvalNote(_ a: PushApproval?) -> String {
-        guard let when = a?.armedAt else { return a == nil ? "armed" : "dead session" }
-        let f = DateFormatter(); f.dateFormat = "d MMM"
-        return "armed \(f.string(from: when)), dead session"
-    }
 
     private func serviceRows() -> [SBRow] {
         let s = sbSnapshot
@@ -488,6 +475,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             guard let self = self else { return }
             self.policyController?.store.systemGroups = self.panelSystemGroups()
             self.policyController?.store.remoteGroups = self.panelRemoteGroups()
+            self.policyController?.store.needs = NeedsYou.rows(self.sbSnapshot.needs) { [weak self] in self?.refreshSnapshot() }
         }
     }
 

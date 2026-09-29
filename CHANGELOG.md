@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Needs you**: a strip above the tabs, shown only while something waits:
+  pushes held by the push gate and actions behind an "ask" policy, with the
+  session they belong to. Copy puts the approve line on the clipboard to paste
+  into that session; Cancel does what typing `cancel push` or `deny` does.
+  The panel never approves by itself, because a button in an app is something
+  an agent could press. Leftovers from ended sessions fold into one row with
+  Clear all. The old "Push approvals" row in Guards moved here.
+
 - **Remote**: each online host has a "…" menu: chat with its csync-assist in
   a terminal (or copy that command), Info, Logs and Recipes in a terminal,
   keep connected on or off, and copyable lines for run, push, pull, say and
