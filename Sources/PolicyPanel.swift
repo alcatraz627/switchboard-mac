@@ -387,6 +387,7 @@ struct GroupHeader: View {
         "Services": "server.rack",
         "Dev servers": "network",
         "Repos": "arrow.triangle.branch",
+        "Drives": "externaldrive",
         "Local models": "cpu",
         "Console": "server.rack",
         "Hosts": "laptopcomputer.and.iphone",
@@ -572,6 +573,8 @@ struct SystemRowView: View {
         case "Editor": return "chevron.left.forwardslash.chevron.right"
         case "Fetch": return "arrow.triangle.2.circlepath"
         case "Prune": return "scissors"
+        case "Eject": return "eject.fill"
+        case "Disk Utility": return "internaldrive"
         default: return "circle"
         }
     }

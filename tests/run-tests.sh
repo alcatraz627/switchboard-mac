@@ -94,6 +94,8 @@ check "remote.py list reports hosts and checks" python3 -c "import json,subproce
 eq "remote.py refuses an unknown host"     1 "$(rc python3 Resources/lib/remote.py shot no-such-host-xyz)"
 check "gitscan.py list reports repos and a clean count" python3 -c "import json,subprocess;d=json.loads(subprocess.run(['python3','Resources/lib/gitscan.py','list'],capture_output=True,text=True,timeout=120).stdout);assert isinstance(d['repos'],list) and d['clean']>=0"
 eq "gitscan.py refuses a path outside ~/Code" 1 "$(rc python3 Resources/lib/gitscan.py prune /tmp)"
+check "drives.py list emits a JSON array" python3 -c "import json,subprocess;assert isinstance(json.loads(subprocess.run(['python3','Resources/lib/drives.py','list'],capture_output=True,text=True,timeout=60).stdout),list)"
+eq "drives.py refuses to eject the boot disk" 1 "$(rc python3 Resources/lib/drives.py eject disk0)"
 eq "wol.py refuses a malformed MAC"         2 "$(rc python3 Resources/lib/wol.py wake not-a-mac)"
 eq "wol.py sends to a well-formed MAC"      0 "$(rc python3 Resources/lib/wol.py wake 02:00:00:00:00:01)"
 python3 Resources/lib/wol.py add "Test box" 02:00:00:00:00:02 >/dev/null

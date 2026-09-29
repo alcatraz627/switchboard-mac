@@ -153,6 +153,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var models: [String: Any] = [:]
         var remote: [String: Any] = [:]
         var git: [String: Any] = [:]
+        var drives: [[String: Any]] = []
     }
 
     /// Refresh the slow half off the main thread. The panel shows whatever
@@ -194,6 +195,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             }
             s.jobs = pyList("jobs.py")
             s.wolTargets = pyList("wol.py")
+            s.drives = pyList("drives.py")
             let dev = Services.shell("/usr/bin/env", ["python3", AppPaths.lib("devservers.py"), "list"], timeout: 20)
             s.devServers = ((try? JSONSerialization.jsonObject(with: Data(dev.utf8)) as? [String: Any])?["servers"]
                 as? [[String: Any]]) ?? []
@@ -516,6 +518,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         if !dev.isEmpty { out.append(SystemGroup(title: "Dev servers", rows: dev)) }
         let code = gitRows()
         if !code.isEmpty { out.append(SystemGroup(title: "Repos", rows: code)) }
+        let drives = driveRows()
+        if !drives.isEmpty { out.append(SystemGroup(title: "Drives", rows: drives)) }
         let models = modelRows()
         if !models.isEmpty { out.append(SystemGroup(title: "Local models", rows: models)) }
         let schedules = scheduleRows()
@@ -740,6 +744,47 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             rows.append(j)
         }
         return rows
+    }
+
+    // ── Drives: external disks and disk images ───────────────────────────────
+
+    /// One row per attached drive, with its format and free space. The group
+    /// is absent when nothing is attached.
+    private func driveRows() -> [SystemRow] {
+        let script = AppPaths.lib("drives.py")
+        return sbSnapshot.drives.map { d in
+            let name = d["name"] as? String ?? "?", mount = d["mount"] as? String ?? ""
+            let disk = d["disk"] as? String ?? ""
+            let total = d["total_gb"] as? Double ?? 0, free = d["free_gb"] as? Double ?? 0
+            let kind = (d["image"] as? Bool ?? false) ? "disk image" : (d["protocol"] as? String ?? "external")
+            var r = SystemRow(label: name, state: .on(menuTeal),
+                              // Free space means nothing on a read-only volume (an installer image).
+                              note: "\(kind) · \(d["format"] as? String ?? "?") · "
+                                  + ((d["writable"] as? Bool ?? true)
+                                     ? String(format: "%.1f of %.1f GB free", free, total)
+                                     : String(format: "%.1f GB · read-only", total)),
+                              tip: "\(mount) · \(disk)")
+            r.key = "drive-" + mount
+            r.showsBadge = false
+            r.buttons = [RowButton(label: "Finder", kind: .run({
+                DispatchQueue.main.async { NSWorkspace.shared.open(URL(fileURLWithPath: mount)) }
+                return nil
+            }), help: "Open in Finder")]
+            if d["ejectable"] as? Bool ?? true {
+                r.buttons.append(RowButton(label: "Eject", kind: .run({ [weak self] in
+                    let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script, "eject", disk], timeout: 70))
+                    self?.refreshSnapshot()
+                    return err
+                }), help: "Eject \(disk) and every volume on it", doing: "eject \(name)"))
+            }
+            r.buttons.append(RowButton(label: "Disk Utility", kind: .run({
+                DispatchQueue.main.async {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Disk Utility.app"))
+                }
+                return nil
+            }), help: "Open Disk Utility, for formatting and repair"))
+            return r
+        }
     }
 
     // ── Code: git repositories under ~/Code ──────────────────────────────────

@@ -11,6 +11,9 @@
   each with Finder, Terminal, Editor and Fetch, and Prune (asks first) where a
   worktree record is stale. Nothing commits, pushes or resets. Scanned in
   parallel and cached for two minutes.
+- **Machine > Drives**: every external disk and mounted disk image with its
+  format and free space, and Finder, Eject and Disk Utility. The group is
+  absent when nothing is attached; the boot disk can never be ejected.
 
 - Every row button is an icon (play, stop, log, copy, trash, shield…), like
   the timer beside it, with its name in the tooltip. Copy turns into a green
