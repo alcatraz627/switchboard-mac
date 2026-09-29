@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **One time picker** for every snooze, timed flip, expiry, reminder and timer:
+  preset chips, a field that reads "90m", "3h", "tomorrow 9am" or "fri 5pm",
+  and a calendar.
+- **Timers** tab: several labelled, coloured countdowns with a sound and a
+  notification. **Queue** tab: gcc schedules, cron duties (dead ones first),
+  the deploy queue and open proposals.
+- Notes save as you type; the notes folder shows under the list and can be
+  changed in Settings. The hover preview now appears (it never did), with
+  timers, the next reminder, All clear, and a red or yellow icon dot.
+
 - **Notes**: a compose bar (Enter saves, or save from the clipboard, or save
   and copy the path), one markdown file per note, copy path / content / title,
   tags, an expiry that dims a note into a collapsed Expired section, reminders
