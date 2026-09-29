@@ -519,25 +519,43 @@ struct SystemRowView: View {
 
     // ── Row buttons ──
 
-    @ViewBuilder private func rowButton(_ b: RowButton) -> some View {
-        if let icon = b.icon {
-            Button { press(b) } label: { Image(systemName: icon).font(.system(size: 12)) }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .disabled(busyButton != nil)
-                .help(b.help)
-        } else {
-            labelButton(b)
+    /// Every row button is an icon, like the timer beside it; its name moves
+    /// to the tooltip. One table so a new button can never come out as text.
+    static func symbol(for label: String) -> String {
+        switch label {
+        case "Copy": return "doc.on.doc"
+        case "Transcript": return "text.bubble"
+        case "Start": return "play.fill"
+        case "Stop": return "stop.fill"
+        case "Open": return "doc.text"
+        case "Reap": return "trash"
+        case "Load": return "arrow.down.circle"
+        case "Unload": return "eject"
+        case "Wake": return "power"
+        case "Forget": return "minus.circle"
+        case "Add…": return "plus.circle"
+        case "Re-arm", "Lift": return "checkmark.shield"
+        default: return "circle"
         }
     }
 
-    private func labelButton(_ b: RowButton) -> some View {
+    private func iconButton(_ symbol: String, tip: String, tint: Color? = nil,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 12)).frame(width: 18, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(tint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.secondary))
+        .help(tip)
+    }
+
+    private func rowButton(_ b: RowButton) -> some View {
         let copied = copiedButton == b.label
-        return Button(copied ? "Copied" : b.label) { press(b) }
-            .controlSize(.small)
+        return iconButton(copied ? "checkmark" : (b.icon ?? Self.symbol(for: b.label)),
+                          tip: copied ? "Copied" : (b.help.isEmpty ? b.label : "\(b.label): \(b.help)"),
+                          tint: copied ? Color(nsColor: .systemGreen) : nil) { press(b) }
             .disabled(busyButton != nil)
-            .foregroundStyle(copied ? AnyShapeStyle(Color(nsColor: .systemGreen)) : AnyShapeStyle(.primary))
-            .help(b.help)
     }
 
     private func press(_ b: RowButton) {
@@ -657,7 +675,7 @@ struct SystemRowView: View {
                     .rotationEffect(.degrees(expanded ? 90 : 0))
             }
         } else if let label = row.buttonLabel, let action = row.action {
-            Button(label, action: action).controlSize(.small)
+            iconButton(Self.symbol(for: label), tip: "\(label): \(row.tip)", action: action)
         } else if let choices = row.choices {
             Picker("", selection: Binding(get: { row.selected }, set: { row.onChoose?($0) })) {
                 ForEach(Array(choices.enumerated()), id: \.offset) { i, c in Text(c).tag(i) }

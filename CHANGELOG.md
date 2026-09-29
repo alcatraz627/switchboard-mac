@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Every row button is an icon (play, stop, log, copy, trash, shield…), like
+  the timer beside it, with its name in the tooltip. Copy turns into a green
+  check for a moment.
+
 ## 0.2.0 (2026-09-29)
 
 - **Machine > Dev servers**: the port ledger in the panel. Local services
