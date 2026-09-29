@@ -107,27 +107,28 @@ enum NeedsYou {
         guard FileManager.default.createFile(atPath: sentinel, contents: Data()) else {
             return "could not write \(sentinel)"
         }
-        _ = Services.shell("/bin/bash", [root + "/scripts/hooks/warn-log.sh", "--hook", item.kind == .push ? "push-gate" : "policy-ask",
-                                         "--action", "panel-approved", "--heeded", "yes"], timeout: 5)
-        nudge(item)
+        if !probing {
+            _ = Services.shell("/bin/bash", [root + "/scripts/hooks/warn-log.sh", "--hook", item.kind == .push ? "push-gate" : "policy-ask",
+                                             "--action", "panel-approved", "--heeded", "yes"], timeout: 5)
+        }
+        nudge(item, item.kind == .push
+            ? "[push-gate] the owner approved \(item.title.lowercased()) from the Switchboard panel; the single-use approval is written. Re-run the same git push now."
+            : "[policy-ask] the owner approved \(item.title.lowercased()) from the Switchboard panel; the single-use approval is written. Run the same call again now; it covers that one call.")
         return nil
     }
 
-    /// Tell the waiting session it is approved, so it retries without waiting
-    /// for the owner's next message. Sent as a request because the ipc inbox
-    /// monitor wakes an idle session only for requests, queries and responses;
-    /// an inform would sit until the next turn. Best effort: the gate trusts the
-    /// file, never this message, and the session's next prompt also says so.
-    private static func nudge(_ item: NeedItem) {
+    /// Tell the waiting session what the owner decided, so it acts without
+    /// waiting for the owner's next message. Sent as a request because the ipc
+    /// inbox monitor wakes an idle session only for requests, queries and
+    /// responses. Best effort: the gate trusts the files, never this message.
+    private static func nudge(_ item: NeedItem, _ msg: String) {
+        guard !probing else { return }
         let peers = Services.shell("/bin/zsh", ["-lc", "claude-ipc peers --by-session"], timeout: 8)
         guard let d = peers.data(using: .utf8),
               let list = (try? JSONSerialization.jsonObject(with: d) as? [String: Any])?["peers"] as? [[String: Any]],
               let alias = (list.first { ($0["sessionId"] as? String) == item.sessionID }?["aliases"] as? [String])?.first
         else { dlog("approve: no ipc mailbox for \(item.sessionID); it will see the approval on its next prompt"); return }
         _ = Services.shell("/bin/zsh", ["-lc", "claude-ipc register switchboard-panel --service >/dev/null 2>&1"], timeout: 8)
-        let msg = item.kind == .push
-            ? "[push-gate] the owner approved \(item.title.lowercased()) from the Switchboard panel; the single-use approval is written. Re-run the same git push now."
-            : "[policy-ask] the owner approved \(item.title.lowercased()) from the Switchboard panel; the single-use approval is written. Run the same call again now; it covers that one call."
         _ = Services.shell("/bin/zsh", ["-lc", "claude-ipc send --to \(shellQuote(alias)) --from switchboard-panel --kind request --reply-by none \(shellQuote(msg))"], timeout: 10)
     }
 
@@ -137,10 +138,20 @@ enum NeedsYou {
     /// went wrong, or nil.
     static func cancel(_ item: NeedItem) -> String? {
         for f in item.files where FileManager.default.fileExists(atPath: f) {
-            do { try FileManager.default.removeItem(atPath: f) } catch { return error.localizedDescription }
+            do { try FileManager.default.removeItem(atPath: f) } catch {
+                return "could not remove \((f as NSString).lastPathComponent): \(error.localizedDescription)"
+            }
+        }
+        if item.sessionDir != nil {
+            nudge(item, item.kind == .push
+                ? "[push-gate] the owner cancelled \(item.title.lowercased()) from the Switchboard panel; the nonce and any approval are gone. Do not push."
+                : "[policy-ask] the owner denied \(item.title.lowercased()) from the Switchboard panel. Do not retry it; carry on with the rest of the work.")
         }
         return nil
     }
+
+    /// Set by the headless probe so it never messages a real session.
+    static var probing = false
 
     /// The strip's rows: each live item on its own, then everything whose
     /// session has ended folded into one row with Clear all.
@@ -246,7 +257,8 @@ func probeApprove() -> String {
     try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
     defer { try? fm.removeItem(atPath: dir) }
     NeedsYou.rootOverride = dir
-    defer { NeedsYou.rootOverride = nil }
+    NeedsYou.probing = true
+    defer { NeedsYou.rootOverride = nil; NeedsYou.probing = false }
     let sid = "probe-session-0001"
     let nonce = #"{"nonce":"abcd1234","target":"/tmp/some-repo","why":"push targets main","ts":1}"#
     fm.createFile(atPath: dir + "/.push-nonce-" + sid, contents: Data(nonce.utf8))
@@ -271,7 +283,19 @@ func probeApprove() -> String {
         check("approve reports success", NeedsYou.approve(item) == nil)
         check("the approval file the gate reads exists", fm.fileExists(atPath: dir + "/.push-approved-" + sid))
         check("the held push itself is left for the gate to clear", fm.fileExists(atPath: dir + "/.push-nonce-" + sid))
+        // Cancel after approve must leave neither file, as typing "cancel push" does.
+        check("cancel reports success", NeedsYou.cancel(item) == nil)
+        check("cancel removes the held push", !fm.fileExists(atPath: dir + "/.push-nonce-" + sid))
+        check("cancel removes its approval, so a retried push is held again",
+              !fm.fileExists(atPath: dir + "/.push-approved-" + sid))
     }
+    if let askItem = NeedsYou.items().first(where: { $0.kind == .ask }) {
+        check("cancel on an ask reports success", NeedsYou.cancel(askItem) == nil)
+        check("cancel on an ask removes it and its approval, as typing deny does",
+              !fm.fileExists(atPath: dir + "/.policy-ask/" + sid + "--slack.post.nonce")
+              && !fm.fileExists(atPath: dir + "/.policy-ask/" + sid + "--slack.post.approved"))
+    }
+    check("nothing is left waiting after both cancels", NeedsYou.items().isEmpty)
     lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
     return lines.joined(separator: "\n")
 }
