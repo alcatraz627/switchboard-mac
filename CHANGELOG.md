@@ -2,10 +2,36 @@
 
 ## Unreleased
 
-- **Skills tab**: every skill in ~/.claude/skills by name with its first
-  sentence; open one for the full description and its SKILL.md path, which
-  copies on a click anywhere on the row.
-- The tab bar wraps to two rows of four, so every tab keeps its full label.
+- **Twelve tabs**, in this order: Approvals, Agents, Usage, Rules & Hooks,
+  Ledger, Library, Runtime, Plugins & MCP, Machine, Controls, Home, Remote.
+  The list tabs share one search, rows that open to their details, and paths
+  that copy; a long section shows six rows and a Show all row.
+- **Approvals**: the first tab while anything waits, with a yellow count of
+  items a live session is waiting on. Pushes, policy asks, and what ended
+  sessions left behind, each with Approve, Copy, Cancel and details. The
+  Needs-you strip stays on the other tabs for now and shows the same count.
+  Cancel from the panel tells the waiting session, as typing it does.
+- **Library** (was Skills): skills, parked skills with the command that
+  installs one, feature and convention docs and global memories flagged when
+  past their review date, personas, and every script by its header comment.
+- **Rules & Hooks**: every rule, always-loaded or scoped, with the
+  always-loaded size cap flagged; every hook with the events it runs on from
+  settings.json or a hook-orchestrator tasks file, hooks with no event first;
+  Gates and Permission prompts moved here from Machine.
+- **Ledger**: mistakes by pattern, most recurring first, with the check that
+  would have caught each; open and closed proposals. Rows copy their CLI line.
+- **Runtime**: Services, Dev servers, Local models and Schedules, moved from
+  Machine. **Plugins & MCP**: installed plugins and MCP servers, everywhere or
+  per project, read-only, with keys and tokens never shown.
+- **Machine** keeps Session, Drives and Repos; Context moved to Agents.
+- **Failures say why**: a command that fails, hangs or cannot start is told
+  apart from one with nothing to say, and a group whose source fails says so
+  instead of vanishing. launchd, pm2 and permission errors read as sentences.
+  The kanban switch, hub restart and Codex ask have time limits; a timed flip
+  that did not land says so; an eject says whether the drive went; Controls
+  and the transcript window say what went wrong instead of doing nothing.
+- Row buttons keep their size beside long text, and titles, notes and the
+  footer wrap instead of ending in an ellipsis.
 
 - **Needs you: Approve, Copy, Cancel and details on every item**, pushes and
   policy asks alike. Approve writes the same single-use file the typed approve

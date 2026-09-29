@@ -44,6 +44,8 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   check "the Ledger tab renders" "$BIN" --snapshot "$WORK/ledger.png" --tab ledger
   check "the Runtime tab renders" "$BIN" --snapshot "$WORK/runtime.png" --tab runtime
   check "the Plugins & MCP tab renders" "$BIN" --snapshot "$WORK/plugins.png" --tab plugins
+  check "a transcript window says when the hub is down" "$BIN" --probe-transcript
+  check "every eject helper answer is JSON with ok" python3 -c "import json,subprocess;r=subprocess.run(['python3','Resources/lib/drives.py','eject','disk99'],capture_output=True,text=True);assert json.loads(r.stdout)['ok'] is False"
   # A helper that fails shows its group with the reason instead of dropping it.
   BADLIB="$WORK/badlib"; cp -Rf "$ROOT/Resources/lib" "$BADLIB"
   printf 'import sys\nsys.stderr.write("diskutil is not answering\\n")\nsys.exit(2)\n' > "$BADLIB/drives.py"

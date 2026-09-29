@@ -73,7 +73,13 @@ enum SwitchboardConcerns {
         registry(policy: policy, usage: usage, lights: lights, controls: controls)
             .filter { $0.id != "agents" || Integrations.policyStore }
             .filter { $0.id != "remote" || Integrations.csync }
+            .sorted { (tabOrder.firstIndex(of: $0.id) ?? 99) < (tabOrder.firstIndex(of: $1.id) ?? 99) }
     }
+
+    /// Tab order (docs/plans/20260929-tabs-plan.md): what needs you, what
+    /// agents may do and how much, the gcc's own lists, then this Mac.
+    static let tabOrder = ["approvals", "agents", "usage", "rules", "ledger", "library",
+                           "runtime", "plugins", "system", "controls", "home", "remote"]
 
     private static func registry(policy: PolicyStore, usage: UsageStore, lights: LightsStore, controls: ControlsStore) -> [SwitchboardConcern] {
         [
@@ -290,6 +296,22 @@ struct AgentsTabView: View {
                 let items = g.items.filter { !($0.group == "Limits" && $0.key.hasSuffix("_pct")) }
                 if !items.isEmpty { PolicyGroupView(name: g.name, items: items, store: store) }
             }
+            // Machine groups that moved here (Context). They are machine-wide, so
+            // they show under Everywhere only, never as a project override.
+            if !store.scopeIsProject {
+                ForEach(store.systemGroups.filter { SystemTabView.groupHome[$0.title] == "agents" }) { g in
+                    VStack(alignment: .leading, spacing: 5) {
+                        GroupHeader(name: g.title)
+                        if let st = g.status { ReadingStatus(state: st).padding(.horizontal, 4) }
+                        Card {
+                            ForEach(Array(g.rows.enumerated()), id: \.element.id) { i, row in
+                                if i > 0 { Divider().padding(.leading, PT.rowH) }
+                                SystemRowView(row: row, store: store)
+                            }
+                        }
+                    }
+                }
+            }
         }
         .padding(PT.gap)
     }
@@ -383,7 +405,7 @@ struct SystemTabView: View {
     /// Machine groups that live on another tab now, by that tab's id. The
     /// snapshot still builds them; only where they are drawn changes.
     static let groupHome: [String: String] = [
-        "Guards": "rules",
+        "Guards": "rules", "Context": "agents",
         "Services": "runtime", "Dev servers": "runtime", "Local models": "runtime", "Schedules": "runtime",
     ]
 

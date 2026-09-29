@@ -185,13 +185,16 @@ final class ControlsStore: NSObject, ObservableObject, CLLocationManagerDelegate
 
     func setVolume(_ v: Float) {
         failures["volume"] = nil
-        guard let id = output, AudioOut.setVolume(id, v) else { return fail("volume", "This output does not take a volume from apps.") }
+        guard let id = output else { return fail("volume", "No sound output is selected.") }
+        guard AudioOut.setVolume(id, v) else { return fail("volume", "This output does not take a volume from apps.") }
         volume = AudioOut.volume(id)
     }
 
     func toggleMute() {
         failures["volume"] = nil
-        guard let id = output, let m = muted, AudioOut.setMuted(id, !m) else { return fail("volume", "This output cannot be muted from apps.") }
+        guard let id = output else { return fail("volume", "No sound output is selected.") }
+        guard let m = muted else { return fail("volume", "This output does not report whether it is muted.") }
+        guard AudioOut.setMuted(id, !m) else { return fail("volume", "This output cannot be muted from apps.") }
         muted = AudioOut.muted(id)
     }
 
@@ -203,13 +206,17 @@ final class ControlsStore: NSObject, ObservableObject, CLLocationManagerDelegate
 
     func setWiFi(_ on: Bool) {
         failures["wifi"] = nil
+        guard let wifi = CWWiFiClient.shared().interface() else { return fail("wifi", "This Mac has no Wi-Fi interface to switch.") }
         do {
-            try CWWiFiClient.shared().interface()?.setPower(on)
+            try wifi.setPower(on)
         } catch {
             return fail("wifi", "Wi-Fi did not turn \(on ? "on" : "off"): \(error.localizedDescription)")
         }
-        // The radio reports its new state a moment after it switches.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.load(devices: false) }
+        // The radio reports its new state a moment after it switches; read it back to know it stuck.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            self.load(devices: false)
+            if self.wifiOn != on { self.fail("wifi", "Wi-Fi is still \(on ? "off" : "on").") }
+        }
     }
 
     func askLocation() {
@@ -236,8 +243,10 @@ final class ControlsStore: NSObject, ObservableObject, CLLocationManagerDelegate
     }
 
     func toggleDevice(_ d: BTDevice) {
-        guard let dev = IOBluetoothDevice(addressString: d.id) else { return }
         failures[d.id] = nil
+        guard let dev = IOBluetoothDevice(addressString: d.id) else {
+            return fail(d.id, "\(d.name) is no longer paired with this Mac.")
+        }
         busy.insert(d.id)
         DispatchQueue.global(qos: .userInitiated).async {
             let r = d.connected ? dev.closeConnection() : dev.openConnection()

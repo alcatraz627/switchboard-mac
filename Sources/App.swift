@@ -21,6 +21,9 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
 
     private var kanbanUp: Bool?
     private var kanbanBusy = false
+    /// Timed flips that did not land, by switch, shown on the switch's row
+    /// until the switch is flipped or timed again.
+    var timerFailures: [String: String] = [:]
     /// Why the last kanban start or stop failed, shown on its row until the next try.
     private var kanbanError: String?
 
@@ -559,8 +562,11 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             case .count(let n, let c): state = .count(n, c)
             case .ok: state = .ok
             }
-            var row = SystemRow(label: r.label, state: state, note: r.note, enabled: r.enabled,
-                                tip: r.tip, link: r.link, action: r.onClick, menu: r.submenu)
+            let failed = timerFailures[r.label]
+            // A manual flip clears a timer failure: the owner has taken it from here.
+            let onClick: (() -> Void)? = r.onClick.map { act in { [weak self] in self?.timerFailures[r.label] = nil; act() } }
+            var row = SystemRow(label: r.label, state: state, note: failed.map { "⚠︎ " + $0 } ?? r.note, enabled: r.enabled,
+                                tip: r.tip, link: r.link, action: onClick, menu: r.submenu)
             row.children = r.children
             row.buttons = r.buttons
             if row.isSwitch && r.enabled {
@@ -1297,11 +1303,19 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         a.addButton(withTitle: "Cancel")
         NSApp.activate(ignoringOtherApps: true)
         guard a.runModal() == .alertFirstButtonReturn else { return }
-        let r = Services.shell("/usr/bin/env", ["python3", wol, "add", name.stringValue, mac.stringValue])
-        if r.contains("error") {
-            let e = NSAlert(); e.messageText = "Not saved"; e.informativeText = r; e.runModal()
+        let (n, m) = (name.stringValue, mac.stringValue)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // A timeout or crash is a failure too, not a quiet save.
+            let err = Self.helperError(Services.run("/usr/bin/env", ["python3", wol, "add", n, m], timeout: 8))
+            DispatchQueue.main.async {
+                if let err = err {
+                    let e = NSAlert(); e.messageText = "\(n.isEmpty ? "The device" : n) was not saved"; e.informativeText = err
+                    NSApp.activate(ignoringOtherApps: true)
+                    e.runModal()
+                }
+                self?.refreshSnapshot()
+            }
         }
-        refreshSnapshot()
     }
 
     // ── Timed flips ──────────────────────────────────────────────────────────
@@ -1335,6 +1349,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         // Re-timing keeps the original restore state.
         let restore = systemTimers[key]?.restoreOn ?? row.isOn
         if row.isOn == restore { row.action?() }
+        timerFailures[key] = nil
         systemTimers[key] = SystemTimer(until: until, restoreOn: restore)
         dlog("timer: \(key) until \(until), then \(restore ? "on" : "off")")
         refreshPanel()
@@ -1362,11 +1377,30 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 if let row = self.systemRow(key), row.isOn != t.restoreOn {
                     dlog("timer: \(key) due, turning \(t.restoreOn ? "on" : "off")")
                     row.action?()
+                    self.verifyTimedFlip(key, wantOn: t.restoreOn)
                 } else {
                     dlog("timer: \(key) due, already \(t.restoreOn ? "on" : "off")")
                 }
             }
             self.refreshSnapshot()
+        }
+    }
+
+    /// Some switches take seconds (pm2, a login shell), so the check waits
+    /// before reading the switch back; a flip that did not land says so on its row.
+    private func verifyTimedFlip(_ key: String, wantOn: Bool, after: TimeInterval = 10) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
+            self?.refreshSnapshot {
+                guard let self = self, let row = self.systemRow(key) else { return }
+                if row.isOn == wantOn {
+                    self.timerFailures[key] = nil
+                } else {
+                    let want = wantOn ? "on" : "off"
+                    self.timerFailures[key] = "the timer could not turn it \(want); it is still \(wantOn ? "off" : "on")"
+                    dwarn("timer: \(key) did not turn \(want)")
+                }
+                self.refreshPanel()
+            }
         }
     }
 

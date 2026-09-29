@@ -177,22 +177,11 @@ final class UsageStore: ObservableObject {
         codexBusySince = Date()
         codexRefreshError = nil
         queue.async { [weak self] in
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            p.arguments = ["python3", Self.codexGate, "--fresh"]
             var env = ProcessInfo.processInfo.environment
             env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (env["PATH"] ?? "")
-            p.environment = env
-            let pipe = Pipe()
-            p.standardOutput = pipe
-            p.standardError = FileHandle.nullDevice
-            var verdict = ""
-            if (try? p.run()) != nil {
-                verdict = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-                p.waitUntilExit()
-            } else {
-                verdict = "UNKNOWN: could not start python3"
-            }
+            // Capped: a Codex that never answers used to leave the spinner running until restart.
+            let r = Services.run("/usr/bin/env", ["python3", Self.codexGate, "--fresh"], timeout: 60, environment: env)
+            let verdict = r.timedOut || !r.launched ? "UNKNOWN: " + (r.failure ?? "Codex did not answer") : r.out
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.codexBusySince = nil

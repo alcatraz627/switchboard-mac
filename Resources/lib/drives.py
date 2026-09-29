@@ -63,9 +63,21 @@ def main():
         if disk not in {v["disk"] for v in volumes()}:
             print(json.dumps({"ok": False, "error": f"{disk} is not one of the attached drives"}))
             sys.exit(1)
-        r = subprocess.run(["diskutil", "eject", disk], capture_output=True, text=True, timeout=60)
-        ok = r.returncode == 0
-        print(json.dumps({"ok": ok, "error": None if ok else (r.stderr or r.stdout).strip() or "eject failed"}))
+        try:
+            r = subprocess.run(["diskutil", "eject", disk], capture_output=True, text=True, timeout=60)
+            ok, why = r.returncode == 0, (r.stderr or r.stdout).strip() or "eject failed"
+        except subprocess.TimeoutExpired:
+            ok, why = False, "diskutil did not finish within 60 s"
+        # Whatever diskutil said, the list says whether the drive is still there.
+        try:
+            attached = disk in {v["disk"] for v in volumes()}
+        except Exception:
+            attached = None
+        if not ok and attached is False:
+            ok = True   # it went, even though diskutil complained or ran long
+        elif not ok:
+            why += "; it is still attached" if attached else "; whether it ejected is unknown"
+        print(json.dumps({"ok": ok, "error": None if ok else why}))
         sys.exit(0 if ok else 1)
     else:
         print(__doc__)

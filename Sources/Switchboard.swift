@@ -411,11 +411,13 @@ enum Services {
     /// capped. Both pipes are drained on other queues: a child that fills the
     /// 64K pipe buffer blocks forever on write if nobody reads it, and then the
     /// timeout never gets a chance to fire.
-    static func run(_ exe: String, _ args: [String], timeout: TimeInterval = 4.0) -> ShellResult {
+    static func run(_ exe: String, _ args: [String], timeout: TimeInterval = 4.0,
+                    environment: [String: String]? = nil) -> ShellResult {
         var r = ShellResult(name: ShellResult.displayName(exe, args), timeout: timeout)
         let p = Process()
         p.executableURL = URL(fileURLWithPath: exe)
         p.arguments = args
+        if let env = environment { p.environment = env }
         let outPipe = Pipe(), errPipe = Pipe()
         p.standardOutput = outPipe
         p.standardError = errPipe
