@@ -60,6 +60,11 @@ if args.contains("--probe-visibility") {
     print(report)
     exit(report.hasSuffix("all passed") ? 0 : 1)
 }
+if args.contains("--probe-notes") {
+    let report = probeNotes()
+    print(report)
+    exit(report.hasSuffix("all passed") ? 0 : 1)
+}
 if args.contains("--probe-transcript") {
     let report = probeTranscript()
     print(report)

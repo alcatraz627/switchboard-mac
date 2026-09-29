@@ -47,6 +47,8 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   check "a transcript window says when the hub is down" "$BIN" --probe-transcript
   check "a section hidden in Settings is neither drawn nor read" "$BIN" --probe-visibility
   check "the Settings tab renders" "$BIN" --snapshot "$WORK/settings.png" --tab settings
+  check "notes save, read back, expire, reorder and delete (scratch folder)" env SWITCHBOARD_STATE="$WORK/notes-state" "$BIN" --probe-notes
+  check "the Notes tab renders with an editor open" env SWITCHBOARD_STATE="$WORK/notes-state" "$BIN" --snapshot "$WORK/notes.png" --tab notes --expand
   check "every eject helper answer is JSON with ok" python3 -c "import json,subprocess;r=subprocess.run(['python3','Resources/lib/drives.py','eject','disk99'],capture_output=True,text=True);assert json.loads(r.stdout)['ok'] is False"
   # A helper that fails shows its group with the reason instead of dropping it.
   BADLIB="$WORK/badlib"; cp -Rf "$ROOT/Resources/lib" "$BADLIB"

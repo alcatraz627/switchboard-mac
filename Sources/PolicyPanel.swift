@@ -135,6 +135,12 @@ enum SwitchboardConcerns {
                                content: AnyView(SystemTabView(store: policy, source: .catalog("plugins"))),
                                refresh: { policy.reloadCatalog("plugins", PluginsCatalog.groups) },
                                pinned: AnyView(ScopedSearch(store: policy, id: "plugins", prompt: "Search plugins and MCP servers"))),
+            SwitchboardConcern(id: "notes", title: "Notes", subtitle: "Notes at hand, one file each", icon: "note.text",
+                               footer: "Drag the grip to reorder. Each note is a markdown file; the link icon copies its path.",
+                               footerIcon: "doc.text",
+                               content: AnyView(NotesTabView(notes: NotesStore.shared)),
+                               refresh: { NotesStore.shared.load() },
+                               pinned: AnyView(NoteCompose(notes: NotesStore.shared))),
             catalogTab(policy, id: "rules", title: "Hooks", subtitle: "Rules, gates and hook scripts", icon: "checklist",
                        footer: "Problems sort first: a hook with no event, or one whose file is gone.",
                        search: "Search rules, gates and hooks", read: RulesCatalog.groups),
@@ -1374,6 +1380,7 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     store.systemGroups = system
     store.remoteGroups = remote
     if let read = catalogReaders[tab] { store.catalogs[tab] = read() }
+    if tab == "notes" { NotesStore.remindersOff = true; NotesStore.shared.load(); NoteRow.startOpen = CommandLine.arguments.contains("--expand") }
     if let f = CommandLine.arguments.firstIndex(of: "--filter").flatMap({ $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }) {
         store.queries[tab + "::scope"] = f
     }
