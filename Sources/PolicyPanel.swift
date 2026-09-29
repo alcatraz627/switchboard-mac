@@ -59,6 +59,10 @@ struct SwitchboardConcern: Identifiable {
     var refresh: () -> Void = {}
     /// Stays above the scrolling content, such as a search field.
     var pinned: AnyView? = nil
+    /// False hides the tab, as Approvals is hidden while nothing waits.
+    var isShown: () -> Bool = { true }
+    /// A number on the tab label, or nil for none.
+    var badge: () -> Int? = { nil }
 }
 
 /// The registry: every concern, in tab order.
@@ -73,6 +77,12 @@ enum SwitchboardConcerns {
 
     private static func registry(policy: PolicyStore, usage: UsageStore, lights: LightsStore, controls: ControlsStore) -> [SwitchboardConcern] {
         [
+            SwitchboardConcern(id: "approvals", title: "Approvals", subtitle: "Waiting on you", icon: "hand.raised",
+                               footer: "Approve writes a one-time pass and wakes the session.", footerIcon: "checkmark.seal",
+                               content: AnyView(SystemTabView(store: policy, source: .approvals)),
+                               refresh: { policy.requestSystemRefresh() },
+                               isShown: { !policy.needGroups.isEmpty },
+                               badge: { policy.needsWaiting > 0 ? policy.needsWaiting : nil }),
             SwitchboardConcern(id: "agents", title: "Agents", subtitle: "What agents may do", icon: "person.badge.shield.checkmark",
                                footer: "Applies to every session at once. Only you can change it.", footerIcon: "bolt.fill",
                                content: AnyView(AgentsTabView(store: policy)),
@@ -110,8 +120,8 @@ enum SwitchboardConcerns {
 
 struct PolicyPanel: View {
     let concerns: [SwitchboardConcern]
-    /// Feeds the Needs-you strip above the tabs; nil draws no strip.
-    var store: PolicyStore? = nil
+    /// Feeds the Needs-you strip and decides which tabs show.
+    @ObservedObject var store: PolicyStore
     /// Fixed-height rendering for snapshots, where a ScrollView would clip.
     var unbounded = false
     /// Pins a tab for snapshots; nil follows the owner's last choice.
@@ -119,16 +129,22 @@ struct PolicyPanel: View {
     @State private var contentHeight: CGFloat = 0
     @AppStorage("policyPanel.tab") private var storedTab = "agents"
 
+    private var shown: [SwitchboardConcern] { concerns.filter { $0.isShown() } }
+
+    /// The chosen tab, or the first other one when the chosen tab is hidden,
+    /// so Approvals emptying out never leaves the panel on a blank tab.
     private var current: SwitchboardConcern {
         let id = forcedTab ?? storedTab
-        return concerns.first { $0.id == id } ?? concerns[0]
+        let tabs = shown
+        return tabs.first { $0.id == id } ?? tabs.first { $0.id != "approvals" } ?? concerns[0]
     }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            if let store = store { NeedsStrip(store: store) }
+            // The strip would repeat the Approvals tab's own rows above them.
+            if current.id != "approvals" { NeedsStrip(store: store) }
             if let pinned = current.pinned { pinned }
             if unbounded {
                 current.content
@@ -167,7 +183,7 @@ struct PolicyPanel: View {
             // A drawn tab bar: the native segmented control drops a label's icon on macOS.
             // Four to a row, so seven tabs sit in two rows with full labels.
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 4), spacing: 2) {
-                ForEach(concerns) { c in
+                ForEach(shown) { c in
                     let on = c.id == current.id
                     Button {
                         storedTab = c.id
@@ -177,6 +193,7 @@ struct PolicyPanel: View {
                             Image(systemName: c.icon).font(.system(size: 10.5))
                             Text(c.title).font(.system(size: 11.5, weight: on ? .semibold : .regular))
                                 .lineLimit(1).fixedSize()
+                            if let n = c.badge() { TabBadge(count: n, onAccent: on) }
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)
@@ -331,7 +348,7 @@ private struct ScopeRow: View {
 struct SystemTabView: View {
     @ObservedObject var store: PolicyStore
     /// Which of the store's group lists this tab draws with the shared rows.
-    enum Source { case machine, remote, skills }
+    enum Source { case machine, remote, skills, approvals }
     var source: Source = .machine
 
     private var groups: [SystemGroup] {
@@ -339,6 +356,7 @@ struct SystemTabView: View {
         case .machine: return store.systemGroups
         case .remote: return store.remoteGroups
         case .skills: return SystemTabView.filter(store.skillGroups, store.skillQuery)
+        case .approvals: return store.needGroups
         }
     }
 
@@ -357,7 +375,11 @@ struct SystemTabView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: PT.gap) {
             if groups.isEmpty {
-                ReadingStatus(state: .loading).padding(.horizontal, 4)
+                if source == .approvals {
+                    Text("Nothing is waiting on you.").font(PT.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
+                } else {
+                    ReadingStatus(state: .loading).padding(.horizontal, 4)
+                }
             }
             ForEach(groups) { g in
                 VStack(alignment: .leading, spacing: 5) {
@@ -402,6 +424,24 @@ private struct PolicyGroupView: View {
 
 // ── Shared chrome: the tracked group label and the rounded card ────────────
 
+/// The round count on a tab label, in the Needs-you yellow so it reads as
+/// "waiting on you" on any tab, selected or not.
+struct TabBadge: View {
+    let count: Int
+    var onAccent = false
+
+    var body: some View {
+        Text("\(count)")
+            .font(.system(size: 9.5, weight: .bold).monospacedDigit())
+            .foregroundStyle(Color.black.opacity(0.85))
+            .padding(.horizontal, count > 9 ? 4 : 0)
+            .frame(minWidth: 15, minHeight: 15)
+            .background(Capsule().fill(Color(nsColor: menuYellow)))
+            .overlay(Capsule().strokeBorder(onAccent ? Color.white.opacity(0.7) : .clear, lineWidth: 1))
+            .help("\(count) waiting on you")
+    }
+}
+
 struct GroupHeader: View {
     let name: String
     var body: some View {
@@ -436,6 +476,9 @@ struct GroupHeader: View {
         "Bluetooth": "dot.radiowaves.left.and.right",
         "Local models": "cpu",
         "Skills": "wand.and.stars",
+        "Pushes": "arrow.up.circle",
+        "Policy asks": "questionmark.bubble",
+        "Left by ended sessions": "moon.zzz",
         "Console": "server.rack",
         "Hosts": "laptopcomputer.and.iphone",
         "Schedules": "calendar.badge.clock",
@@ -1235,14 +1278,18 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     if let q = CommandLine.arguments.firstIndex(of: "--query").flatMap({ $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }) { store.skillQuery = q }
     var needs = NeedsYou.items()
     if CommandLine.arguments.contains("--demo-states") {
-        needs.append(NeedItem(id: "demo-push", kind: .push, title: "Push switchboard-mac (push targets main)",
-                              sessionID: "demo", sessionDir: NSHomeDirectory() + "/Code/Claude/switchboard-mac",
-                              since: Date().addingTimeInterval(-240), approveLine: "approve push 0000demo", files: []))
+        var push = NeedItem(id: "demo-push", kind: .push, title: "Push switchboard-mac",
+                            sessionID: "demo", sessionDir: NSHomeDirectory() + "/Code/Claude/switchboard-mac",
+                            since: Date().addingTimeInterval(-240), approveLine: "approve push 0000demo", files: [])
+        push.approvedFile = NSTemporaryDirectory() + "sb-demo-never-written"
+        push.details = [("Repository", "~/Code/Claude/switchboard-mac"), ("Why it is held", "push targets main"),
+                        ("Session", "demo"), ("Approve line", "approve push 0000demo"), ("Cancel line", "cancel push")]
+        needs.append(push)
         needs.append(NeedItem(id: "demo-ask", kind: .ask, title: "Posting to Slack",
                               sessionID: "gone", sessionDir: nil, since: Date().addingTimeInterval(-7200),
                               approveLine: "approve slack.post 1111demo", files: []))
     }
-    store.needs = NeedsYou.rows(needs) {}
+    store.setNeeds(needs) {}
     let usage = UsageStore()
     let lights = LightsStore()
     if tab == "usage" { usage.reload() }   // file reads only; never starts Codex

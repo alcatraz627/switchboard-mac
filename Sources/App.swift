@@ -530,7 +530,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             guard let self = self else { return }
             self.policyController?.store.systemGroups = self.panelSystemGroups()
             self.policyController?.store.remoteGroups = self.panelRemoteGroups()
-            self.policyController?.store.needs = NeedsYou.rows(self.sbSnapshot.needs) { [weak self] in self?.refreshSnapshot() }
+            self.policyController?.store.setNeeds(self.sbSnapshot.needs) { [weak self] in self?.refreshSnapshot() }
         }
     }
 

@@ -165,14 +165,41 @@ enum NeedsYou {
                               tip: "Pushes and asks whose session is gone, and approvals never used. Click to list them.")
             r.key = "needs-dead"
             r.children = itemRows(dead, refresh: refresh)
-            r.buttons = [RowButton(label: "Cancel", kind: .run({
-                let err = dead.lazy.compactMap(cancel).first
-                DispatchQueue.main.async(execute: refresh)
-                return err
-            }), help: "Clear all of them", doing: "clear them")]
+            r.buttons = [clearAll(dead, refresh: refresh)]
             out.append(r)
         }
         return out
+    }
+
+    /// The Approvals tab: live pushes, live asks, then what ended sessions left
+    /// behind, each its own section. Empty when nothing waits.
+    static func groups(_ items: [NeedItem], refresh: @escaping () -> Void) -> [SystemGroup] {
+        let live = items.filter { $0.sessionDir != nil }
+        let dead = items.filter { $0.sessionDir == nil }
+        var out: [SystemGroup] = []
+        let pushes = live.filter { $0.kind == .push }, asks = live.filter { $0.kind != .push }
+        if !pushes.isEmpty { out.append(SystemGroup(title: "Pushes", rows: itemRows(pushes, refresh: refresh))) }
+        if !asks.isEmpty { out.append(SystemGroup(title: "Policy asks", rows: itemRows(asks, refresh: refresh))) }
+        if !dead.isEmpty {
+            var all = SystemRow(label: "Nothing will run these", state: .off,
+                                note: "their session is gone; ask a live session to try again, then clear these",
+                                tip: "An ended session cannot use an approval, so these have no Approve.")
+            all.key = "needs-dead-all"
+            all.showsBadge = false
+            all.buttons = [clearAll(dead, refresh: refresh)]
+            out.append(SystemGroup(title: "Left by ended sessions", rows: [all] + itemRows(dead, refresh: refresh)))
+        }
+        return out
+    }
+
+    /// Clears every item, carrying on past one that fails, and names each
+    /// failure rather than stopping at the first.
+    private static func clearAll(_ items: [NeedItem], refresh: @escaping () -> Void) -> RowButton {
+        RowButton(label: "Cancel", kind: .run({
+            let errs = items.compactMap { i in cancel(i).map { "\(i.title): \($0)" } }
+            DispatchQueue.main.async(execute: refresh)
+            return errs.isEmpty ? nil : "\(errs.count) of \(items.count) not cleared. " + errs.joined(separator: "; ")
+        }), help: "Clear all \(items.count)", doing: "clear them")
     }
 
     private static func itemRows(_ items: [NeedItem], refresh: @escaping () -> Void) -> [SystemRow] {
@@ -219,6 +246,15 @@ enum NeedsYou {
     }
 }
 
+extension PolicyStore {
+    /// Publish what waits, to the strip and the Approvals tab together.
+    func setNeeds(_ items: [NeedItem], refresh: @escaping () -> Void) {
+        needs = NeedsYou.rows(items, refresh: refresh)
+        needGroups = NeedsYou.groups(items, refresh: refresh)
+        needsWaiting = items.filter { $0.sessionDir != nil }.count
+    }
+}
+
 /// The strip above the tabs: a yellow-edged card, only while something waits.
 struct NeedsStrip: View {
     @ObservedObject var store: PolicyStore
@@ -229,7 +265,10 @@ struct NeedsStrip: View {
                 HStack(spacing: 5) {
                     Image(systemName: "hand.raised.fill").font(.system(size: 9.5, weight: .semibold))
                     Text("NEEDS YOU").font(PT.section).tracking(0.7)
-                    Text("\(store.needs.count)").font(PT.section).foregroundStyle(.secondary)
+                    // Same number as the Approvals tab badge: items a live session waits on.
+                    if store.needsWaiting > 0 {
+                        Text("\(store.needsWaiting)").font(PT.section).foregroundStyle(.secondary)
+                    }
                 }
                 .foregroundStyle(Color(nsColor: menuYellow))
                 .padding(.leading, 4)
@@ -263,7 +302,9 @@ func probeApprove() -> String {
     let nonce = #"{"nonce":"abcd1234","target":"/tmp/some-repo","why":"push targets main","ts":1}"#
     fm.createFile(atPath: dir + "/.push-nonce-" + sid, contents: Data(nonce.utf8))
     var lines: [String] = []
-    func check(_ name: String, _ ok: Bool) { lines.append("\(ok ? "ok  " : "FAIL") \(name)") }
+    func check(_ name: String, _ ok: Bool, _ got: String = "") {
+        lines.append("\(ok ? "ok  " : "FAIL") \(name)\(ok || got.isEmpty ? "" : " (got: \(got))")")
+    }
     let ask = #"{"nonce":"ef567890","key":"slack.post","what":"posting to Slack","ts":1}"#
     try? fm.createDirectory(atPath: dir + "/.policy-ask", withIntermediateDirectories: true)
     fm.createFile(atPath: dir + "/.policy-ask/" + sid + "--slack.post.nonce", contents: Data(ask.utf8))
@@ -296,6 +337,30 @@ func probeApprove() -> String {
               && !fm.fileExists(atPath: dir + "/.policy-ask/" + sid + "--slack.post.approved"))
     }
     check("nothing is left waiting after both cancels", NeedsYou.items().isEmpty)
+
+    // The Approvals tab's sections, and Clear all carrying on past a failure.
+    let live = NeedItem(id: "live", kind: .push, title: "Push a", sessionID: "s1", sessionDir: "/tmp",
+                        since: nil, approveLine: "approve push x", files: [])
+    let stuckDir = dir + "/locked"
+    try? fm.createDirectory(atPath: stuckDir, withIntermediateDirectories: true)
+    fm.createFile(atPath: stuckDir + "/held", contents: Data())
+    fm.createFile(atPath: dir + "/free", contents: Data())
+    _ = chmod(stuckDir, 0o555)
+    defer { _ = chmod(stuckDir, 0o755) }
+    let stuck = NeedItem(id: "stuck", kind: .ask, title: "Stuck ask", sessionID: "gone1", sessionDir: nil,
+                         since: nil, approveLine: nil, files: [stuckDir + "/held"])
+    let free = NeedItem(id: "free", kind: .ask, title: "Free ask", sessionID: "gone2", sessionDir: nil,
+                        since: nil, approveLine: nil, files: [dir + "/free"])
+    let groups = NeedsYou.groups([live, stuck, free]) {}
+    check("the tab has a Pushes and a Left by ended sessions section",
+          groups.map(\.title) == ["Pushes", "Left by ended sessions"], groups.map(\.title).joined(separator: ","))
+    if let clear = groups.last?.rows.first?.buttons.first, case .run(let clearAll) = clear.kind {
+        let err = clearAll() ?? ""
+        check("Clear all names the one it could not clear", err.hasPrefix("1 of 2 not cleared") && err.contains("Stuck ask"), err)
+        check("Clear all still clears the rest", !fm.fileExists(atPath: dir + "/free"))
+    } else {
+        check("the ended-sessions section starts with a Clear all row", false)
+    }
     lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
     return lines.joined(separator: "\n")
 }

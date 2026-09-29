@@ -304,6 +304,10 @@ final class PolicyStore: ObservableObject {
     @Published var skillQuery = ""
     /// The Needs-you strip's rows: pushes and asks waiting on the owner.
     @Published var needs: [SystemRow] = []
+    /// The same items as the Approvals tab's sections.
+    @Published var needGroups: [SystemGroup] = []
+    /// Items a live session is waiting on, for the tab's badge.
+    @Published var needsWaiting = 0
 
     /// Repositories the owner is working in right now, from the live sessions.
     var liveDirs: () -> [String] = { [] }
