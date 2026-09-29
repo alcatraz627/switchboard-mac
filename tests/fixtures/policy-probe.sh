@@ -15,7 +15,7 @@ git -C "$WORK/repo" commit -q --allow-empty -m x
 
 cp -f "$ROOT/tests/fixtures/policy-probe.swift" "$WORK/main.swift"
 if ! swiftc -o "$OUT" "$WORK/main.swift" "$ROOT/Sources/Policy.swift" "$ROOT/Sources/Switchboard.swift" \
-     "$ROOT/Sources/AppSupport.swift" > "$WORK/compile.log" 2>&1; then
+     "$ROOT/Sources/AppSupport.swift" "$ROOT/Sources/Skills.swift" > "$WORK/compile.log" 2>&1; then
   rg "error:" "$WORK/compile.log"
   echo "COMPILE FAILED"
   exit 1

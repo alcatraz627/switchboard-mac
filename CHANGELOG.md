@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Skills tab**: every skill in ~/.claude/skills by name with its first
+  sentence; open one for the full description and its SKILL.md path, which
+  copies on a click anywhere on the row.
+- The tab bar wraps to two rows of four, so every tab keeps its full label.
+
 - **Needs you: Approve, Copy, Cancel and details on every item**, pushes and
   policy asks alike. Approve writes the same single-use file the typed approve
   line writes, then wakes the waiting session with a claude-ipc request so it

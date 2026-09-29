@@ -13,7 +13,7 @@ swiftc -o "$OUT" \
     "$WORK/main.swift" \
     "$ROOT/Sources/Switchboard.swift" \
     "$ROOT/Sources/Policy.swift" \
-    "$ROOT/Sources/AppSupport.swift" \
+    "$ROOT/Sources/AppSupport.swift" "$ROOT/Sources/Skills.swift" \
     "$ROOT/Sources/DesignKit.swift" \
     "$ROOT/Sources/Palette.swift" 2>&1 | rg "error:" && { echo "COMPILE FAILED"; exit 1; }
 

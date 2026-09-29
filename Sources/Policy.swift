@@ -229,6 +229,8 @@ struct SystemRow: Identifiable {
     var children: [SystemRow] = []
     /// A child's one action as a labelled button ("Re-arm", "Lift").
     var buttonLabel: String? = nil
+    /// How many lines the note may wrap to; 0 means as many as it needs.
+    var noteLines = 3
     /// Small labelled buttons beside the row's own control ("Start", "Open",
     /// "Copy"), each with its own waiting and failure state.
     var buttons: [RowButton] = []
@@ -293,6 +295,8 @@ final class PolicyStore: ObservableObject {
     @Published var systemGroups: [SystemGroup] = []
     /// The Remote tab's rows (csync hosts), built by the same snapshot.
     @Published var remoteGroups: [SystemGroup] = []
+    /// The Skills tab's rows: every skill under ~/.claude/skills.
+    @Published var skillGroups: [SystemGroup] = []
     /// The Needs-you strip's rows: pushes and asks waiting on the owner.
     @Published var needs: [SystemRow] = []
 
@@ -300,6 +304,14 @@ final class PolicyStore: ObservableObject {
     var liveDirs: () -> [String] = { [] }
     /// Asks the bar to re-probe its services; results arrive via systemGroups.
     var requestSystemRefresh: () -> Void = {}
+
+    /// Re-read ~/.claude/skills off the main thread; about 80 small files.
+    func reloadSkills() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let groups = SkillsIndex.groups()
+            DispatchQueue.main.async { self.skillGroups = groups }
+        }
+    }
     /// Flip a system switch now and back at a time; cancel keeps the current
     /// state, endNow flips it back at once. The bar owns the timers.
     var startSystemTimer: (_ key: String, _ until: Date) -> Void = { _, _ in }

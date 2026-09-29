@@ -93,8 +93,12 @@ enum SwitchboardConcerns {
                                refresh: { controls.load(devices: true) }),
             SwitchboardConcern(id: "remote", title: "Remote", subtitle: "Machines you drive with csync", icon: "network.badge.shield.half.filled",
                                footer: "Every action is a csync command, recorded in its log.", footerIcon: "terminal",
-                               content: AnyView(SystemTabView(store: policy, remote: true)),
+                               content: AnyView(SystemTabView(store: policy, source: .remote)),
                                refresh: { policy.requestSystemRefresh() }),
+            SwitchboardConcern(id: "skills", title: "Skills", subtitle: "Every skill in ~/.claude", icon: "wand.and.stars",
+                               footer: "Open a skill for its description; the path copies on click.", footerIcon: "doc.on.doc",
+                               content: AnyView(SystemTabView(store: policy, source: .skills)),
+                               refresh: { policy.reloadSkills() }),
         ]
     }
 }
@@ -155,7 +159,8 @@ struct PolicyPanel: View {
     private var headerTop: some View {
         HStack(spacing: 0) {
             // A drawn tab bar: the native segmented control drops a label's icon on macOS.
-            HStack(spacing: 2) {
+            // Four to a row, so seven tabs sit in two rows with full labels.
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 4), spacing: 2) {
                 ForEach(concerns) { c in
                     let on = c.id == current.id
                     Button {
@@ -319,10 +324,17 @@ private struct ScopeRow: View {
 
 struct SystemTabView: View {
     @ObservedObject var store: PolicyStore
-    /// The Remote tab draws its csync groups with the same rows.
-    var remote = false
+    /// Which of the store's group lists this tab draws with the shared rows.
+    enum Source { case machine, remote, skills }
+    var source: Source = .machine
 
-    private var groups: [SystemGroup] { remote ? store.remoteGroups : store.systemGroups }
+    private var groups: [SystemGroup] {
+        switch source {
+        case .machine: return store.systemGroups
+        case .remote: return store.remoteGroups
+        case .skills: return store.skillGroups
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: PT.gap) {
@@ -400,6 +412,7 @@ struct GroupHeader: View {
         "Wi-Fi": "wifi",
         "Bluetooth": "dot.radiowaves.left.and.right",
         "Local models": "cpu",
+        "Skills": "wand.and.stars",
         "Console": "server.rack",
         "Hosts": "laptopcomputer.and.iphone",
         "Schedules": "calendar.badge.clock",
@@ -466,6 +479,8 @@ struct SystemRowView: View {
                 .onTapGesture {
                     if opens { withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() } }
                     else if let menu = row.menu { menu().popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil) }
+                    // A row whose one action is a copy (a file path) copies anywhere it is clicked.
+                    else if row.buttons.count == 1, case .copy = row.buttons[0].kind { press(row.buttons[0]) }
                 }
             if picking, let key = row.timerKey { timePicker(key) }
             if let b = asking, case .ask(let placeholder, _) = b.kind {
@@ -531,7 +546,8 @@ struct SystemRowView: View {
                     }
                     .font(PT.caption).foregroundStyle(snoozeTint)
                 } else if !row.note.isEmpty {
-                    Text(row.note).font(PT.caption).foregroundStyle(.secondary).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                    Text(row.note).font(PT.caption).foregroundStyle(.secondary)
+                        .lineLimit(row.noteLines == 0 ? nil : row.noteLines).fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 6)
@@ -787,7 +803,7 @@ struct SystemRowView: View {
     @ViewBuilder private var control: some View {
         if opens {
             HStack(spacing: 4) {
-                StateBadge(state: row.state)
+                if row.showsBadge { StateBadge(state: row.state) }
                 Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(expanded ? 90 : 0))
@@ -1192,6 +1208,7 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     store.applyForSnapshot(items: r.items, projects: r.projects, error: r.error)
     store.systemGroups = system
     store.remoteGroups = remote
+    if tab == "skills" { store.skillGroups = SkillsIndex.groups() }
     var needs = NeedsYou.items()
     if CommandLine.arguments.contains("--demo-states") {
         needs.append(NeedItem(id: "demo-push", kind: .push, title: "Push switchboard-mac (push targets main)",
