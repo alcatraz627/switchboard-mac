@@ -52,7 +52,7 @@ if args.contains("--probe-shell") {
     exit(report.hasSuffix("all passed") ? 0 : 1)
 }
 if args.contains("--probe-catalog") {
-    let lines = probeCatalog().components(separatedBy: "\n").dropLast() + probeRedaction() + probeToggles() + probeReorder()
+    let lines = probeCatalog().components(separatedBy: "\n").dropLast() + probeRedaction() + probeToggles() + probeReorder() + probeWhen()
     print((lines + [lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed"]).joined(separator: "\n"))
     exit(lines.contains { $0.hasPrefix("FAIL") } ? 1 : 0)
 }
@@ -83,6 +83,22 @@ if args.contains("--dump-policy") {
     store.applyForSnapshot(items: r.items, projects: r.projects, error: r.error)
     print(policyDump(store))
     exit(r.error == nil ? 0 : 1)
+}
+if let out = argAfter("--snapshot-when") {
+    let v = WhenPanel(title: "Switch later, keeping Allow until then", presets: WhenPreset.short,
+                      choices: ["To Ask", "To Block"], extra: [("Cancel the timed change", {})], onPick: { _, _ in })
+    let dark = !args.contains("--light")
+    let host = NSHostingView(rootView: v.background(Color(nsColor: .windowBackgroundColor)))
+    host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+    host.frame = NSRect(origin: .zero, size: host.fittingSize)
+    let win = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    win.contentView = host
+    host.layoutSubtreeIfNeeded()
+    let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+    host.cacheDisplay(in: host.bounds, to: rep)
+    let ok = (try? rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: out))) != nil
+    print(ok ? "wrote \(out)" : "snapshot failed")
+    exit(ok ? 0 : 1)
 }
 if let out = argAfter("--snapshot-hover") {
     // Every item on, from a real snapshot and the real limits file, plus one waiting push.

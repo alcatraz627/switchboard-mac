@@ -71,8 +71,12 @@ final class NotesStore: ObservableObject {
     @Published private(set) var notes: [Note] = []
     @Published var error: String?
 
+    /// Where notes are kept: the folder chosen in Settings, or the state folder's notes.
+    static let folderKey = "switchboard.notesFolder"
+    static var defaultDir: String { AppPaths.stateDir + "/notes" }
     static var dir: String {
-        let d = AppPaths.stateDir + "/notes"
+        let chosen = UserDefaults.standard.string(forKey: folderKey)
+        let d = (chosen?.isEmpty == false ? chosen! : defaultDir)
         try? FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true)
         return d
     }
@@ -115,10 +119,12 @@ final class NotesStore: ObservableObject {
         return n
     }
 
-    /// Save a changed note; its reminder follows the change.
+    /// Save a changed note; its reminder follows only a change to when, how
+    /// often or what it says, so typing in the body does not touch Reminders.
     func update(_ n: Note) {
         var n = n
-        syncReminder(&n)
+        let old = notes.first { $0.id == n.id }
+        if old?.remindAt != n.remindAt || old?.remindRepeat != n.remindRepeat || old?.title != n.title { syncReminder(&n) }
         guard write(n) else { return }
         if let i = notes.firstIndex(where: { $0.id == n.id }) { notes[i] = n }
     }

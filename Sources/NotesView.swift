@@ -91,6 +91,7 @@ struct NotesTabView: View {
                     }
                 }
             }
+            NotesFolderLink()
             if !notes.expired.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
                     Button { withAnimation(.easeOut(duration: 0.15)) { showExpired.toggle() } } label: {
@@ -118,6 +119,36 @@ struct NotesTabView: View {
     }
 }
 
+/// The folder the notes live in: click opens it in Finder, the icon copies it.
+struct NotesFolderLink: View {
+    @State private var copied = false
+
+    var body: some View {
+        let dir = NotesStore.dir
+        HStack(spacing: 6) {
+            Button { NSWorkspace.shared.open(URL(fileURLWithPath: dir)) } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "folder").font(.system(size: 10.5))
+                    Text(abbreviateHome(dir)).font(PT.caption).lineLimit(1).truncationMode(.middle)
+                }
+            }
+            .buttonStyle(.link).help("Open the notes folder in Finder")
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(dir, forType: .string)
+                copied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+            } label: {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc").font(.system(size: 10.5))
+                    .foregroundStyle(copied ? Color(nsColor: menuGreen) : .secondary)
+            }
+            .buttonStyle(.borderless).help("Copy the folder's path")
+            Spacer()
+        }
+        .padding(.horizontal, 4)
+    }
+}
+
 /// One note: title, first line of the body, tags and what is set on it, with
 /// copy buttons; clicking opens an editor below.
 struct NoteRow: View {
@@ -129,6 +160,7 @@ struct NoteRow: View {
     @State private var tagsText = ""
     @State private var expireWithReminder = false
     @State private var copied: String?
+    @State private var savedAt: Date?
     /// Snapshots open the first note's editor so its look can be checked.
     static var startOpen = false
 
@@ -185,6 +217,7 @@ struct NoteRow: View {
     }
 
     private func toggleOpen() {
+        if open { save() }   // closing keeps whatever was typed
         withAnimation(.easeOut(duration: 0.15)) {
             open.toggle()
             if open {
@@ -195,53 +228,54 @@ struct NoteRow: View {
         }
     }
 
+    /// The editor saves by itself shortly after each change, so there is no
+    /// Save button to find; collapsing the row saves too.
     private var editor: some View {
         let d = Binding(get: { draft ?? note }, set: { draft = $0 })
+        let f = DateFormatter(); f.dateFormat = "EEE d MMM, h:mm a"
         return VStack(alignment: .leading, spacing: 8) {
             TextField("Title", text: d.title).textFieldStyle(.roundedBorder).font(PT.label)
             TextEditor(text: d.body).font(PT.label).frame(height: 80)
                 .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.primary.opacity(0.12)))
-            TextField("Tags, separated by commas", text: $tagsText).textFieldStyle(.roundedBorder).font(PT.caption)
-            // Expiry: a date after which the note dims and moves to Expired.
+            TextField("Tags, separated by commas", text: Binding(get: { tagsText }, set: { t in
+                tagsText = t
+                d.wrappedValue.tags = t.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            })).textFieldStyle(.roundedBorder).font(PT.caption)
             HStack(spacing: 6) {
-                Toggle("Expires", isOn: Binding(get: { d.wrappedValue.expires != nil },
-                                                set: { d.wrappedValue.expires = $0 ? Date().addingTimeInterval(86400 * 7) : nil }))
-                    .toggleStyle(.checkbox).font(PT.caption)
-                if d.wrappedValue.expires != nil {
-                    DatePicker("", selection: Binding(get: { d.wrappedValue.expires ?? Date() }, set: { d.wrappedValue.expires = $0 }))
-                        .labelsHidden().controlSize(.small).disabled(expireWithReminder)
+                Image(systemName: "hourglass").font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
+                WhenButton(title: "Expire this note at", presets: WhenPreset.long,
+                           extra: d.wrappedValue.expires == nil ? [] : [("No expiry", { d.wrappedValue.expires = nil; expireWithReminder = false })],
+                           initial: d.wrappedValue.expires,
+                           onPick: { t, _ in d.wrappedValue.expires = t; expireWithReminder = false }) {
+                    chip(d.wrappedValue.expires.map { "Expires " + f.string(from: $0) } ?? "No expiry", set: d.wrappedValue.expires != nil)
                 }
                 Spacer()
             }
-            // Reminder: once or on a repeat, in macOS Reminders, separate from expiry.
             HStack(spacing: 6) {
-                Picker("", selection: Binding(get: { d.wrappedValue.remindAt == nil ? "off" : d.wrappedValue.remindRepeat.rawValue },
-                                              set: { v in
-                                                  if v == "off" { d.wrappedValue.remindAt = nil; return }
-                                                  if d.wrappedValue.remindAt == nil { d.wrappedValue.remindAt = Date().addingTimeInterval(3600) }
-                                                  d.wrappedValue.remindRepeat = Note.Repeat(rawValue: v) ?? .never
-                                              })) {
-                    Text("No reminder").tag("off")
-                    Text("Remind once").tag("never")
-                    Text("Every day").tag("daily")
-                    Text("Every week").tag("weekly")
-                    Text("Every month").tag("monthly")
-                }
-                .labelsHidden().controlSize(.small).fixedSize()
-                if d.wrappedValue.remindAt != nil {
-                    DatePicker("", selection: Binding(get: { d.wrappedValue.remindAt ?? Date() }, set: { d.wrappedValue.remindAt = $0 }))
-                        .labelsHidden().controlSize(.small)
+                Image(systemName: "bell").font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
+                WhenButton(title: "Remind me in macOS Reminders", presets: WhenPreset.long,
+                           choices: ["Once", "Every day", "Every week", "Every month"],
+                           extra: d.wrappedValue.remindAt == nil ? [] : [("No reminder", { d.wrappedValue.remindAt = nil; expireWithReminder = false })],
+                           initial: d.wrappedValue.remindAt,
+                           onPick: { t, i in
+                               d.wrappedValue.remindAt = t
+                               d.wrappedValue.remindRepeat = [.never, .daily, .weekly, .monthly][i]
+                               if expireWithReminder { d.wrappedValue.expires = t }
+                           }) {
+                    chip(d.wrappedValue.remindAt.map { "Reminds " + f.string(from: $0)
+                        + (d.wrappedValue.remindRepeat == .never ? "" : ", " + d.wrappedValue.remindRepeat.rawValue) } ?? "No reminder",
+                         set: d.wrappedValue.remindAt != nil)
                 }
                 Spacer()
             }
             if d.wrappedValue.remindAt != nil, d.wrappedValue.remindRepeat == .never {
-                Toggle("Expire the note when it fires", isOn: $expireWithReminder).toggleStyle(.checkbox).font(PT.caption)
+                Toggle("Expire the note when it fires", isOn: Binding(get: { expireWithReminder }, set: { on in
+                    expireWithReminder = on
+                    d.wrappedValue.expires = on ? d.wrappedValue.remindAt : nil
+                })).toggleStyle(.checkbox).font(PT.caption)
             }
             HStack(spacing: 10) {
-                Button { save() } label: { Image(systemName: "checkmark.circle") }
-                    .buttonStyle(.borderless).help("Save the changes")
-                Button { open = false; draft = nil } label: { Image(systemName: "xmark.circle") }
-                    .buttonStyle(.borderless).help("Discard the changes")
+                Text(savedAt.map { "Saved " + age($0) } ?? "Saves as you type").font(PT.caption).foregroundStyle(.tertiary)
                 Spacer()
                 Button {
                     let a = NSAlert(); a.messageText = "Delete \u{201C}\(note.title)\u{201D}?"
@@ -254,16 +288,25 @@ struct NoteRow: View {
             }
         }
         .padding(.horizontal, PT.rowH).padding(.bottom, 10).padding(.top, 2)
+        // Every change lands 0.7 s after the typing stops.
+        .task(id: draft) {
+            guard let n = draft, n != note else { return }
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            if !Task.isCancelled { save() }
+        }
+    }
+
+    private func chip(_ text: String, set: Bool) -> some View {
+        Text(text).font(.system(size: 11)).padding(.horizontal, 8).padding(.vertical, 3)
+            .background(Capsule().fill(Color.primary.opacity(set ? 0.12 : 0.06)))
+            .foregroundStyle(set ? .primary : .secondary)
     }
 
     private func save() {
-        guard var n = draft else { return }
-        n.title = n.title.trimmingCharacters(in: .whitespaces).isEmpty ? note.title : n.title
-        n.tags = tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        if n.remindAt == nil || n.remindRepeat != .never { expireWithReminder = false }
-        if expireWithReminder { n.expires = n.remindAt }
+        guard var n = draft, n != note else { return }
+        if n.title.trimmingCharacters(in: .whitespaces).isEmpty { n.title = note.title }
         notes.update(n)
-        withAnimation(.easeOut(duration: 0.15)) { open = false; draft = nil }
+        savedAt = Date()
     }
 
     private func copyButton(_ icon: String, _ help: String, _ text: String) -> some View {

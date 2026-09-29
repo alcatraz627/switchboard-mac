@@ -61,6 +61,8 @@ final class HoverPeek: NSObject {
     private let lines: () -> [HoverLine]
     private let panelOpen: () -> Bool
     private var closeWork: DispatchWorkItem?
+    private var poll: Timer?
+    private var inside = false
 
     init(button: NSStatusBarButton, lines: @escaping () -> [HoverLine], panelOpen: @escaping () -> Bool) {
         self.button = button
@@ -69,11 +71,21 @@ final class HoverPeek: NSObject {
         super.init()
         popover.behavior = .applicationDefined   // it follows the pointer, not clicks
         popover.animates = false
-        button.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-                                              owner: self, userInfo: nil))
+        // A tracking area on a status item never reaches a non-view owner, so the
+        // pointer is checked against the icon's frame five times a second instead.
+        poll = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.check() }
     }
 
-    @objc func mouseEntered(with event: NSEvent) {
+    private func check() {
+        guard let b = button, let win = b.window else { return }
+        let frame = win.convertToScreen(b.convert(b.bounds, to: nil))
+        let now = frame.contains(NSEvent.mouseLocation)
+        guard now != inside else { return }
+        inside = now
+        if now { entered() } else { exited() }
+    }
+
+    private func entered() {
         closeWork?.cancel()
         guard let b = button, !panelOpen(), !popover.isShown else { return }
         let l = lines()
@@ -85,7 +97,7 @@ final class HoverPeek: NSObject {
         popover.show(relativeTo: b.bounds, of: b, preferredEdge: .minY)
     }
 
-    @objc func mouseExited(with event: NSEvent) {
+    private func exited() {
         let work = DispatchWorkItem { [weak self] in self?.popover.performClose(nil) }
         closeWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)

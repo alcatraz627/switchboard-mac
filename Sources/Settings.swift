@@ -16,6 +16,7 @@ struct SettingsTabView: View {
             group("Tabs", note: "Open a tab to choose its sections. Hidden ones are not read at all.", rows: tabs.map(tabRow))
             group("Hover preview", note: "What shows when the pointer rests on the menu bar icon. Keep it short.",
                   rows: HoverItem.allCases.map(hoverRow))
+            group("Notes folder", note: "Where each note is saved as a markdown file.", rows: [notesFolderRow])
         }
         .padding(PT.gap)
     }
@@ -68,6 +69,41 @@ struct SettingsTabView: View {
                               if store.hoverItems.contains(item) { store.hoverItems.remove(item) } else { store.hoverItems.insert(item) }
                           })
         r.key = "settings-hover-" + item.rawValue
+        return r
+    }
+
+    /// Choose a folder for notes; existing notes stay where they are, so a
+    /// move is a Finder job the owner does on purpose.
+    private var notesFolderRow: SystemRow {
+        let custom = UserDefaults.standard.string(forKey: NotesStore.folderKey)?.isEmpty == false
+        var r = SystemRow(label: abbreviateHome(NotesStore.dir), state: .off,
+                          note: custom ? "chosen by you; notes already saved elsewhere stay there" : "the default", tip: "")
+        r.key = "settings-notes-folder"
+        r.showsBadge = false
+        r.buttons = [RowButton(label: "Choose", kind: .run({
+            DispatchQueue.main.async {
+                let p = NSOpenPanel()
+                p.canChooseDirectories = true; p.canChooseFiles = false; p.canCreateDirectories = true
+                p.prompt = "Use this folder"
+                NSApp.activate(ignoringOtherApps: true)
+                if p.runModal() == .OK, let url = p.url {
+                    UserDefaults.standard.set(url.path, forKey: NotesStore.folderKey)
+                    NotesStore.shared.load()
+                    store.objectWillChange.send()
+                }
+            }
+            return nil
+        }), help: "Choose another folder for notes", icon: "folder.badge.gearshape")]
+        if custom {
+            r.buttons.append(RowButton(label: "Reset", kind: .run({
+                DispatchQueue.main.async {
+                    UserDefaults.standard.removeObject(forKey: NotesStore.folderKey)
+                    NotesStore.shared.load()
+                    store.objectWillChange.send()
+                }
+                return nil
+            }), help: "Go back to the default folder", icon: "arrow.uturn.backward"))
+        }
         return r
     }
 

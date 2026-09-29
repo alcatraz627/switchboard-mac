@@ -597,8 +597,6 @@ struct Card<Content: View>: View {
 struct SystemRowView: View {
     let row: SystemRow
     @ObservedObject var store: PolicyStore
-    @State private var picking = false
-    @State private var pickedTime = SystemRowView.defaultPick()
     /// A flip asked for and not yet seen by the next probe.
     @State private var pendingFlip: PendingChange<Bool>?
     @State private var failure: String?
@@ -642,7 +640,6 @@ struct SystemRowView: View {
                     // So does a row whose one action is a labelled button ("Show all").
                     else if row.buttonLabel != nil, row.buttons.isEmpty, let a = row.action { a() }
                 }
-            if picking, let key = row.timerKey { timePicker(key) }
             if let b = asking, case .ask(let placeholder, _) = b.kind {
                 HStack(spacing: 6) {
                     TextField(placeholder, text: $askDraft)
@@ -897,76 +894,24 @@ struct SystemRowView: View {
 
     // ── Timers: flip now, flip back later ──
 
-    private static func defaultPick() -> Date {
-        // An hour from now, on the next quarter hour: a sensible first guess.
-        let t = Date().addingTimeInterval(3600)
-        let c = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: t)
-        var r = c; r.minute = ((c.minute ?? 0) / 15) * 15
-        return Calendar.current.date(from: r) ?? t
-    }
-
     private func timerMenu(_ key: String) -> some View {
-        let verb = row.isOn ? "Off" : "On"
         let active = row.timer != nil
-        return Menu {
-            Section(active ? "Change the timer" : "\(verb) for a while") {
-                Button("\(verb) for 30 minutes") { start(key, 30 * 60) }
-                Button("\(verb) for 1 hour") { start(key, 3600) }
-                Button("\(verb) for 2 hours") { start(key, 2 * 3600) }
-                Button("\(verb) for 4 hours") { start(key, 4 * 3600) }
-                Button("\(verb) for 2 days") { start(key, 2 * 86400) }
-                Button("\(verb) for 3 days") { start(key, 3 * 86400) }
-                Button("\(verb) until the end of today") {
-                    if let end = Calendar.current.date(bySettingHour: 23, minute: 59, second: 0, of: Date()) {
-                        store.startSystemTimer(key, end)
-                    }
-                }
-                Button("\(verb) until a time…") { pickedTime = Self.defaultPick(); picking = true }
-            }
-            if active {
-                Divider()
-                Button("End now") { store.endSystemTimerNow(key) }
-                Button("Cancel the timer") { store.cancelSystemTimer(key) }
-            }
-        } label: {
+        // While a timer runs the switch shows the temporary state; the title says where it goes back to.
+        let title = active ? "Change when it turns back \(row.timer!.restoreOn ? "on" : "off")"
+                           : "\(row.isOn ? "Off" : "On") until…"
+        return WhenButton(title: title, presets: WhenPreset.short,
+                          extra: active ? [("End now", { store.endSystemTimerNow(key) }),
+                                           ("Cancel the timer", { store.cancelSystemTimer(key) })] : [],
+                          initial: row.timer?.until,
+                          onPick: { d, _ in store.startSystemTimer(key, d) }) {
             Image(systemName: active ? "timer.circle.fill" : "timer")
                 .font(.system(size: 11))
                 .foregroundStyle(active ? AnyShapeStyle(snoozeTint) : AnyShapeStyle(.tertiary))
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
         .fixedSize()
         .help(row.isOn ? "Turn this off for a while" : "Turn this on for a while")
     }
 
-    private func start(_ key: String, _ seconds: TimeInterval) {
-        store.startSystemTimer(key, Date().addingTimeInterval(seconds))
-    }
-
-    /// "Until 6:30 PM": a time earlier than now means tomorrow.
-    private func timePicker(_ key: String) -> some View {
-        HStack(spacing: 8) {
-            Text("\(row.isOn ? "Off" : "On") until").font(PT.caption).foregroundStyle(.secondary)
-            DatePicker("", selection: $pickedTime, displayedComponents: .hourAndMinute)
-                .labelsHidden()
-                .datePickerStyle(.stepperField)
-                .controlSize(.small)
-            Spacer(minLength: 0)
-            Button("Cancel") { picking = false }
-                .controlSize(.small)
-            Button("Start") {
-                var until = pickedTime
-                if until <= Date() { until = Calendar.current.date(byAdding: .day, value: 1, to: until) ?? until }
-                store.startSystemTimer(key, until)
-                picking = false
-            }
-            .controlSize(.small)
-            .keyboardShortcut(.defaultAction)
-        }
-        .padding(.horizontal, PT.rowH)
-        .padding(.bottom, PT.rowV + 2)
-    }
 
     @ViewBuilder private var control: some View {
         if opens {
@@ -1197,32 +1142,16 @@ struct PolicyRowView: View {
         let targets = item.options.filter { $0 != item.value }
         if !targets.isEmpty {
             let active = item.snooze.map { !$0.expired } ?? false
-            Menu {
-                ForEach(targets, id: \.self) { t in
-                    Section("Switch to \(word(t))") {
-                        Button("in 1 hour") { store.snooze(item, seconds: 3600, then: t) }
-                        Button("in 4 hours") { store.snooze(item, seconds: 4 * 3600, then: t) }
-                        Button("at the end of today") { store.snoozeTonight(item, then: t) }
-                        Button("in 1 day") { store.snooze(item, seconds: 86400, then: t) }
-                        Button("in 2 days") { store.snooze(item, seconds: 2 * 86400, then: t) }
-                        Button("in 3 days") { store.snooze(item, seconds: 3 * 86400, then: t) }
-                        Button("in 7 days") { store.snooze(item, seconds: 7 * 86400, then: t) }
-                    }
-                }
-                if active {
-                    Divider()
-                    Button("Cancel the timed change") { store.cancelSnooze(item) }
-                }
-            } label: {
-                // A plain-styled menu keeps the icon's own colour; the borderless
-                // style repaints its label and loses the "pending" tint.
+            WhenButton(title: "Switch later, keeping \(word(item.value)) until then", presets: WhenPreset.short,
+                       choices: targets.map { "To " + word($0) },
+                       extra: active ? [("Cancel the timed change", { store.cancelSnooze(item) })] : [],
+                       onPick: { d, i in
+                           store.snooze(item, seconds: max(60, Int(d.timeIntervalSinceNow)), then: targets[min(i, targets.count - 1)])
+                       }) {
                 Image(systemName: active ? "clock.fill" : "clock")
                     .font(.system(size: 11))
                     .foregroundStyle(active ? AnyShapeStyle(snoozeTint) : AnyShapeStyle(.tertiary))
             }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
             .fixedSize()
             .help("Change this later, keeping the current value until then")
         }
