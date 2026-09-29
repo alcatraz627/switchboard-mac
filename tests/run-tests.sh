@@ -42,6 +42,7 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   check "the Library tab renders" "$BIN" --snapshot "$WORK/library.png" --tab library
   check "the Rules & Hooks tab renders" "$BIN" --snapshot "$WORK/rules.png" --tab rules
   check "the Ledger tab renders" "$BIN" --snapshot "$WORK/ledger.png" --tab ledger
+  check "the Runtime tab renders" "$BIN" --snapshot "$WORK/runtime.png" --tab runtime
   # A helper that fails shows its group with the reason instead of dropping it.
   BADLIB="$WORK/badlib"; cp -Rf "$ROOT/Resources/lib" "$BADLIB"
   printf 'import sys\nsys.stderr.write("diskutil is not answering\\n")\nsys.exit(2)\n' > "$BADLIB/drives.py"
@@ -99,6 +100,13 @@ eq "jobs.py start of an unknown label fails" 1 "$(rc python3 Resources/lib/jobs.
 eq "jobs.py stop of an unknown label fails"  1 "$(rc python3 Resources/lib/jobs.py stop com.example.no-such-job)"
 check "jobs.py gives every job a distinct name" python3 -c "import json,subprocess;n=[j['name'] for j in json.loads(subprocess.run(['python3','Resources/lib/jobs.py','list'],capture_output=True,text=True).stdout)];assert len(n)==len(set(n)),n"
 check "devservers.py list emits servers" python3 -c "import json,subprocess;d=json.loads(subprocess.run(['python3','Resources/lib/devservers.py','list'],capture_output=True,text=True,timeout=60).stdout);assert isinstance(d['servers'],list)"
+# A tool that cannot answer must fail the list with its reason, never read as "nothing loaded".
+FAKEBIN="$(mktemp -d)"
+printf '#!/bin/sh\necho "Could not connect to launchd" >&2\nexit 5\n' > "$FAKEBIN/launchctl"
+printf '#!/bin/sh\necho "lsof: cannot read" >&2\nexit 1\n' > "$FAKEBIN/lsof"
+chmod +x "$FAKEBIN/launchctl" "$FAKEBIN/lsof"
+check "jobs.py list fails with the reason when launchctl cannot answer" python3 -c "import subprocess;r=subprocess.run(['python3','Resources/lib/jobs.py','list'],capture_output=True,text=True,env={'PATH':'$FAKEBIN:/usr/bin:/bin'});assert r.returncode==2 and 'Could not connect' in r.stderr, r"
+check "devservers.py list fails with the reason when lsof cannot answer" python3 -c "import subprocess;r=subprocess.run(['python3','Resources/lib/devservers.py','list'],capture_output=True,text=True,timeout=60,env={'PATH':'$FAKEBIN:/usr/bin:/bin','HOME':'$HOME'});assert r.returncode==2 and 'lsof could not' in r.stderr, r"
 eq "devservers.py start of a name pm2 lacks fails" 1 "$(rc python3 Resources/lib/devservers.py start no-such-server-xyz)"
 check "models.py list reports pressure and mem-guard" python3 -c "import json,subprocess;d=json.loads(subprocess.run(['python3','Resources/lib/models.py','list'],capture_output=True,text=True,timeout=30).stdout);assert d['pressure'] and 'guard' in d"
 eq "models.py refuses an unknown verb"      64 "$(rc python3 Resources/lib/models.py warm sideways)"

@@ -230,7 +230,7 @@ struct SystemRow: Identifiable {
     /// A child's one action as a labelled button ("Re-arm", "Lift").
     var buttonLabel: String? = nil
     /// How many lines the note may wrap to; 0 means as many as it needs.
-    var noteLines = 3
+    var noteLines = 0
     /// Small labelled buttons beside the row's own control ("Start", "Open",
     /// "Copy"), each with its own waiting and failure state.
     var buttons: [RowButton] = []

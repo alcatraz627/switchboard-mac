@@ -21,6 +21,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
 
     private var kanbanUp: Bool?
     private var kanbanBusy = false
+    /// Why the last kanban start or stop failed, shown on its row until the next try.
+    private var kanbanError: String?
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -160,6 +162,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var probeFailures: [String: String] = [:]
         /// When each helper last answered, to date a stale value.
         var probeReadAt: [String: Date] = [:]
+        /// Set when the dev server list came back but pm2 did not answer.
+        var pm2Error: String? = nil
     }
 
     /// How a helper-backed group should read: nil when its last probe worked.
@@ -209,7 +213,11 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             probe("jobs.py", ["list"], timeout: 8) { if let v = $0 as? [[String: Any]] { s.jobs = v } }
             probe("wol.py", ["list"], timeout: 8) { if let v = $0 as? [[String: Any]] { s.wolTargets = v } }
             probe("drives.py", ["list"], timeout: 30) { if let v = $0 as? [[String: Any]] { s.drives = v } }
-            probe("devservers.py", ["list"], timeout: 50) { if let v = ($0 as? [String: Any])?["servers"] as? [[String: Any]] { s.devServers = v } }
+            probe("devservers.py", ["list"], timeout: 50) {
+                guard let d = $0 as? [String: Any], let v = d["servers"] as? [[String: Any]] else { return }
+                s.devServers = v
+                s.pm2Error = d["pm2_error"] as? String
+            }
             probe("models.py", ["list"], timeout: 25) { if let v = $0 as? [String: Any] { s.models = v } }
             probe("gitscan.py", ["list"], timeout: 90) { if let v = $0 as? [String: Any] { s.git = v } }
             if Integrations.csync {
@@ -374,7 +382,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var rows: [SBRow] = []
 
         if Integrations.kanban {
-            let note = kanbanBusy ? "working…" : kanbanUp == nil ? "probing…" : kanbanUp! ? "serving :5106" : "not running"
+            let note = kanbanBusy ? "working…" : kanbanError.map { "couldn't switch: \($0)" }
+                ?? (kanbanUp == nil ? "probing…" : kanbanUp! ? "serving :5106" : "not running")
             rows.append(SBRow(label: "Kanban Board", badge: kanbanUp == true ? .on(menuGreen) : .off, note: note,
                               enabled: !kanbanBusy, onClick: { [weak self] in self?.toggleKanban() },
                               tip: "The kanban board server on port 5106. It stays off across reboots; this switch is where it comes back.",
@@ -391,7 +400,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                               onClick: { [weak self] in
                                   let up = ok
                                   DispatchQueue.global(qos: .utility).async {
-                                      _ = Services.shell("/bin/bash", [hub, up ? "stop" : "restart"])
+                                      // A restart waits for the port; the 4 s default killed it midway.
+                                      _ = Services.run("/bin/bash", [hub, up ? "stop" : "restart"], timeout: 15)
                                       DispatchQueue.main.async { self?.refreshSnapshot() }
                                   }
                               },
@@ -568,7 +578,10 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         for (title, helper, rows) in [("Dev servers", "devservers.py", devServerRows()), ("Repos", "gitscan.py", gitRows()),
                                       ("Drives", "drives.py", driveRows()), ("Local models", "models.py", modelRows()),
                                       ("Schedules", "jobs.py", scheduleRows())] {
-            let st = probeStatus(helper)
+            var st = probeStatus(helper)
+            if st == nil, helper == "devservers.py", let why = sbSnapshot.pm2Error {
+                st = .stale(Date(), why + ", so pm2 states are unknown")
+            }
             if !rows.isEmpty || st != nil { out.append(SystemGroup(title: title, rows: rows, status: st)) }
         }
         out.append(SystemGroup(title: "Session", rows: sessionRows().map(convert) + [wakeOnLANRow()]))
@@ -1193,7 +1206,37 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             let raw = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
             return raw.isEmpty ? "\(r.name) gave no answer" : raw
         }
-        return (obj["ok"] as? Bool ?? false) ? nil : (obj["error"] as? String ?? "\(r.name) refused")
+        return (obj["ok"] as? Bool ?? false) ? nil : plainError(obj["error"] as? String ?? "\(r.name) refused")
+    }
+
+    /// A tool's error in words a person reads: colour codes and table borders
+    /// gone, known launchctl, pm2 and permission failures said plainly, and
+    /// otherwise the first line that says something.
+    static func plainError(_ raw: String) -> String {
+        let text = raw.replacingOccurrences(of: #"\u{1B}\[[0-9;]*[A-Za-z]"#, with: "", options: .regularExpression)
+        let known: [(String, String)] = [
+            (#"(?i)bootstrap failed: 5|input/output error"#, "launchd would not load it; it may be loaded already, or its plist is broken"),
+            (#"(?i)bootstrap failed: 37|already (loaded|bootstrapped)"#, "it is loaded already"),
+            (#"(?i)could not find service|no such process|service is disabled"#, "launchd has no running job by that name right now"),
+            (#"(?i)operation not permitted|permission denied|EPERM"#, "macOS did not allow it (permission denied)"),
+            (#"(?i)\[PM2\]\[ERROR\] Process or Namespace (\S+) not found"#, "pm2 has no process named $1"),
+            (#"(?i)command not found: (\S+)"#, "$1 is not installed or not on the PATH"),
+            (#"(?i)(\S+): command not found"#, "$1 is not installed or not on the PATH"),
+        ]
+        for (pattern, plain) in known {
+            // Rewrite only the matched text, so a capture ($1) carries the name through.
+            if let r = text.range(of: pattern, options: .regularExpression) {
+                return String(text[r]).replacingOccurrences(of: pattern, with: plain, options: .regularExpression)
+            }
+        }
+        let boxChars = CharacterSet(charactersIn: "│┌┐└┘├┤┬┴┼─═║╔╗╚╝")
+        // A table (pm2 prints one) carries no reason, so its lines are skipped whole.
+        let line = text.components(separatedBy: "\n")
+            .filter { $0.rangeOfCharacter(from: boxChars) == nil }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty && !$0.hasPrefix("[PM2] ") && $0.rangeOfCharacter(from: .letters) != nil }
+        guard let l = line else { return "it failed without saying why" }
+        return l.count > 160 ? String(l.prefix(157)) + "…" : l
     }
 
     // ── Wake-on-LAN ──────────────────────────────────────────────────────────
@@ -1397,21 +1440,17 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         // zsh -lc so pm2 resolves from the login PATH (GUI apps don't get it).
         let cmd = stopping ? "pm2 stop kanban"
             : "pm2 start kanban 2>/dev/null || pm2 start bun --name kanban -- \"\(Integrations.kanbanServer)\" --port 5106"
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        task.arguments = ["-lc", cmd]
-        task.standardOutput = FileHandle.nullDevice
-        task.standardError = FileHandle.nullDevice
-        task.terminationHandler = { [weak self] _ in
+        kanbanError = nil
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let r = Services.run("/bin/zsh", ["-lc", cmd], timeout: 20)
+            // pm2 prints its table either way; the exit status and the timeout are what count.
+            let why = r.timedOut || !r.launched ? r.failure : (r.ok ? nil : "pm2 could not \(stopping ? "stop" : "start") it (exit \(r.status ?? -1))")
+            if let why = why { derr("kanban toggle failed: \(why)") }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                self?.kanbanError = why
                 self?.kanbanBusy = false
                 self?.refreshSnapshot()
             }
-        }
-        do { try task.run() } catch {
-            derr("kanban toggle failed: \(fmtErr(error))")
-            kanbanBusy = false
-            refreshSnapshot()
         }
     }
 }
@@ -1460,6 +1499,21 @@ func probeShell() -> String {
     let refused = Services.run("/bin/sh", ["-c", "echo '{\"ok\": false, \"error\": \"no such job\"}'"])
     check("helperError keeps the helper's own error", SwitchboardApp.helperError(refused) == "no such job")
     check("the old output-only call still returns the output", Services.shell("/bin/echo", ["hi"]) == "hi\n")
+
+    // Tool errors reach the owner in words.
+    let plain: [(String, String)] = [
+        ("Bootstrap failed: 5: Input/output error", "launchd would not load it; it may be loaded already, or its plist is broken"),
+        ("\u{1B}[31m[PM2][ERROR] Process or Namespace kanban not found\u{1B}[39m", "pm2 has no process named kanban"),
+        ("kill: 123: Operation not permitted", "macOS did not allow it (permission denied)"),
+        ("zsh:1: command not found: pm2", "pm2 is not installed or not on the PATH"),
+        ("pm2: command not found", "pm2 is not installed or not on the PATH"),
+        ("[PM2] Applying action\n┌────┬──────┐\n│ id │ name │\n", "it failed without saying why"),
+        ("", "it failed without saying why"),
+    ]
+    for (raw, want) in plain {
+        let got = SwitchboardApp.plainError(raw)
+        check("plain words for: \(raw.prefix(30).replacingOccurrences(of: "\n", with: " "))", got == want, got)
+    }
 
     lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
     return lines.joined(separator: "\n")

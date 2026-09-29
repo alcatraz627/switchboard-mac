@@ -107,6 +107,13 @@ enum SwitchboardConcerns {
                                footer: "Every action is a csync command, recorded in its log.", footerIcon: "terminal",
                                content: AnyView(SystemTabView(store: policy, source: .remote)),
                                refresh: { policy.requestSystemRefresh() }),
+            SwitchboardConcern(id: "runtime", title: "Runtime", subtitle: "Everything that runs", icon: "bolt.horizontal",
+                               footer: "Stop and Disable ask first; a command copies instead of opening a terminal.", footerIcon: "doc.on.doc",
+                               content: AnyView(SystemTabView(store: policy, source: .catalog("runtime"))),
+                               refresh: { policy.requestSystemRefresh() },
+                               pinned: AnyView(SearchField(text: Binding(get: { policy.queries["runtime"] ?? "" },
+                                                                         set: { policy.queries["runtime"] = $0 }),
+                                                           prompt: "Search services, ports, models and jobs"))),
             catalogTab(policy, id: "rules", title: "Rules & Hooks", subtitle: "Rules, gates and hook scripts", icon: "checklist",
                        footer: "Problems sort first: a hook with no event, or one whose file is gone.",
                        search: "Search rules, gates and hooks", read: RulesCatalog.groups),
@@ -197,7 +204,7 @@ struct PolicyPanel: View {
     private var headerTop: some View {
         HStack(spacing: 0) {
             // A drawn tab bar: the native segmented control drops a label's icon on macOS.
-            // Four to a row, so seven tabs sit in two rows with full labels.
+            // Four to a row; a long label ("Rules & Hooks") shrinks a little to fit its cell.
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 4), spacing: 2) {
                 ForEach(shown) { c in
                     let on = c.id == current.id
@@ -205,10 +212,10 @@ struct PolicyPanel: View {
                         storedTab = c.id
                         c.refresh()
                     } label: {
-                        HStack(spacing: 5) {
+                        HStack(spacing: 4) {
                             Image(systemName: c.icon).font(.system(size: 10.5))
                             Text(c.title).font(.system(size: 11.5, weight: on ? .semibold : .regular))
-                                .lineLimit(1).fixedSize()
+                                .lineLimit(1).minimumScaleFactor(0.8)
                             if let n = c.badge() { TabBadge(count: n, onAccent: on) }
                         }
                         .frame(maxWidth: .infinity)
@@ -230,6 +237,7 @@ struct PolicyPanel: View {
         HStack(spacing: 6) {
             Image(systemName: current.footerIcon).font(.system(size: 9)).foregroundStyle(.secondary)
             Text(current.footer).font(PT.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
             Button { current.refresh() } label: {
                 Image(systemName: "arrow.clockwise").font(.system(size: 11))
@@ -371,6 +379,7 @@ struct SystemTabView: View {
     /// snapshot still builds them; only where they are drawn changes.
     static let groupHome: [String: String] = [
         "Guards": "rules",
+        "Services": "runtime", "Dev servers": "runtime", "Local models": "runtime", "Schedules": "runtime",
     ]
 
     private var groups: [SystemGroup] {
@@ -391,7 +400,7 @@ struct SystemTabView: View {
         switch source {
         case .approvals:
             Text("Nothing is waiting on you.").font(PT.caption).foregroundStyle(.secondary)
-        case .catalog(let id) where store.catalogs[id] != nil:
+        case .catalog(let id) where store.catalogs[id] != nil || !(store.queries[id] ?? "").isEmpty:
             Text("Nothing matches \u{201C}\(store.queries[id] ?? "")\u{201D}.").font(PT.caption).foregroundStyle(.secondary)
         default:
             ReadingStatus(state: .loading)

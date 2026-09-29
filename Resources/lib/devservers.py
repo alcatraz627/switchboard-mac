@@ -39,8 +39,11 @@ def pm2(*args):
 
 
 def listeners():
-    """port -> pid of the process listening on it."""
-    _, out, _ = run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-Fpn"])
+    """port -> pid of the process listening on it. Raises when lsof cannot
+    answer, so a failed read never looks like every port being free."""
+    code, out, err = run(["lsof", "-nP", "-iTCP", "-sTCP:LISTEN", "-Fpn"])
+    if code != 0 and not out.strip():
+        raise RuntimeError(f"lsof could not list listening ports: {err.strip() or code}")
     ports, pid = {}, None
     for line in out.splitlines():
         if line.startswith("p"):
@@ -72,14 +75,22 @@ def process_tree():
     return parents
 
 
+PM2_ERROR = None   # why the last pm2 read failed, reported beside the list
+
+
 def pm2_status():
+    global PM2_ERROR
     code, out, _ = pm2("jlist")
     # jlist can print a banner line before the JSON when pm2's daemon was cold.
     start = out.find("[")
     try:
-        return {p["name"]: p.get("pm2_env", {}).get("status") for p in json.loads(out[start:])} if code == 0 and start >= 0 else {}
+        if code == 0 and start >= 0:
+            PM2_ERROR = None
+            return {p["name"]: p.get("pm2_env", {}).get("status") for p in json.loads(out[start:])}
     except (ValueError, KeyError, TypeError):
-        return {}
+        pass
+    PM2_ERROR = "pm2 did not answer" if code != 0 else "pm2 gave a list that could not be read"
+    return {}
 
 
 def servers():
@@ -122,17 +133,26 @@ def main():
     a = sys.argv[1:]
     cmd = a[0] if a else "help"
     if cmd == "list":
-        print(json.dumps({"servers": servers() if os.path.exists(PORTS) else [], "ledger": os.path.exists(PORTS)}))
+        try:
+            found = servers() if os.path.exists(PORTS) else []
+        except RuntimeError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(2)
+        print(json.dumps({"servers": found, "ledger": os.path.exists(PORTS), "pm2_error": PM2_ERROR}))
     elif cmd in ("start", "stop") and len(a) == 2:
         if a[1] not in pm2_status():
-            answer(1, f"pm2 has no process named {a[1]}")
+            answer(1, PM2_ERROR or f"pm2 has no process named {a[1]}")
         code, out, err = pm2(cmd, a[1])
         answer(code, err or out)
     elif cmd == "kill" and len(a) == 2 and a[1].isdigit():
-        pid = listeners().get(int(a[1]))
+        try:
+            pid = listeners().get(int(a[1]))
+            owners = {p: l for l, (p, _) in launchd.launchctl_list().items() if p} if pid else {}
+        except RuntimeError as e:
+            answer(1, str(e))
         if not pid:
             answer(1, f"nothing is listening on :{a[1]}")
-        owner = launchd_owner(pid, process_tree(), {p: l for l, (p, _) in launchd.launchctl_list().items() if p})
+        owner = launchd_owner(pid, process_tree(), owners)
         if owner:
             answer(1, f"launchd runs it as {owner} and would start it again; disable that job instead")
         try:

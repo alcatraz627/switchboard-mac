@@ -29,8 +29,17 @@ FOREIGN = ("com.google.", "com.microsoft.", "com.adobe.", "com.apple.", "us.zoom
 
 
 def launchctl_list():
-    """label -> (pid or None, last exit status) for every loaded job."""
-    out = subprocess.run(["launchctl", "list"], capture_output=True, text=True).stdout
+    """label -> (pid or None, last exit status) for every loaded job.
+
+    Raises when launchctl cannot answer, so the panel says the list could not
+    be read instead of showing every job as not loaded."""
+    try:
+        r = subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise RuntimeError(f"launchctl list did not answer: {e}")
+    if r.returncode != 0:
+        raise RuntimeError(f"launchctl list failed: {r.stderr.strip() or r.returncode}")
+    out = r.stdout
     loaded = {}
     for line in out.splitlines()[1:]:
         parts = line.split("\t")
@@ -133,7 +142,10 @@ def jobs():
 
 
 def launchctl(*argv):
-    r = subprocess.run(["launchctl", *argv], capture_output=True, text=True)
+    try:
+        r = subprocess.run(["launchctl", *argv], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return False, f"launchctl {argv[0]} did not answer: {e}"
     return r.returncode == 0, (r.stderr.strip() or r.stdout.strip() or f"launchctl exit {r.returncode}")
 
 
@@ -198,7 +210,11 @@ def main():
     args = sys.argv[1:]
     cmd = args[0] if args else "help"
     if cmd == "list":
-        print(json.dumps(jobs()))
+        try:
+            print(json.dumps(jobs()))
+        except RuntimeError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(2)
     elif cmd in ("run", "start", "stop", "disable", "enable") and len(args) == 2:
         if cmd == "run":
             ok, err = launchctl("kickstart", f"gui/{UID}/{args[1]}")
