@@ -40,6 +40,59 @@ func probeNotes() -> String {
     check("a dragged order is kept across a reload", s.notes.map(\.id) == [a!.id, c.id, b!.id], s.notes.map(\.title).joined(separator: ","))
     s.delete(c)
     check("delete removes the file", !FileManager.default.fileExists(atPath: c.path) && !s.notes.contains { $0.id == c.id })
+
+    // Reminders through a stand-in: the permission dialog stays up until answer() runs.
+    NotesStore.remindersOff = false
+    var status = EKAuthorizationStatus.notDetermined
+    var answer: ((Bool) -> Void)?
+    var saved: [Note] = []
+    var saveFails = false
+    s.reminders = ReminderBackend(status: { status }, requestAccess: { answer = $0 },
+                                  save: { n in
+                                      if saveFails { throw NSError(domain: "probe", code: 1, userInfo: [NSLocalizedDescriptionKey: "calendar is read-only"]) }
+                                      saved.append(n); return "rem-\(saved.count)" },
+                                  remove: { _ in })
+    func pump() { RunLoop.current.run(until: Date().addingTimeInterval(0.1)) }
+    var r = s.add("Call the bank")!
+    r.remindAt = Date().addingTimeInterval(3600)
+    s.update(r)
+    r.body = "typed while the dialog was up"
+    s.update(r)
+    status = .fullAccess
+    answer?(true); pump()
+    let after = s.notes.first { $0.id == r.id }
+    check("the first reminder is created once access is given", saved.count == 1, "\(saved.count) saved")
+    check("it carries what was typed while the dialog was up", saved.first?.body == "typed while the dialog was up"
+          && after?.body == "typed while the dialog was up", after?.body ?? "nil")
+    check("the note records its reminder", after?.reminderID == "rem-1", after?.reminderID ?? "nil")
+    status = .denied
+    var d = s.add("Denied one")!
+    d.remindAt = Date().addingTimeInterval(3600)
+    s.update(d)
+    check("no access says so instead of passing quietly", s.error?.contains("may not add reminders") == true, s.error ?? "nil")
+    status = .fullAccess; saveFails = true
+    var f = s.add("Failing save")!
+    f.remindAt = Date().addingTimeInterval(3600)
+    s.update(f)
+    check("a failed save says why", s.error?.contains("read-only") == true, s.error ?? "nil")
+    NotesStore.remindersOff = true
+
+    // A folder of the owner's own, holding a markdown file written by hand.
+    let ud = UserDefaults.standard
+    let chosenBefore = ud.string(forKey: NotesStore.folderKey)
+    let own = AppPaths.stateDir + "/own-notes"
+    ud.set(own, forKey: NotesStore.folderKey)
+    try? "# Shopping\n\n- milk\n- eggs\n".write(toFile: NotesStore.dir + "/shopping.md", atomically: true, encoding: .utf8)
+    s.load()
+    var h = s.notes.first { $0.id == "shopping" }
+    check("a hand-written file reads its heading as the title", h?.title == "Shopping", h?.title ?? "nil")
+    check("and keeps its body", h?.body == "- milk\n- eggs", h?.body ?? "nil")
+    h?.tags = ["errands"]
+    if let h = h { s.update(h); s.saveOrder() }
+    let onDisk = (try? String(contentsOfFile: own + "/shopping.md", encoding: .utf8)) ?? ""
+    check("editing it keeps the body in the file", onDisk.contains("- milk\n- eggs"), onDisk)
+    check("the saved order is not written into the owner's folder", !FileManager.default.fileExists(atPath: own + "/order.json"))
+    ud.set(chosenBefore, forKey: NotesStore.folderKey)
     lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
     return lines.joined(separator: "\n")
 }
@@ -80,7 +133,13 @@ final class NotesStore: ObservableObject {
         try? FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true)
         return d
     }
-    private static var orderPath: String { dir + "/order.json" }
+    /// The saved order lives beside the default notes, but never inside a
+    /// folder of the owner's own that was chosen in Settings.
+    private static var orderPath: String {
+        let d = dir
+        guard d != defaultDir else { return d + "/order.json" }
+        return AppPaths.stateDir + "/notes-order" + d.replacingOccurrences(of: "/", with: "_") + ".json"
+    }
 
     // ── Reading and writing the files ───────────────────────────────────────
 
@@ -124,15 +183,18 @@ final class NotesStore: ObservableObject {
     func update(_ n: Note) {
         var n = n
         let old = notes.first { $0.id == n.id }
-        if old?.remindAt != n.remindAt || old?.remindRepeat != n.remindRepeat || old?.title != n.title { syncReminder(&n) }
+        var problem: String?
+        if old?.remindAt != n.remindAt || old?.remindRepeat != n.remindRepeat || old?.title != n.title { problem = syncReminder(&n) }
         guard write(n) else { return }
         if let i = notes.firstIndex(where: { $0.id == n.id }) { notes[i] = n }
+        // After write, which clears the error line on success.
+        if let p = problem { error = p }
     }
 
     func delete(_ n: Note) {
         var gone = n
         gone.remindAt = nil
-        syncReminder(&gone)
+        _ = syncReminder(&gone)
         do { try FileManager.default.removeItem(atPath: n.path) } catch {
             self.error = "\(n.title) could not be removed: \(error.localizedDescription)"; return
         }
@@ -195,8 +257,15 @@ final class NotesStore: ObservableObject {
             body = String(text[end.upperBound...])
         }
         body = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        let title = fields["title"] ?? body.components(separatedBy: "\n").first ?? id
-        return Note(id: id, title: title, body: fields["title"] == nil ? "" : body,
+        // A file written by hand has no title field: its first line is the
+        // title (a markdown heading loses its #) and the rest stays the body.
+        var title = fields["title"] ?? id
+        if fields["title"] == nil, !body.isEmpty {
+            let lines = body.components(separatedBy: "\n")
+            title = lines[0].drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)
+            body = lines.dropFirst().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return Note(id: id, title: title, body: body,
                     tags: (fields["tags"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty },
                     created: fields["created"].flatMap(iso.date) ?? Date.distantPast,
                     expires: fields["expires"].flatMap(iso.date),
@@ -210,48 +279,77 @@ final class NotesStore: ObservableObject {
     private let events = EKEventStore()
     /// Set by the headless probe so it never touches the real Reminders.
     static var remindersOff = false
+    /// macOS Reminders, or a stand-in the probe uses to play the permission dialog.
+    lazy var reminders: ReminderBackend = .system(events)
 
     /// Make Reminders match the note: add, move or remove its one reminder.
     /// Access is asked the first time a reminder is set, never before.
-    private func syncReminder(_ n: inout Note) {
-        guard !Self.remindersOff else { return }
-        let existing = n.reminderID.flatMap { events.calendarItem(withIdentifier: $0) as? EKReminder }
-        guard let at = n.remindAt else {
-            if let r = existing { try? events.remove(r, commit: true) }
+    /// Returns what went wrong in plain words, or nil.
+    private func syncReminder(_ n: inout Note) -> String? {
+        guard !Self.remindersOff else { return nil }
+        guard n.remindAt != nil else {
+            if let id = n.reminderID { reminders.remove(id) }
             n.reminderID = nil
-            return
+            return nil
         }
-        switch EKEventStore.authorizationStatus(for: .reminder) {
+        switch reminders.status() {
         case .fullAccess, .authorized, .writeOnly: break
         case .notDetermined:
-            // Ask once, off the main thread; the note is saved now and the reminder follows the answer.
-            let pending = n
-            events.requestFullAccessToReminders { [weak self] granted, _ in
+            // The note is saved now and the reminder follows the answer, made
+            // from the note as it is then: it may have been edited meanwhile.
+            let id = n.id
+            reminders.requestAccess { [weak self] granted in
                 DispatchQueue.main.async {
-                    if granted { self?.update(pending) }
-                    else { self?.error = "Reminders access was not given, so the reminder was not set." }
+                    guard let self = self else { return }
+                    guard granted else { self.error = "Reminders access was not given, so the reminder was not set."; return }
+                    guard var now = self.notes.first(where: { $0.id == id }), now.remindAt != nil else { return }
+                    let problem = self.syncReminder(&now)
+                    guard self.write(now) else { return }
+                    if let i = self.notes.firstIndex(where: { $0.id == id }) { self.notes[i] = now }
+                    if let p = problem { self.error = p }
                 }
             }
-            return
+            return nil
         default:
-            error = "Switchboard may not add reminders. Allow it in System Settings > Privacy & Security > Reminders."
-            return
+            return "Switchboard may not add reminders. Allow it in System Settings > Privacy & Security > Reminders."
         }
-        let r = existing ?? EKReminder(eventStore: events)
-        r.title = n.title
-        r.notes = (n.body.isEmpty ? "" : n.body + "\n\n") + n.path
-        if r.calendar == nil { r.calendar = events.defaultCalendarForNewReminders() }
-        r.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: at)
-        r.alarms?.forEach { r.removeAlarm($0) }
-        r.addAlarm(EKAlarm(absoluteDate: at))
-        r.recurrenceRules?.forEach { r.removeRecurrenceRule($0) }
-        let freq: EKRecurrenceFrequency? = [.daily: .daily, .weekly: .weekly, .monthly: .monthly][n.remindRepeat]
-        if let f = freq { r.addRecurrenceRule(EKRecurrenceRule(recurrenceWith: f, interval: 1, end: nil)) }
         do {
-            try events.save(r, commit: true)
-            n.reminderID = r.calendarItemIdentifier
+            n.reminderID = try reminders.save(n)
+            return nil
         } catch {
-            self.error = "the reminder could not be saved: \(error.localizedDescription)"
+            return "the reminder could not be saved: \(error.localizedDescription)"
         }
+    }
+}
+
+/// The three things notes need from Reminders.
+struct ReminderBackend {
+    var status: () -> EKAuthorizationStatus
+    var requestAccess: (@escaping (Bool) -> Void) -> Void
+    /// Adds or moves the note's one reminder; returns its identifier.
+    var save: (Note) throws -> String
+    var remove: (String) -> Void
+
+    static func system(_ events: EKEventStore) -> ReminderBackend {
+        func existing(_ id: String?) -> EKReminder? { id.flatMap { events.calendarItem(withIdentifier: $0) as? EKReminder } }
+        return ReminderBackend(
+            status: { EKEventStore.authorizationStatus(for: .reminder) },
+            requestAccess: { done in events.requestFullAccessToReminders { granted, _ in done(granted) } },
+            save: { n in
+                let r = existing(n.reminderID) ?? EKReminder(eventStore: events)
+                r.title = n.title
+                r.notes = (n.body.isEmpty ? "" : n.body + "\n\n") + n.path
+                if r.calendar == nil { r.calendar = events.defaultCalendarForNewReminders() }
+                let at = n.remindAt ?? Date()
+                r.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: at)
+                r.alarms?.forEach { r.removeAlarm($0) }
+                r.addAlarm(EKAlarm(absoluteDate: at))
+                r.recurrenceRules?.forEach { r.removeRecurrenceRule($0) }
+                let freq: EKRecurrenceFrequency? = [.daily: .daily, .weekly: .weekly, .monthly: .monthly][n.remindRepeat]
+                if let f = freq { r.addRecurrenceRule(EKRecurrenceRule(recurrenceWith: f, interval: 1, end: nil)) }
+                try events.save(r, commit: true)
+                return r.calendarItemIdentifier
+            },
+            remove: { id in if let r = existing(id) { try? events.remove(r, commit: true) } })
     }
 }

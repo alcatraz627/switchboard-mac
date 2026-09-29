@@ -215,6 +215,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         snapshotRunsStarted += 1
         dlog("snapshot started")
         let previous = sbSnapshot
+        // A pending timed flip needs its switch read even where it is hidden.
+        let timersPending = !systemTimers.isEmpty
         DispatchQueue.global(qos: .utility).async { [weak self] in
             var s = SBSnapshot()
             // The helpers are separate processes, so they run side by side; a
@@ -257,7 +259,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             if Integrations.csync {
                 probe("remote.py", ["list"], timeout: 70) { if let v = $0 as? [String: Any] { s.remote = v } }
             }
-            if Integrations.guardHooks && !Visibility.groupHidden("Guards") {
+            if Integrations.guardHooks && (timersPending || !Visibility.groupHidden("Guards")) {
                 s.muted = Guards.muted()
                 s.gates = Guards.all()
             }
@@ -270,7 +272,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             }
             s.boardSync = BoardSync.enabled()
             // Services are several network and login-shell probes; hidden, none run.
-            let servicesShown = !Visibility.groupHidden("Services")
+            let servicesShown = timersPending || !Visibility.groupHidden("Services")
             if servicesShown, Integrations.hubScript != nil {
                 s.hubHost = Services.hubAdvertisedHost()
                 s.hubLocal = Services.probeHTTP("http://127.0.0.1:5400/healthz")
@@ -593,6 +595,11 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
     }
 
     func panelSystemGroups() -> [SystemGroup] {
+        allSystemGroups().filter { !Visibility.groupHidden($0.title) }
+    }
+
+    /// Every Machine group, hidden ones too: the timer engine still owns their switches.
+    private func allSystemGroups() -> [SystemGroup] {
         func convert(_ r: SBRow) -> SystemRow {
             let state: SystemRow.State
             switch r.badge {
@@ -630,7 +637,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             if !rows.isEmpty || st != nil { out.append(SystemGroup(title: title, rows: rows, status: st)) }
         }
         out.append(SystemGroup(title: "Session", rows: sessionRows().map(convert) + [wakeOnLANRow()]))
-        return out.filter { !Visibility.groupHidden($0.title) }
+        return out
     }
 
     /// The Machine tab as text, for checking the rows without a screen.
@@ -1380,7 +1387,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
     }
 
     private func systemRow(_ key: String) -> SystemRow? {
-        panelSystemGroups().flatMap { $0.rows }.first { $0.timerKey == key }
+        allSystemGroups().flatMap { $0.rows }.first { $0.timerKey == key }
     }
 
     func startSystemTimer(_ key: String, until: Date) {
@@ -1636,6 +1643,19 @@ extension SwitchboardApp {
         check("a shown group still reads", sbSnapshot.probeReadAt["jobs.py"] != nil && titles.contains("Schedules"))
         let hiddenCatalog = Visibility.hiddenTitles("runtime")
         check("the hidden title is known per tab", hiddenCatalog == ["Dev servers"])
+
+        // A timer far off on Keep Awake while its section and Services are hidden.
+        let timersKey = systemTimersKey
+        systemTimersKey = "switchboard.timers.probe-visibility"
+        defer { systemTimers = [:]; systemTimersKey = timersKey }
+        systemTimers = ["Keep Awake": SystemTimer(until: Date().addingTimeInterval(86400), restoreOn: keepAwakeOn)]
+        d.set(["system::Session", "runtime::Services"], forKey: Visibility.sectionsKey)
+        let shown = panelSystemGroupsFresh().map(\.title)
+        check("a hidden section is not drawn while a timer waits on it", !shown.contains("Session"))
+        check("the timer still finds its switch in a hidden section", systemRow("Keep Awake") != nil)
+        if Integrations.ipcBroker {
+            check("hidden Services are read while a timer is pending", sbSnapshot.brokerUp != nil)
+        }
         lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
         return lines.joined(separator: "\n")
     }
