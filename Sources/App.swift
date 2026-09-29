@@ -41,6 +41,10 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             requestSystemRefresh: { [weak self] in self?.refreshSnapshot() })
         policyController?.appHoverLines = { [weak self] chosen in self?.hoverLines(chosen) ?? [] }
         if let store = policyController?.store {
+            // refreshPanel hands over the new rows a tick later, so answer after it.
+            store.afterFreshSnapshot = { [weak self] done in
+                self?.refreshSnapshot { DispatchQueue.main.async(execute: done) }
+            }
             store.startSystemTimer = { [weak self] k, until in self?.startSystemTimer(k, until: until) }
             store.cancelSystemTimer = { [weak self] k in self?.cancelSystemTimer(k) }
             store.endSystemTimerNow = { [weak self] k in self?.endSystemTimerNow(k) }
@@ -52,7 +56,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         // the first open instead of loading while the owner watches.
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.refreshSnapshot() }
         if CommandLine.arguments.contains("--open") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.policyController?.show() }
+            // After the launch snapshot, so an open is measured on its own.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in self?.policyController?.show() }
         }
     }
 
@@ -187,9 +192,28 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { [weak self] in self?.refreshSnapshot(completion: completion) }
             return
         }
+        // A waiter asked for values read after its request, so one arriving
+        // mid-run waits for the rerun rather than the run already reading.
+        guard !snapshotRunning else {
+            if let c = completion { rerunWaiters.append(c) }
+            snapshotAgain = true
+            return
+        }
         if let c = completion { snapshotWaiters.append(c) }
-        guard !snapshotRunning else { snapshotAgain = true; return }
+        // Requests in the same main-queue turn (a panel open asks from four
+        // tabs) join the one snapshot that is about to start.
+        guard !snapshotQueued else { return }
+        snapshotQueued = true
+        DispatchQueue.main.async { [weak self] in
+            self?.snapshotQueued = false
+            self?.runSnapshot()
+        }
+    }
+
+    private func runSnapshot() {
         snapshotRunning = true
+        snapshotRunsStarted += 1
+        dlog("snapshot started")
         let previous = sbSnapshot
         DispatchQueue.global(qos: .utility).async { [weak self] in
             var s = SBSnapshot()
@@ -273,7 +297,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 if !self.kanbanBusy { self.kanbanUp = kanban }
                 self.refreshPanel(); self.policyController?.updateDot(problems: !self.problemTexts().isEmpty)
                 let waiters = self.snapshotWaiters
-                self.snapshotWaiters = []
+                self.snapshotWaiters = self.rerunWaiters
+                self.rerunWaiters = []
                 waiters.forEach { $0() }
                 self.snapshotRunning = false
                 if self.snapshotAgain {
@@ -284,8 +309,11 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         }
     }
     private var snapshotRunning = false
+    private var snapshotQueued = false
     private var snapshotAgain = false
     private var snapshotWaiters: [() -> Void] = []
+    private var rerunWaiters: [() -> Void] = []
+    private var snapshotRunsStarted = 0
 
     /// Other processes holding the Mac awake: pmset's per-process list, minus
     /// macOS's own daemons and this app. A caffeinate is named by the process
@@ -1558,6 +1586,42 @@ extension SwitchboardApp {
 extension SwitchboardApp {
     /// Hides Repos and Dev servers for this process only, takes a fresh
     /// snapshot, and checks both groups are gone and their helpers never ran.
+    /// Runs real snapshots: requests made together share one, and a caller
+    /// waiting on one that was already reading gets the next, fresher one.
+    func probeSnapshot() -> String {
+        var lines: [String] = []
+        func check(_ name: String, _ ok: Bool) { lines.append("\(ok ? "ok  " : "FAIL") \(name)") }
+        func pumpUntil(_ cond: () -> Bool) {
+            let deadline = Date().addingTimeInterval(120)
+            while !cond() && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        }
+        let idle = { !self.snapshotRunning && !self.snapshotQueued && !self.snapshotAgain }
+
+        let before = snapshotRunsStarted
+        (1...4).forEach { _ in refreshSnapshot() }
+        pumpUntil(idle)
+        check("four requests in one turn start one snapshot (started \(snapshotRunsStarted - before))",
+              snapshotRunsStarted - before == 1)
+
+        refreshSnapshot()
+        pumpUntil { self.snapshotRunning }
+        let askedDuring = snapshotRunsStarted
+        var servedAfter = -1
+        refreshSnapshot { servedAfter = self.snapshotRunsStarted }
+        pumpUntil { servedAfter >= 0 && idle() }
+        check("a wait asked mid-run is answered by a snapshot started after it (run \(askedDuring) -> \(servedAfter))",
+              servedAfter > askedDuring)
+
+        let store = PolicyStore()
+        var sw = SystemRow(label: "Probe switch", state: .on(.systemGreen), note: "", action: {})
+        sw.key = "probe-sw"
+        store.systemGroups = [SystemGroup(title: "G", rows: [SystemRow(label: "Parent", state: .ok, note: "", children: [sw])])]
+        check("a switch nested in a row is found in the store", store.systemRowIsOn("probe-sw") == true)
+        check("an unknown switch reads as unknown", store.systemRowIsOn("nope") == nil)
+        lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
+        return lines.joined(separator: "\n")
+    }
+
     func probeVisibility() -> String {
         let d = UserDefaults.standard
         let before = d.stringArray(forKey: Visibility.sectionsKey)

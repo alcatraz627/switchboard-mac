@@ -38,6 +38,7 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   check "headless snapshot renders" "$BIN" --snapshot "$WORK/home.png" --tab home
   check "Approve writes the file the push gate reads (scratch folder)" "$BIN" --probe-approve
   check "a clean, failed, hung and missing command are told apart" "$BIN" --probe-shell
+  check "a panel open costs one snapshot; a wait gets a fresh one" "$BIN" --probe-snapshot
   check "list tabs: parsing, a failing source, preview and search" "$BIN" --probe-catalog
   check "the Library tab renders" "$BIN" --snapshot "$WORK/library.png" --tab library
   check "the Rules & Hooks tab renders" "$BIN" --snapshot "$WORK/rules.png" --tab rules

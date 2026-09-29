@@ -74,10 +74,10 @@ enum RulesCatalog {
             .map { hookDir + "/" + $0 }
         // A script another script runs is in use even with no event of its
         // own. Comment lines and test folders do not count as a call.
-        let bodies = liveScriptBodies(gcc + "/scripts")
+        let callers = scriptCallers(liveScriptBodies(gcc + "/scripts"))
         for path in files {
-            let base = (path as NSString).lastPathComponent
-            let users = bodies.filter { $0.0 != path && $0.1.contains(base) }.map { ($0.0 as NSString).lastPathComponent }
+            let users = (callers[(path as NSString).lastPathComponent] ?? []).filter { $0 != path }
+                .map { ($0 as NSString).lastPathComponent }
             if !users.isEmpty { wiring[path, default: Wiring()].usedBy = users.sorted() }
         }
         let all = Set(files).union(wiring.keys)
@@ -124,6 +124,20 @@ enum RulesCatalog {
             let code = text.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("#") }
                 .joined(separator: "\n")
             out.append((root + "/" + rel, code))
+        }
+        return out
+    }
+
+    /// Which scripts name each script file, keyed by file name. One pass over
+    /// the bodies, splitting on anything that cannot be part of a file name.
+    static func scriptCallers(_ bodies: [(String, String)]) -> [String: [String]] {
+        let nameChars = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_.-"))
+        var out: [String: [String]] = [:]
+        for (path, code) in bodies {
+            let names = Set(code.components(separatedBy: nameChars.inverted)
+                .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ".")) }
+                .filter { $0.hasSuffix(".sh") || $0.hasSuffix(".py") })
+            for n in names { out[n, default: []].append(path) }
         }
         return out
     }

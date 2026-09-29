@@ -10,6 +10,7 @@
 //   --probe-controls        write volume, mute and brightness back to themselves
 //   --probe-approve         approve a planted push in a scratch folder, never ~/.claude
 //   --probe-shell           tell a clean, failed, hung and missing command apart
+//   --probe-snapshot        one snapshot per burst of requests; a wait gets a fresh one
 //   --probe-catalog         the list tabs' parsing, failure, preview and search
 //   --open                  open the panel shortly after launch
 
@@ -38,6 +39,11 @@ if args.contains("--dump") {
 }
 if args.contains("--probe-timers") {
     let report = delegate.probeSystemTimers()
+    print(report)
+    exit(report.hasSuffix("all passed") ? 0 : 1)
+}
+if args.contains("--probe-snapshot") {
+    let report = delegate.probeSnapshot()
     print(report)
     exit(report.hasSuffix("all passed") ? 0 : 1)
 }

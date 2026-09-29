@@ -329,6 +329,17 @@ final class PolicyStore: ObservableObject {
     var liveDirs: () -> [String] = { [] }
     /// Asks the bar to re-probe its services; results arrive via systemGroups.
     var requestSystemRefresh: () -> Void = {}
+    /// Runs its argument once a snapshot requested now has reached the rows.
+    var afterFreshSnapshot: (@escaping () -> Void) -> Void = { $0() }
+
+    /// Whether the switch with this id is on in the rows the panel shows now.
+    func systemRowIsOn(_ id: String) -> Bool? {
+        func find(_ rows: [SystemRow]) -> SystemRow? {
+            for r in rows { if r.id == id { return r }; if let c = find(r.children) { return c } }
+            return nil
+        }
+        return find((systemGroups + remoteGroups + needGroups).flatMap(\.rows))?.isOn
+    }
 
     /// Re-read one list tab off the main thread. The tab keeps its last
     /// sections until the new ones arrive, and one read runs at a time.

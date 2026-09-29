@@ -684,11 +684,19 @@ struct SystemRowView: View {
         pendingFlip = p
         failure = nil
         row.action?()
+        // Past the grace time, the verdict is a snapshot started after it, however
+        // long that takes: a slow helper is not a switch that failed.
+        let id = row.id, label = row.label
         DispatchQueue.main.asyncAfter(deadline: .now() + Pending.giveUpAfter) {
             guard pendingFlip == p else { return }
-            pendingFlip = nil
-            failure = "\(row.label) did not turn \(on ? "on" : "off"). It is still \(row.isOn ? "on" : "off")."
-            dwarn("switch did not confirm: \(row.label) -> \(on ? "on" : "off")")
+            store.afterFreshSnapshot {
+                guard pendingFlip == p else { return }
+                pendingFlip = nil
+                let now = store.systemRowIsOn(id)
+                if now == on { failure = nil; return }
+                failure = "\(label) did not turn \(on ? "on" : "off")." + (now.map { " It is still \($0 ? "on" : "off")." } ?? "")
+                dwarn("switch did not confirm: \(label) -> \(on ? "on" : "off")")
+            }
         }
     }
 
