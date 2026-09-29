@@ -9,6 +9,7 @@
 //   --probe-timers          exercise the timed-flip engine on Keep Awake
 //   --probe-controls        write volume, mute and brightness back to themselves
 //   --probe-approve         approve a planted push in a scratch folder, never ~/.claude
+//   --probe-shell           tell a clean, failed, hung and missing command apart
 //   --open                  open the panel shortly after launch
 
 import AppKit
@@ -40,6 +41,11 @@ if args.contains("--probe-timers") {
 }
 if args.contains("--probe-approve") {
     let report = probeApprove()
+    print(report)
+    exit(report.hasSuffix("all passed") ? 0 : 1)
+}
+if args.contains("--probe-shell") {
+    let report = probeShell()
     print(report)
     exit(report.hasSuffix("all passed") ? 0 : 1)
 }

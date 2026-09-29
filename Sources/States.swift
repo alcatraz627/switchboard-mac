@@ -57,17 +57,6 @@ struct RowFailure: View {
     }
 }
 
-/// What a reading from outside the app is: waiting for its first value, a
-/// value with its age, a value that could not be refreshed, no value because
-/// reading failed, or nothing to read because the source is absent.
-enum ReadingState: Equatable {
-    case loading
-    case fresh(Date)
-    case stale(Date, String)
-    case failed(String)
-    case unavailable(String)
-}
-
 /// The status line under a reading's header. Ages stay grey until the value is
 /// older than `staleAfter`, then turn amber; a failure with nothing to show is
 /// red with Retry; an absent source is grey and offers nothing to click.
@@ -107,11 +96,6 @@ struct ReadingStatus: View {
     }
 
     private var amber: Color { Color(nsColor: .systemOrange) }
-}
-
-extension ReadingState {
-    var isFailure: Bool { if case .failed = self { return true }; return false }
-    var canRetry: Bool { if case .unavailable = self { return false }; if case .loading = self { return false }; return true }
 }
 
 /// "just now", "4m ago", "3h ago", "2d ago".

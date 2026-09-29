@@ -280,6 +280,9 @@ struct SystemTimer: Equatable {
 struct SystemGroup: Identifiable {
     let title: String
     let rows: [SystemRow]
+    /// Set when the group's source could not be read: stale with the last good
+    /// time, or failed when there was never a value. Nil when it read fine.
+    var status: ReadingState? = nil
     var id: String { title }
 }
 

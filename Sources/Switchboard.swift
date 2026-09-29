@@ -396,41 +396,95 @@ enum Services {
         return true
     }
 
+    /// A command's output only, for callers where an empty answer and a failed
+    /// one mean the same thing. Anything that shows the owner a result should
+    /// use `run` instead, so a failure never reads as "nothing there".
+    static func shell(_ exe: String, _ args: [String], timeout: TimeInterval = 4.0) -> String {
+        run(exe, args, timeout: timeout).out
+    }
+
+    /// Run a command and say how it went: its output, its exit status, and
+    /// whether it could not start or ran out of time.
+    ///
     /// A subprocess that wedges would otherwise pin a background thread for every
     /// menu-open and leave the switchboard silently stale, so every call is
-    /// capped. Reading the pipe happens on another queue: a child that fills the
-    /// 64K pipe buffer blocks forever on write if nobody drains it, and then the
+    /// capped. Both pipes are drained on other queues: a child that fills the
+    /// 64K pipe buffer blocks forever on write if nobody reads it, and then the
     /// timeout never gets a chance to fire.
-    static func shell(_ exe: String, _ args: [String], timeout: TimeInterval = 4.0) -> String {
+    static func run(_ exe: String, _ args: [String], timeout: TimeInterval = 4.0) -> ShellResult {
+        var r = ShellResult(name: ShellResult.displayName(exe, args), timeout: timeout)
         let p = Process()
         p.executableURL = URL(fileURLWithPath: exe)
         p.arguments = args
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = FileHandle.nullDevice
-        guard (try? p.run()) != nil else { return "" }
+        let outPipe = Pipe(), errPipe = Pipe()
+        p.standardOutput = outPipe
+        p.standardError = errPipe
+        guard (try? p.run()) != nil else { r.launched = false; return r }
 
-        var out = Data()
+        var out = Data(), err = Data()
         let lock = NSLock()
-        let drained = DispatchSemaphore(value: 0)
-        DispatchQueue.global(qos: .utility).async {
-            let d = pipe.fileHandleForReading.readDataToEndOfFile()
-            lock.lock(); out = d; lock.unlock()
-            drained.signal()
+        let drained = DispatchGroup()
+        for (pipe, isOut) in [(outPipe, true), (errPipe, false)] {
+            drained.enter()
+            DispatchQueue.global(qos: .utility).async {
+                let d = pipe.fileHandleForReading.readDataToEndOfFile()
+                lock.lock(); if isOut { out = d } else { err = d }; lock.unlock()
+                drained.leave()
+            }
         }
 
         if drained.wait(timeout: .now() + timeout) == .timedOut {
+            r.timedOut = true
             p.terminate()
             // SIGTERM can be ignored; give it a moment, then take the process out.
             if drained.wait(timeout: .now() + 0.5) == .timedOut {
                 kill(p.processIdentifier, SIGKILL)
                 _ = drained.wait(timeout: .now() + 0.5)
             }
-            return ""
+            return r
         }
         p.waitUntilExit()
         lock.lock(); defer { lock.unlock() }
-        return String(data: out, encoding: .utf8) ?? ""
+        r.out = String(data: out, encoding: .utf8) ?? ""
+        r.err = String(data: err.suffix(4096), encoding: .utf8) ?? ""
+        r.status = p.terminationStatus
+        return r
+    }
+}
+
+/// How one command went. `failure` is the sentence the panel shows when it
+/// did not work; nil means it ran and exited cleanly, even with no output.
+struct ShellResult {
+    var name: String
+    var timeout: TimeInterval
+    var out = ""
+    var err = ""
+    var status: Int32? = nil
+    var timedOut = false
+    var launched = true
+
+    var ok: Bool { launched && !timedOut && status == 0 }
+
+    var failure: String? {
+        if !launched { return "\(name) could not be started" }
+        if timedOut { return "\(name) took longer than \(Int(timeout)) s and was stopped" }
+        guard let s = status, s != 0 else { return nil }
+        let line = err.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty && !$0.hasPrefix("at ") && !$0.hasPrefix("File \"") }
+        return line.map { "\(name): \($0)" } ?? "\(name) stopped with an error (exit \(s))"
+    }
+
+    /// The name a person would recognise: the script for `env python3 x.py`,
+    /// the first word for `zsh -lc "cmd …"`, else the program itself.
+    static func displayName(_ exe: String, _ args: [String]) -> String {
+        let base = (exe as NSString).lastPathComponent
+        if base == "env", args.first == "python3", args.count > 1 { return (args[1] as NSString).lastPathComponent }
+        guard ["zsh", "bash", "sh"].contains(base), let first = args.first else { return base }
+        // A login-shell one-liner is named by its first word; an inline `-c`
+        // script has no better name than the shell.
+        if first == "-lc", args.count > 1 { return String(args[1].split(separator: " ").first ?? Substring(base)) }
+        if !first.hasPrefix("-") { return (first as NSString).lastPathComponent }
+        return base
     }
 }
 

@@ -169,3 +169,18 @@ enum PreferenceMigration {
         if !copied.isEmpty { dlog("migrated preferences from claude-instances: \(copied.joined(separator: ", "))") }
     }
 }
+
+/// What a reading from outside the app is: waiting for its first value, a
+/// value with its age, a value that could not be refreshed, no value because
+/// reading failed, or nothing to read because the source is absent.
+/// Drawn by `ReadingStatus` in States.swift.
+enum ReadingState: Equatable {
+    case loading
+    case fresh(Date)
+    case stale(Date, String)
+    case failed(String)
+    case unavailable(String)
+
+    var isFailure: Bool { if case .failed = self { return true }; return false }
+    var canRetry: Bool { if case .unavailable = self { return false }; if case .loading = self { return false }; return true }
+}

@@ -350,7 +350,7 @@ struct SystemTabView: View {
             SystemGroup(title: g.title, rows: g.rows.filter { r in
                 let hay = ([r.label, r.note] + r.children.map { $0.note }).joined(separator: " ").lowercased()
                 return words.allSatisfy { hay.contains($0) }
-            })
+            }, status: g.status)
         }
     }
 
@@ -362,10 +362,15 @@ struct SystemTabView: View {
             ForEach(groups) { g in
                 VStack(alignment: .leading, spacing: 5) {
                     GroupHeader(name: g.title)
-                    Card {
-                        ForEach(Array(g.rows.enumerated()), id: \.element.id) { i, row in
-                            if i > 0 { Divider().padding(.leading, PT.rowH) }
-                            SystemRowView(row: row, store: store)
+                    if let st = g.status {
+                        ReadingStatus(state: st).padding(.horizontal, 4)
+                    }
+                    if !g.rows.isEmpty {
+                        Card {
+                            ForEach(Array(g.rows.enumerated()), id: \.element.id) { i, row in
+                                if i > 0 { Divider().padding(.leading, PT.rowH) }
+                                SystemRowView(row: row, store: store)
+                            }
                         }
                     }
                 }

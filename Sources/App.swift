@@ -155,6 +155,17 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var git: [String: Any] = [:]
         var drives: [[String: Any]] = []
         var needs: [NeedItem] = []
+        /// Helpers whose last run failed, by script name, with the reason in
+        /// words. Their group still shows its previous value, marked stale.
+        var probeFailures: [String: String] = [:]
+        /// When each helper last answered, to date a stale value.
+        var probeReadAt: [String: Date] = [:]
+    }
+
+    /// How a helper-backed group should read: nil when its last probe worked.
+    func probeStatus(_ name: String) -> ReadingState? {
+        guard let why = sbSnapshot.probeFailures[name] else { return nil }
+        return sbSnapshot.probeReadAt[name].map { .stale($0, why) } ?? .failed(why)
     }
 
     /// Refresh the slow half off the main thread. The panel shows whatever
@@ -181,17 +192,20 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 group.enter()
                 DispatchQueue.global(qos: .utility).async {
                     defer { group.leave() }
-                    let out = Services.shell("/usr/bin/env", ["python3", AppPaths.lib(name)] + args, timeout: timeout)
+                    let r = Services.run("/usr/bin/env", ["python3", AppPaths.lib(name)] + args, timeout: timeout)
                     // A probe that failed keeps its last value instead of emptying its group.
-                    guard let v = try? JSONSerialization.jsonObject(with: Data(out.utf8)) else {
-                        dwarn("probe \(name) gave no answer; keeping the last one")
+                    guard let v = try? JSONSerialization.jsonObject(with: Data(r.out.utf8)) else {
+                        let why = r.failure ?? "\(name) gave no answer"
+                        dwarn("probe failed, keeping the last value: \(why)")
+                        lock.lock(); s.probeFailures[name] = why; lock.unlock()
                         return
                     }
-                    lock.lock(); apply(v); lock.unlock()
+                    lock.lock(); apply(v); s.probeReadAt[name] = Date(); lock.unlock()
                 }
             }
             s.jobs = previous.jobs; s.wolTargets = previous.wolTargets; s.drives = previous.drives
             s.devServers = previous.devServers; s.models = previous.models; s.git = previous.git; s.remote = previous.remote
+            s.probeReadAt = previous.probeReadAt
             probe("jobs.py", ["list"], timeout: 8) { if let v = $0 as? [[String: Any]] { s.jobs = v } }
             probe("wol.py", ["list"], timeout: 8) { if let v = $0 as? [[String: Any]] { s.wolTargets = v } }
             probe("drives.py", ["list"], timeout: 30) { if let v = $0 as? [[String: Any]] { s.drives = v } }
@@ -543,16 +557,14 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         for (title, rows) in [("Guards", guardRows()), ("Context", contextRows()), ("Services", serviceRows())] where !rows.isEmpty {
             out.append(SystemGroup(title: title, rows: rows.map(convert)))
         }
-        let dev = devServerRows()
-        if !dev.isEmpty { out.append(SystemGroup(title: "Dev servers", rows: dev)) }
-        let code = gitRows()
-        if !code.isEmpty { out.append(SystemGroup(title: "Repos", rows: code)) }
-        let drives = driveRows()
-        if !drives.isEmpty { out.append(SystemGroup(title: "Drives", rows: drives)) }
-        let models = modelRows()
-        if !models.isEmpty { out.append(SystemGroup(title: "Local models", rows: models)) }
-        let schedules = scheduleRows()
-        if !schedules.isEmpty { out.append(SystemGroup(title: "Schedules", rows: schedules)) }
+        // A helper-backed group shows while it has rows or while its helper is
+        // failing, so a broken read never looks like "nothing there".
+        for (title, helper, rows) in [("Dev servers", "devservers.py", devServerRows()), ("Repos", "gitscan.py", gitRows()),
+                                      ("Drives", "drives.py", driveRows()), ("Local models", "models.py", modelRows()),
+                                      ("Schedules", "jobs.py", scheduleRows())] {
+            let st = probeStatus(helper)
+            if !rows.isEmpty || st != nil { out.append(SystemGroup(title: title, rows: rows, status: st)) }
+        }
         out.append(SystemGroup(title: "Session", rows: sessionRows().map(convert) + [wakeOnLANRow()]))
         return out
     }
@@ -563,6 +575,11 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var out = ["SWITCHBOARD DUMP"]
         for g in groups {
             out.append("\n\(g.title.uppercased())")
+            switch g.status {
+            case .stale(let d, let why)?: out.append("  status: stale, last read \(age(d)): \(why)")
+            case .failed(let why)?: out.append("  status: failed: \(why)")
+            default: break
+            }
             for r in g.rows {
                 let badge: String
                 switch r.state {
@@ -616,7 +633,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         func tier(_ n: Int) -> [[String: Any]] { all.filter { ($0["tier"] as? Int) == n } }
         func live(_ s: [String: Any]) -> Bool { s["live"] as? Bool ?? false }
         let act: (String, String) -> () -> String? = { [weak self] verb, name in {
-            let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script, verb, name], timeout: 20))
+            let err = Self.helperError(Services.run("/usr/bin/env", ["python3", script, verb, name], timeout: 20))
             self?.refreshSnapshot()
             return err
         } }
@@ -637,7 +654,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             } else if on, let owner = owner {
                 // Killing a launchd job's server only makes launchd start it again.
                 r.buttons = [RowButton(label: "Disable", kind: .run({ [weak self] in
-                    let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", AppPaths.lib("jobs.py"), "disable", owner], timeout: 20))
+                    let err = Self.helperError(Services.run("/usr/bin/env", ["python3", AppPaths.lib("jobs.py"), "disable", owner], timeout: 20))
                     self?.refreshSnapshot()
                     return err
                 }), help: "Stop it and keep it off: launchd runs it as \(owner)", doing: "disable \(owner)",
@@ -691,7 +708,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             r.children = up.map(serverRow)
             if !expired.isEmpty {
                 r.buttons = [RowButton(label: "Reap", kind: .run({ [weak self] in
-                    let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script, "reap"], timeout: 40))
+                    let err = Self.helperError(Services.run("/usr/bin/env", ["python3", script, "reap"], timeout: 40))
                     self?.refreshSnapshot()
                     return err
                 }), help: "ports.sh reap: stop the expired one-offs and free their ports. Each can be brought back with ports.sh revive.",
@@ -719,7 +736,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         guard m["suite"] as? Bool == true else { return [] }
         let script = AppPaths.lib("models.py")
         let run: ([String]) -> () -> String? = { [weak self] args in {
-            let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script] + args, timeout: 130))
+            let err = Self.helperError(Services.run("/usr/bin/env", ["python3", script] + args, timeout: 130))
             self?.refreshSnapshot()
             return err
         } }
@@ -814,7 +831,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             }), help: "Open in Finder")]
             if d["ejectable"] as? Bool ?? true {
                 r.buttons.append(RowButton(label: "Eject", kind: .run({ [weak self] in
-                    let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script, "eject", disk], timeout: 70))
+                    let err = Self.helperError(Services.run("/usr/bin/env", ["python3", script, "eject", disk], timeout: 70))
                     self?.refreshSnapshot()
                     return err
                 }), help: "Eject \(disk) and every volume on it", doing: "eject \(name)"))
@@ -871,13 +888,13 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 }), help: "Open in \((editor as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: ""))"))
             }
             row.buttons.append(RowButton(label: "Fetch", kind: .run({ [weak self] in
-                let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script, "fetch", path], timeout: 70))
+                let err = Self.helperError(Services.run("/usr/bin/env", ["python3", script, "fetch", path], timeout: 70))
                 self?.refreshSnapshot()
                 return err
             }), help: "git fetch: see what the remote has, without changing your files", doing: "fetch"))
             if prunable > 0 {
                 row.buttons.append(RowButton(label: "Prune", kind: .run({ [weak self] in
-                    let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script, "prune", path], timeout: 70))
+                    let err = Self.helperError(Services.run("/usr/bin/env", ["python3", script, "prune", path], timeout: 70))
                     self?.refreshSnapshot()
                     return err
                 }), help: "git worktree prune: forget worktrees whose folders are gone", doing: "prune worktrees",
@@ -962,10 +979,13 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
     /// its state allows, then a row to invite a new one.
     func panelRemoteGroups() -> [SystemGroup] {
         let m = sbSnapshot.remote
-        guard m["installed"] as? Bool == true else { return [] }
+        let readStatus = probeStatus("remote.py")
+        guard m["installed"] as? Bool == true else {
+            return readStatus.map { [SystemGroup(title: "Console", rows: [], status: $0)] } ?? []
+        }
         let script = AppPaths.lib("remote.py")
         let act: ([String]) -> () -> String? = { [weak self] args in {
-            let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script] + args, timeout: 130))
+            let err = Self.helperError(Services.run("/usr/bin/env", ["python3", script] + args, timeout: 130))
             self?.refreshSnapshot()
             return err
         } }
@@ -1037,9 +1057,9 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         invite.key = "host-invite"
         invite.showsBadge = false
         invite.buttons = [RowButton(label: "Invite", kind: .ask(placeholder: "A name for it, like studio-mac") { [weak self] name in
-            let out = Services.shell("/usr/bin/env", ["python3", script, "invite", name], timeout: 70)
-            if let err = Self.helperError(out) { return err }
-            guard let d = out.data(using: .utf8),
+            let r = Services.run("/usr/bin/env", ["python3", script, "invite", name], timeout: 70)
+            if let err = Self.helperError(r) { return err }
+            guard let d = r.out.data(using: .utf8),
                   let paste = (try? JSONSerialization.jsonObject(with: d) as? [String: Any])?["paste"] as? String
             else { return "csync gave no line to paste" }
             DispatchQueue.main.async {
@@ -1051,6 +1071,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         }, help: "Name the machine; the paste line lands on your clipboard", doing: "invite that machine")]
         rows.append(invite)
         groups.append(SystemGroup(title: "Hosts", rows: rows))
+        if let st = readStatus { groups[0].status = st }
         return groups
     }
 
@@ -1116,7 +1137,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         // Two plists can carry one Label (pm2's user and root agents are both com.PM2).
         r.key = j["plist"] as? String ?? label
         let act: (String) -> () -> String? = { [weak self] verb in {
-            let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", script, verb, label], timeout: 15))
+            let err = Self.helperError(Services.run("/usr/bin/env", ["python3", script, verb, label], timeout: 15))
             self?.refreshSnapshot()
             return err
         } }
@@ -1156,13 +1177,17 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
 
     /// What a lib helper's `{"ok": …, "error": …}` answer means for a button:
     /// nil when it worked, otherwise the reason in the helper's words.
-    static func helperError(_ out: String) -> String? {
-        guard let d = out.data(using: .utf8),
+    /// What went wrong with a helper call, in words, or nil when it answered ok.
+    /// The helper's own error wins; otherwise the run's failure (could not
+    /// start, timed out, crashed) says why there was no answer.
+    static func helperError(_ r: ShellResult) -> String? {
+        guard let d = r.out.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else {
-            let raw = out.trimmingCharacters(in: .whitespacesAndNewlines)
-            return raw.isEmpty ? "no answer" : raw
+            if let why = r.failure { return why }
+            let raw = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
+            return raw.isEmpty ? "\(r.name) gave no answer" : raw
         }
-        return (obj["ok"] as? Bool ?? false) ? nil : (obj["error"] as? String ?? "refused")
+        return (obj["ok"] as? Bool ?? false) ? nil : (obj["error"] as? String ?? "\(r.name) refused")
     }
 
     // ── Wake-on-LAN ──────────────────────────────────────────────────────────
@@ -1184,12 +1209,12 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             r.showsBadge = false
             r.buttons = [
                 RowButton(label: "Wake", kind: .run({
-                    let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", wol, "wake", mac, bcast]))
+                    let err = Self.helperError(Services.run("/usr/bin/env", ["python3", wol, "wake", mac, bcast]))
                     dlog("wol: \(name) \(err ?? "sent")")
                     return err
                 }), help: "Send the magic packet. A sleeping machine takes a few seconds to answer."),
                 RowButton(label: "Forget", kind: .run({ [weak self] in
-                    let err = Self.helperError(Services.shell("/usr/bin/env", ["python3", wol, "remove", mac]))
+                    let err = Self.helperError(Services.run("/usr/bin/env", ["python3", wol, "remove", mac]))
                     self?.refreshSnapshot()
                     return err
                 }), help: "Remove it from the saved devices"),
@@ -1384,3 +1409,53 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         }
     }
 }
+
+// ── Headless probe: the command runner ──────────────────────────────────────
+
+/// Runs the four ways a command can end (clean, error, timeout, never started)
+/// plus two pipe floods, and checks each is told apart. Touches nothing.
+func probeShell() -> String {
+    var lines: [String] = []
+    func check(_ name: String, _ ok: Bool, _ got: String = "") {
+        lines.append("\(ok ? "ok  " : "FAIL") \(name)\(ok || got.isEmpty ? "" : " (got: \(got))")")
+    }
+    let clean = Services.run("/usr/bin/true", [])
+    check("a clean run with no output is ok, not a failure", clean.ok && clean.failure == nil && clean.out.isEmpty)
+
+    let bad = Services.run("/bin/sh", ["-c", "echo partial; echo 'disk is full' >&2; exit 3"])
+    check("an error exit is a failure with the program's own words",
+          !bad.ok && bad.status == 3 && bad.failure == "sh: disk is full", bad.failure ?? "nil")
+
+    let quiet = Services.run("/bin/sh", ["-c", "exit 4"])
+    check("an error exit with nothing on stderr names the exit code",
+          quiet.failure == "sh stopped with an error (exit 4)", quiet.failure ?? "nil")
+
+    let t0 = Date()
+    let slow = Services.run("/bin/sleep", ["5"], timeout: 0.5)
+    check("a hung command is stopped at its cap and says so",
+          slow.timedOut && Date().timeIntervalSince(t0) < 2.5 && (slow.failure ?? "").contains("took longer"), slow.failure ?? "nil")
+
+    let missing = Services.run("/nonexistent/tool", [])
+    check("a program that is not there is 'could not be started'",
+          !missing.launched && missing.failure == "tool could not be started", missing.failure ?? "nil")
+
+    let big = Services.run("/bin/sh", ["-c", "head -c 200000 /dev/zero | tr '\\0' x"], timeout: 5)
+    check("200 KB of output arrives whole", big.ok && big.out.count == 200000, "\(big.out.count)")
+
+    let errFlood = Services.run("/bin/sh", ["-c", "head -c 200000 /dev/zero | tr '\\0' e >&2; echo done"], timeout: 5)
+    check("200 KB on stderr does not wedge the call", errFlood.ok && errFlood.out == "done\n", errFlood.failure ?? errFlood.out)
+
+    check("the helper name is the script, not python3",
+          ShellResult.displayName("/usr/bin/env", ["python3", "/x/lib/gitscan.py", "list"]) == "gitscan.py")
+    check("helperError reports the run's failure when there is no JSON",
+          SwitchboardApp.helperError(bad) == "sh: disk is full")
+    let good = Services.run("/bin/sh", ["-c", "echo '{\"ok\": true}'"])
+    check("helperError is nil for an ok answer", SwitchboardApp.helperError(good) == nil)
+    let refused = Services.run("/bin/sh", ["-c", "echo '{\"ok\": false, \"error\": \"no such job\"}'"])
+    check("helperError keeps the helper's own error", SwitchboardApp.helperError(refused) == "no such job")
+    check("the old output-only call still returns the output", Services.shell("/bin/echo", ["hi"]) == "hi\n")
+
+    lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
+    return lines.joined(separator: "\n")
+}
+

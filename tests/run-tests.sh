@@ -37,6 +37,13 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   [[ "$out" == *"lib=$ROOT/Resources/lib"* ]] && ok "SWITCHBOARD_LIB points the helpers at the source tree" || bad "lib override ignored"
   check "headless snapshot renders" "$BIN" --snapshot "$WORK/home.png" --tab home
   check "Approve writes the file the push gate reads (scratch folder)" "$BIN" --probe-approve
+  check "a clean, failed, hung and missing command are told apart" "$BIN" --probe-shell
+  # A helper that fails shows its group with the reason instead of dropping it.
+  BADLIB="$WORK/badlib"; cp -Rf "$ROOT/Resources/lib" "$BADLIB"
+  printf 'import sys\nsys.stderr.write("diskutil is not answering\\n")\nsys.exit(2)\n' > "$BADLIB/drives.py"
+  bad_out="$(SWITCHBOARD_LIB="$BADLIB" "$BIN" --dump 2>&1)"
+  [[ "$bad_out" == *"status: failed: drives.py: diskutil is not answering"* ]] \
+    && ok "a failing helper's group says why instead of vanishing" || bad "failing helper not surfaced"
   if [[ "${SWITCHBOARD_PROBE_TIMERS:-}" == 1 ]]; then
     check "timed flips on Keep Awake (real power assertion)" "$BIN" --probe-timers
   else
