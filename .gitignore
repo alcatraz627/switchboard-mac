@@ -4,5 +4,6 @@ dist/
 .DS_Store
 __pycache__/
 .claude/wal.*
+.claude/output/
 _*.claude.md
 .review/
