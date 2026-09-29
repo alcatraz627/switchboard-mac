@@ -114,6 +114,11 @@ enum SwitchboardConcerns {
                                pinned: AnyView(SearchField(text: Binding(get: { policy.queries["runtime"] ?? "" },
                                                                          set: { policy.queries["runtime"] = $0 }),
                                                            prompt: "Search services, ports, models and jobs"))),
+            SwitchboardConcern(id: "plugins", title: "Plugins & MCP", subtitle: "What extends Claude Code", icon: "puzzlepiece.extension",
+                               footer: "Read-only. MCP keys and tokens are never shown; env lists names only.", footerIcon: "lock",
+                               content: AnyView(SystemTabView(store: policy, source: .catalog("plugins"))),
+                               refresh: { policy.reloadCatalog("plugins", PluginsCatalog.groups) },
+                               pinned: AnyView(ScopedSearch(store: policy, id: "plugins", prompt: "Search plugins and MCP servers"))),
             catalogTab(policy, id: "rules", title: "Rules & Hooks", subtitle: "Rules, gates and hook scripts", icon: "checklist",
                        footer: "Problems sort first: a hook with no event, or one whose file is gone.",
                        search: "Search rules, gates and hooks", read: RulesCatalog.groups),
@@ -390,7 +395,15 @@ struct SystemTabView: View {
         case .catalog(let id):
             let q = store.queries[id] ?? ""
             let moved = store.systemGroups.filter { SystemTabView.groupHome[$0.title] == id }
-            let all = Catalog.filter(moved + (store.catalogs[id] ?? []), q)
+            // Sections titled "Project …" apply in one repo; the scope filter picks them in or out.
+            let scoped = (moved + (store.catalogs[id] ?? [])).filter { g in
+                switch store.queries[id + "::scope"] ?? "all" {
+                case "everywhere": return !g.title.hasPrefix("Project")
+                case "project": return g.title.hasPrefix("Project")
+                default: return true
+                }
+            }
+            let all = Catalog.filter(scoped, q)
             return q.isEmpty ? all.map { Catalog.preview($0, tab: id, store: store) } : all
         }
     }
@@ -509,6 +522,10 @@ struct GroupHeader: View {
         "Rules": "checklist",
         "Hook scripts": "link",
         "Mistakes": "exclamationmark.bubble",
+        "Plugins": "puzzlepiece.extension",
+        "Project plugins": "puzzlepiece",
+        "MCP servers": "server.rack",
+        "Project MCP servers": "folder.badge.gearshape",
         "Open proposals": "lightbulb",
         "Closed proposals": "archivebox",
         "Knowledge": "book.closed",
@@ -1309,6 +1326,7 @@ let catalogReaders: [String: () -> [SystemGroup]] = [
     "library": LibraryCatalog.groups,
     "rules": RulesCatalog.groups,
     "ledger": LedgerCatalog.groups,
+    "plugins": PluginsCatalog.groups,
 ]
 
 /// Draws the real panel offscreen, so it can be checked in dark and light
@@ -1323,6 +1341,9 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     store.systemGroups = system
     store.remoteGroups = remote
     if let read = catalogReaders[tab] { store.catalogs[tab] = read() }
+    if let f = CommandLine.arguments.firstIndex(of: "--filter").flatMap({ $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }) {
+        store.queries[tab + "::scope"] = f
+    }
     if let q = CommandLine.arguments.firstIndex(of: "--query").flatMap({ $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }) { store.queries[tab] = q }
     var needs = NeedsYou.items()
     if CommandLine.arguments.contains("--demo-states") {
@@ -1381,6 +1402,31 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     host.cacheDisplay(in: host.bounds, to: rep)
     guard let png = rep.representation(using: .png, properties: [:]) else { return false }
     return (try? png.write(to: URL(fileURLWithPath: path))) != nil
+}
+
+/// A search field with an Everywhere / One project filter beside it, for a
+/// list whose sections split by where they apply.
+struct ScopedSearch: View {
+    @ObservedObject var store: PolicyStore
+    let id: String
+    let prompt: String
+
+    var body: some View {
+        // SearchField brings its own outer padding; the picker matches its edges.
+        VStack(spacing: 4) {
+            SearchField(text: Binding(get: { store.queries[id] ?? "" }, set: { store.queries[id] = $0 }), prompt: prompt)
+            Picker("", selection: Binding(get: { store.queries[id + "::scope"] ?? "all" },
+                                          set: { store.queries[id + "::scope"] = $0 })) {
+                Text("All").tag("all")
+                Text("Everywhere").tag("everywhere")
+                Text("One project").tag("project")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .padding(.horizontal, PT.gap)
+        }
+    }
 }
 
 // ── A search field pinned above a list ──────────────────────────────────────

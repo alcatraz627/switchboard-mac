@@ -149,6 +149,153 @@ enum RulesCatalog {
     }
 }
 
+// ── Plugins & MCP: what extends Claude Code, everywhere or in one project ───
+
+enum PluginsCatalog {
+    /// Section titles starting "Project" hold things that apply in one repo;
+    /// the tab's filter shows or hides them by that prefix.
+    static func groups() -> [SystemGroup] {
+        let installed = Result { try plugins() }
+        return [Catalog.section("Plugins") { try installed.get().filter { $0.tag?.contains("project") == false } },
+                Catalog.section("MCP servers", globalMCP),
+                Catalog.section("Project plugins") { try installed.get().filter { $0.tag?.contains("project") == true } },
+                Catalog.section("Project MCP servers", projectMCP)]
+    }
+
+    static func plugins() throws -> [CatalogEntry] {
+        let path = gcc + "/plugins/installed_plugins.json"
+        guard let d = FileManager.default.contents(atPath: path),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let all = o["plugins"] as? [String: Any] else {
+            throw CatalogError("\(abbreviateHome(path)) could not be read")
+        }
+        let enabled = (settingsJSON()?["enabledPlugins"] as? [String: Bool]) ?? [:]
+        return all.compactMap { id, v -> CatalogEntry? in
+            guard let rec = (v as? [[String: Any]])?.first else { return nil }
+            let parts = id.split(separator: "@").map(String.init)
+            let name = parts.first ?? id, market = parts.count > 1 ? parts[1] : "?"
+            let dir = (rec["installPath"] as? String) ?? ""
+            let manifest = FileManager.default.contents(atPath: dir + "/.claude-plugin/plugin.json")
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            let about = (manifest?["description"] as? String) ?? ""
+            let on = enabled[id] ?? true
+            let project = rec["projectPath"] as? String
+            var details: [(String, String)] = [("What it is", about.isEmpty ? "No description in its plugin.json." : about)]
+            let adds = ["skills", "commands", "agents", "hooks"].compactMap { sub -> String? in
+                let n = ((try? FileManager.default.contentsOfDirectory(atPath: dir + "/" + sub)) ?? []).filter { !$0.hasPrefix(".") }.count
+                return n > 0 ? "\(n) \(sub)" : nil
+            } + (FileManager.default.fileExists(atPath: dir + "/.mcp.json") ? ["an MCP server"] : [])
+            details.append(("Adds", adds.isEmpty ? "nothing it lists in folders" : adds.joined(separator: ", ")))
+            details.append(("Source", "\(market) · version \((rec["version"] as? String) ?? "?")"))
+            if let p = project { details.append(("Project", abbreviateHome(p))) }
+            details.append(("State", on ? "enabled in settings.json" : "installed but turned off in settings.json"))
+            return CatalogEntry(name: name, summary: Catalog.firstSentence(about), details: details,
+                                path: dir.isEmpty ? nil : dir + "/.claude-plugin/plugin.json",
+                                tag: (on ? "on" : "off") + " · \(market)" + (project.map { " · project \(($0 as NSString).lastPathComponent)" } ?? ""))
+        }
+        .sorted { ($0.tag?.hasPrefix("on") == true ? 0 : 1, $0.name) < ($1.tag?.hasPrefix("on") == true ? 0 : 1, $1.name) }
+    }
+
+    static func globalMCP() throws -> [CatalogEntry] {
+        let path = NSHomeDirectory() + "/.claude.json"
+        guard let d = FileManager.default.contents(atPath: path),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else {
+            throw CatalogError("~/.claude.json could not be read")
+        }
+        var out = servers(o["mcpServers"] as? [String: Any] ?? [:], file: path, project: nil)
+        for (dir, p) in o["projects"] as? [String: Any] ?? [:] {
+            out += servers((p as? [String: Any])?["mcpServers"] as? [String: Any] ?? [:], file: path, project: dir)
+        }
+        return out.sorted { $0.name < $1.name }
+    }
+
+    /// Every .mcp.json in a repo under ~/Code, four folders deep at most.
+    static func projectMCP() throws -> [CatalogEntry] {
+        let root = NSHomeDirectory() + "/Code"
+        guard let walker = FileManager.default.enumerator(atPath: root) else { throw CatalogError("~/Code could not be read") }
+        var out: [CatalogEntry] = []
+        while let rel = walker.nextObject() as? String {
+            let leaf = (rel as NSString).lastPathComponent
+            if walker.level > 4 || ["node_modules", ".git", "build", "dist", ".venv"].contains(leaf) { walker.skipDescendants(); continue }
+            guard leaf == ".mcp.json",
+                  let d = FileManager.default.contents(atPath: root + "/" + rel),
+                  let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
+            let dir = root + "/" + (rel as NSString).deletingLastPathComponent
+            out += servers(o["mcpServers"] as? [String: Any] ?? [:], file: root + "/" + rel, project: dir)
+        }
+        return out.sorted { ($0.name, $0.tag ?? "") < ($1.name, $1.tag ?? "") }
+    }
+
+    /// One entry per server. Keys and tokens never reach the panel: env shows
+    /// names only, a URL shows its host, and a secret-looking argument is hidden.
+    static func servers(_ map: [String: Any], file: String, project: String?) -> [CatalogEntry] {
+        map.compactMap { name, v -> CatalogEntry? in
+            guard let s = v as? [String: Any] else { return nil }
+            let type = (s["type"] as? String) ?? (s["url"] != nil ? "http" : "stdio")
+            var how: String
+            if let url = s["url"] as? String {
+                how = "\(type) to \(URL(string: url)?.host ?? "a URL")"
+            } else {
+                let cmd = ((s["command"] as? String) ?? "?" as NSString as String)
+                let args = (s["args"] as? [String] ?? []).map(redact)
+                how = ([(cmd as NSString).lastPathComponent] + args).joined(separator: " ")
+            }
+            var details: [(String, String)] = [("Runs", how)]
+            if let env = s["env"] as? [String: Any], !env.isEmpty {
+                details.append(("Environment", env.keys.sorted().joined(separator: ", ") + " (values not shown)"))
+            }
+            if let p = project { details.append(("Project", abbreviateHome(p))) }
+            details.append(("Configured in", abbreviateHome(file)))
+            return CatalogEntry(name: name, summary: how, details: details, path: file,
+                                tag: project.map { "project " + projectName($0) } ?? "everywhere")
+        }
+    }
+
+    /// "walmart-mvp/frontend" for a repo's subfolder, the repo name otherwise.
+    static func projectName(_ dir: String) -> String {
+        let parts = dir.split(separator: "/").map(String.init)
+        guard let last = parts.last else { return dir }
+        return ["frontend", "backend", "web", "app"].contains(last) && parts.count > 1 ? parts[parts.count - 2] + "/" + last : last
+    }
+
+    /// Hides an argument that could be a credential: a key=value pair whose key
+    /// names a secret, or a long unbroken token.
+    static func redact(_ a: String) -> String {
+        // user:password@ inside a connection URL
+        if a.range(of: #"://[^/@\s:]+:[^/@\s]+@"#, options: .regularExpression) != nil {
+            return a.replacingOccurrences(of: #"://[^/@\s:]+:[^/@\s]+@"#, with: "://•••@", options: .regularExpression)
+        }
+        let lower = a.lowercased()
+        if ["key", "token", "secret", "password", "auth"].contains(where: lower.contains), a.contains("=") {
+            return String(a.split(separator: "=").first ?? "") + "=•••"
+        }
+        let token = a.range(of: #"^[A-Za-z0-9_\-\.]{28,}$"#, options: .regularExpression) != nil
+        return token && !a.contains("/") ? "•••" : a
+    }
+
+    private static func settingsJSON() -> [String: Any]? {
+        FileManager.default.contents(atPath: gcc + "/settings.json")
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    }
+}
+
+/// Checks that secrets in MCP server arguments never reach the panel, and
+/// that ordinary arguments pass untouched. Run by --probe-catalog.
+func probeRedaction() -> [String] {
+    let cases: [(String, String)] = [
+        ("postgresql://admin:hunter2@db.local:5432/app", "postgresql://•••@db.local:5432/app"),
+        ("--api-key=sk-abc123", "--api-key=•••"),
+        ("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", "•••"),
+        ("postgresql://localhost:5432/postgres", "postgresql://localhost:5432/postgres"),
+        ("/Users/me/Code/server.js", "/Users/me/Code/server.js"),
+        ("-y", "-y"),
+    ]
+    return cases.map { raw, want in
+        let got = PluginsCatalog.redact(raw)
+        return "\(got == want ? "ok  " : "FAIL") redacts \(raw.prefix(24))\(got == want ? "" : " (got: \(got))")"
+    }
+}
+
 // ── Ledger: mistakes and proposals ──────────────────────────────────────────
 
 enum LedgerCatalog {

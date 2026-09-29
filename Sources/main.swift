@@ -51,9 +51,9 @@ if args.contains("--probe-shell") {
     exit(report.hasSuffix("all passed") ? 0 : 1)
 }
 if args.contains("--probe-catalog") {
-    let report = probeCatalog()
-    print(report)
-    exit(report.hasSuffix("all passed") ? 0 : 1)
+    let lines = probeCatalog().components(separatedBy: "\n").dropLast() + probeRedaction()
+    print((lines + [lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed"]).joined(separator: "\n"))
+    exit(lines.contains { $0.hasPrefix("FAIL") } ? 1 : 0)
 }
 if args.contains("--probe-controls") {
     let report = probeControls()

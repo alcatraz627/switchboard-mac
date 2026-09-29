@@ -58,7 +58,8 @@ enum Catalog {
         let note = [e.tag, summary.isEmpty ? nil : summary].compactMap { $0 }.joined(separator: " · ")
         let state: SystemRow.State = e.count.map { .count($0.0, $0.1) } ?? .off
         var r = SystemRow(label: e.name, state: state, note: note, tip: e.summary)
-        r.key = key + "::" + (e.path ?? e.name)
+        // Name and path both: one config file can hold several entries.
+        r.key = key + "::" + (e.path ?? "") + "::" + e.name + "::" + (e.tag ?? "")
         r.showsBadge = e.count != nil
         r.noteLines = 0
         r.buttons = e.actions
