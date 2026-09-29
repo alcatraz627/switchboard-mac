@@ -7,14 +7,15 @@
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-13%2B-black?logo=apple" alt="macOS 13+">
   <img src="https://img.shields.io/badge/Swift-AppKit%20%2B%20SwiftUI-F05138?logo=swift&logoColor=white" alt="Swift">
-  <img src="https://img.shields.io/badge/version-0.1.0-blue" alt="version 0.1.0">
+  <img src="https://img.shields.io/badge/version-0.3.0-blue" alt="version 0.3.0">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
 </p>
 
 Switchboard is a menu bar app for the switches you would otherwise hunt for in
 five places: keeping the Mac awake, which background jobs are failing, the
 lights in the room, how much of your Claude and Codex quota is left, and what
-your AI agents are allowed to do on your behalf. One icon, one panel, four tabs.
+your AI agents are allowed to do on your behalf. One icon, one panel, and a
+tab per question, any of which you can hide in Settings.
 
 It is small on purpose. There is no server, no account and no cloud: the panel
 reads files and runs a few short scripts when you open it or flip a switch.
@@ -30,10 +31,26 @@ A for-a-while switch: any plain switch can be flipped for a set time, the timer 
 
 | Tab | What it answers | What you can do |
 |---|---|---|
-| **Agents** | What may my agents do as me? | Allow, ask or block GitHub, Slack, Linear, commits, pushes, deploys and model seats, everywhere or per repo, for good or for a while |
+| **Agents** | What may my agents do as me? | Allow, ask or block GitHub, Slack, Linear, commits, pushes, deploys and model seats, everywhere or per repo, for good or for a while; turn claude.ai connectors and browser tools off for new sessions |
 | **Usage** | How much quota is left? | See Claude and Codex usage bars, and set where they turn amber and red |
-| **Machine** | What is running, and what is switched off? | Re-arm muted guards, restart services, run a scheduled job now, keep the Mac awake, wake another machine on the network |
-| **Home** | What are the lights doing? | Turn WiZ bulbs on and off, set brightness, warmth and scenes, name them |
+| **Hooks** | Which rules and hooks are live? | Read every rule (always-loaded or scoped, with the size cap flagged) and every hook with the events it runs on; hooks with no event sort first; re-arm muted guards |
+| **Ledger** | What keeps going wrong, and what is proposed? | Mistakes by how often they recur, with the check that would catch each; open and closed proposals; each row copies its command |
+| **Queue** | What is lined up to happen later? | Scheduled jobs, cron duties (ones whose session has ended sort first), the deploy queue and open proposals |
+| **Library** | What skills, docs and scripts exist? | Skills, parked skills with the command that installs one, docs and memories past their review date, personas, scripts by their header comment |
+| **Notes** | What did I want to keep at hand? | One markdown file per note: tags, an expiry, a reminder in macOS Reminders, drag to reorder, copy the path for an agent |
+| **Timers** | How long until the tea is ready? | Labelled, coloured countdowns that ring until you open the panel, with a notification when macOS allows one |
+| **Runtime** | What is running? | Services, dev servers from the port ledger, local models and scheduled jobs: start, stop, disable, run now |
+| **Claude MCP** | What extends Claude Code? | Turn plugins and project MCP servers on and off for new sessions; keys and tokens are never shown |
+| **Machine** | What is this Mac doing? | Keep it awake, eject drives, see repos with work left, wake another machine on the network |
+| **Controls** | Sound, screen, network | Volume, mute, brightness, Wi-Fi, and connecting paired Bluetooth devices |
+| **Home** | What are the lights doing? | Turn WiZ bulbs on and off, set brightness, warmth and scenes, name and reorder them |
+| **Remote** | What are my other machines doing? | csync hosts and their checks, a screenshot, a chat command to copy |
+| **Settings** | What does the panel show? | Hide any tab or section (hidden ones are never read), pick what the hover preview shows, choose the notes folder |
+| **Approvals** | What is waiting on me? | Approve or cancel a held push or a policy ask with one click; its badge counts what live sessions wait on |
+
+Rest the pointer on the menu bar icon for a preview: the Claude limits, what
+waits on you, problems, and, if you choose them, running timers, the next
+reminder and a coloured dot on the icon.
 
 <p align="center">
   <img src="assets/screenshots/system-dark.png" alt="Machine tab" width="300">

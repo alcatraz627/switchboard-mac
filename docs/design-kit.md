@@ -78,8 +78,10 @@ views live in `Sources/States.swift` (`PendingMark`, `RowFailure`,
    real value and the row grows one red line: what went wrong in plain words,
    Retry, and a dismiss button. It stays until dismissed or until a later
    change to that row succeeds, and it is written to the log. A switch that
-   reports nothing back counts as failed if the next probe does not show it in
-   the asked position within 8 seconds.
+   reports nothing back is given 8 seconds, then judged by the first snapshot
+   that starts after that, however long it takes: a slow reading keeps the
+   spinner up, it never produces a false failure. When the fix is not a retry,
+   `RowFailure` takes a `retryLabel` ("Open Settings").
 4. **Readings carry their age.** Every number from outside the app shows when
    it was read ("as of 3m ago"). Past its expected freshness the age turns
    amber. A refresh that fails keeps the old value on screen with an amber
@@ -102,6 +104,24 @@ is the SwiftUI side of the same scale. Patterns worth keeping:
   so a short tab is not padded with empty space.
 - Every tab can be rendered headlessly to a PNG in dark and light
   (`scripts/snapshots.sh`). Look at both before calling a UI change done.
+
+### Shared pieces
+
+Use these instead of building another one; a fix to one lands everywhere.
+
+| Piece | File | Use it for |
+|---|---|---|
+| `WhenButton` | `WhenPicker.swift` | Any "until", "snooze", "expires" or "remind at". Preset chips (`WhenPreset.short`, `.long`, `.timer`), a typed field that reads "90m", "3h" or "tomorrow 9am", and a calendar |
+| `ReorderStack` | `Reorder.swift` | A list the owner can drag into order; it hands you the grip view and calls `commit` when the drag ends |
+| `Catalog.sections` | `Catalog.swift` | A read-only list with search, details, copyable paths and "Show all" (see `docs/adding-a-concern.md`) |
+| `RowFailure`, `PendingMark`, `ReadingStatus` | `States.swift` | The pending and failure rules above |
+
+The hover preview (`Hover.swift`) is a borderless glass card under the menu
+bar icon. It opens after the pointer rests on the icon and stays open while
+the pointer is over the icon or the card. A status item button never reports
+the pointer entering, so the pointer position is polled instead.
+`--snapshot-hover` renders it, but a snapshot cannot show the real glass or
+the hover itself; check those by hand.
 
 ## Adopting it in a new app
 

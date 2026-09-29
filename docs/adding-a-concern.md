@@ -1,8 +1,45 @@
 # Adding a tab
 
 A tab is a **concern**: a store that knows the state, a view that shows it, and
-one entry in the registry. Home (the WiZ bulbs) is the smallest complete
-example, so read `Sources/Lights.swift` alongside this page.
+one entry in the registry. There are two ways to build one.
+
+- **A list tab** reads things and lists them: Hooks, Ledger, Queue, Library
+  and Claude MCP. It needs one reader function per section and nothing else;
+  search, opening a row, copying a path, "Show all" and hiding a section in
+  Settings all come with it. Start at [A list tab](#a-list-tab) below.
+- **A tab with its own controls** has state you change: Home, Notes, Timers.
+  Home (the WiZ bulbs) is the smallest complete example, so read
+  `Sources/Lights.swift` alongside the four steps after the list-tab section.
+
+## A list tab
+
+Write a reader in `Sources/CatalogReaders.swift`. Each section is a function
+that returns entries, or throws a `CatalogError` whose message the section
+shows in place of its rows:
+
+```swift
+enum PlugsCatalog {
+    static func groups() -> [SystemGroup] {
+        Catalog.sections("plugs", [("Online", online), ("Saved", saved)])
+    }
+
+    static func online() throws -> [CatalogEntry] {
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else {
+            throw CatalogError("\(abbreviateHome(path)) could not be read")
+        }
+        return parse(text).map { p in
+            CatalogEntry(name: p.name, summary: p.room,
+                         details: [("Address", p.ip), ("Seen", p.seen)], path: path, tag: p.state)
+        }
+    }
+}
+```
+
+Then register it with `catalogTab(...)` in `SwitchboardConcerns.registry`
+(`Sources/PolicyPanel.swift`), add its id to `tabOrder`, and add a
+`--snapshot --tab <id>` line to `tests/run-tests.sh`. The reader runs off the
+main thread when the tab opens. An empty section says "Nothing here yet", and
+a failed one says why, so neither ever reads as a blank tab.
 
 ## 1. The store
 

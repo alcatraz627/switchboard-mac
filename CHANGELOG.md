@@ -1,6 +1,25 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-09-30)
+
+- **The panel opens fast again**: the Hooks tab read took about 19 s of CPU on
+  every open and now takes 0.2 s, and one open runs one snapshot, not two.
+- **No false "did not turn on"**: a switch is judged by a reading taken after
+  it was flipped, so a slow helper delays the answer instead of faking a
+  failure.
+- **Reminders work the first time**: allowing Reminders access now creates the
+  reminder (it used to create nothing), keeps what you typed while the macOS
+  dialog was up, and a denied or failed reminder says so.
+- **Your own markdown files are safe**: a note file without frontmatter keeps
+  its body when edited, reads its heading as the title, and a folder you chose
+  no longer gets an `order.json`.
+- **Timers ring until you look**: the chime repeats for up to 30 s and stops
+  when the panel opens, and the Timers tab says when macOS has Switchboard's
+  notifications off, with a button to their settings.
+- **Permissions stick across rebuilds**: Bluetooth and Reminders were asked
+  again after every build, because an ad-hoc signature is tied to one exact
+  binary. Builds now sign with a requirement that names the bundle id.
+- A timed flip on a switch whose section is hidden in Settings still goes off.
 
 - **One time picker** for every snooze, timed flip, expiry, reminder and timer:
   preset chips, a field that reads "90m", "3h", "tomorrow 9am" or "fri 5pm",
@@ -28,15 +47,15 @@
 - Bulbs reorder by drag. Search waits 250 ms after typing, and every text field
   takes ⌘A, ⌘X, ⌘C, ⌘V and ⌘Z.
 
-- **Twelve tabs**, in this order: Approvals, Agents, Usage, Rules & Hooks,
-  Ledger, Library, Runtime, Plugins & MCP, Machine, Controls, Home, Remote.
+- **Sixteen tabs**, in this order: Agents, Usage, Hooks, Ledger, Queue,
+  Library, Notes, Timers, Runtime, Claude MCP, Machine, Controls, Home, Remote,
+  Settings, Approvals.
   The list tabs share one search, rows that open to their details, and paths
   that copy; a long section shows six rows and a Show all row.
-- **Approvals**: the first tab while anything waits, with a yellow count of
-  items a live session is waiting on. Pushes, policy asks, and what ended
-  sessions left behind, each with Approve, Copy, Cancel and details. The
-  Needs-you strip stays on the other tabs for now and shows the same count.
-  Cancel from the panel tells the waiting session, as typing it does.
+- **Approvals**: shown while anything waits, with a yellow count of items a
+  live session is waiting on. Pushes, policy asks, and what ended sessions
+  left behind, each with Approve, Copy, Cancel and details. Cancel from the
+  panel tells the waiting session, as typing it does.
 - **Library** (was Skills): skills, parked skills with the command that
   installs one, feature and convention docs and global memories flagged when
   past their review date, personas, and every script by its header comment.
@@ -86,13 +105,12 @@
   launchd plist no longer hides every scheduled job; Decision Pages, Board
   sync and snooze Lift no longer freeze the panel while they run.
 
-- **Needs you**: a strip above the tabs, shown only while something waits:
-  pushes held by the push gate and actions behind an "ask" policy, with the
-  session they belong to. Copy puts the approve line on the clipboard to paste
-  into that session; Cancel does what typing `cancel push` or `deny` does.
-  The panel never approves by itself, because a button in an app is something
-  an agent could press. Leftovers from ended sessions fold into one row with
-  Clear all. The old "Push approvals" row in Guards moved here.
+- **Needs you** (now the Approvals tab): pushes held by the push gate and
+  actions behind an "ask" policy, with the session they belong to. Copy puts
+  the approve line on the clipboard to paste into that session; Cancel does
+  what typing `cancel push` or `deny` does. Leftovers from ended sessions fold
+  into one row with Clear all. The old "Push approvals" row in Guards moved
+  here.
 
 - **Remote**: each online host has a "…" menu: chat with its csync-assist in
   a terminal (or copy that command), Info, Logs and Recipes in a terminal,
