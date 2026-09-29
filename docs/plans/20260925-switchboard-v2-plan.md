@@ -102,6 +102,14 @@ touch live gates.
 4. Needs you: push and Render answers. Render first needs the sidecar change in
    `render-mcp-gate.py`. Before shipping, try to click the panel through the
    Accessibility API from an agent shell and confirm macOS refuses (findings, unknown 1).
+   **Tested 2026-09-29: macOS does not refuse.** From an agent shell,
+   `osascript` through System Events read Switchboard's menu bar item by name
+   (`menu bar 1 of process "Switchboard"` → "Switchboard"), so an agent can
+   open the panel and press any button in it. A one-click Approve would be an
+   approval an agent can actuate, which the push gate forbids. Ruling: the
+   strip shows, copies the approve line and cancels; it never approves.
+   Revisit only if the approving action moves out of reach of Accessibility
+   (for example Touch ID via LocalAuthentication, which no script can answer).
 5. Notifications group, if still wanted.
 
 ## Checks for done
