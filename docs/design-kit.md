@@ -111,6 +111,7 @@ Use these instead of building another one; a fix to one lands everywhere.
 
 | Piece | File | Use it for |
 |---|---|---|
+| `Icons.tab`, `.space`, `.section` | `AppSupport.swift` | The one map of symbols for every tab, space and section header. The space bar, the row of tabs, Settings and every `GroupHeader` read it, and `--probe-visibility` fails when a tab, space or known section has none |
 | `WhenButton` | `WhenPicker.swift` | Any "until", "snooze", "expires" or "remind at". Preset chips (`WhenPreset.short`, `.long`, `.timer`), a typed field that reads "90m", "3h" or "tomorrow 9am", and a calendar |
 | `ReorderStack` | `Reorder.swift` | A list the owner can drag into order; it hands you the grip view and calls `commit` when the drag ends |
 | `Catalog.sections` | `Catalog.swift` | A read-only list with search, details, copyable paths and "Show all" (see `docs/adding-a-concern.md`) |

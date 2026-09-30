@@ -170,6 +170,94 @@ enum PreferenceMigration {
     }
 }
 
+/// Every symbol that stands for a place in the panel, kept in one map so a
+/// tab, its space, its row in Settings and a section header never disagree.
+enum Icons {
+    /// Tabs, by id. The space bar, the row of tabs under it and Settings all read this.
+    static let tab: [String: String] = [
+        "agents": "person.badge.shield.checkmark",
+        "usage": "gauge.with.dots.needle.67percent",
+        "plugins": "puzzlepiece.extension",
+        "rules": "checklist",
+        "library": "books.vertical",
+        "ledger": "list.bullet.clipboard",
+        "queue": "tray.full",
+        "notes": "note.text",
+        "timers": "timer",
+        "system": "desktopcomputer",
+        "runtime": "bolt.horizontal",
+        "controls": "slider.horizontal.3",
+        "home": "house",
+        "remote": "network.badge.shield.half.filled",
+        "settings": "gearshape",
+        "approvals": "hand.raised",
+    ]
+
+    /// Spaces, by id; none reuses a symbol of a tab inside it.
+    static let space: [String: String] = [
+        "claude": "sparkle",
+        "records": "archivebox",
+        "desk": "cup.and.saucer",
+        "mac": "laptopcomputer",
+        "around": "globe",
+    ]
+
+    /// Section headers, by title, wherever the section appears.
+    static let section: [String: String] = [
+        "Acting as you": "person.wave.2",
+        "Code": "chevron.left.forwardslash.chevron.right",
+        "Deploy": "icloud.and.arrow.up",
+        "Models": "cpu",
+        "Machine": "desktopcomputer",
+        "Limits": "gauge.with.dots.needle.33percent",
+        "Context": "text.badge.minus",
+        "Claude": "sparkle",
+        "Codex": "terminal",
+        "What acts on these numbers": "slider.horizontal.3",
+        "Plugins": "puzzlepiece.extension",
+        "MCP servers": "server.rack",
+        "Project plugins": "puzzlepiece",
+        "Project MCP servers": "folder.badge.gearshape",
+        "Guards": "shield.lefthalf.filled",
+        "Gates": "checkmark.shield",
+        "Rules": "checklist",
+        "Hook scripts": "link",
+        "Skills": "wand.and.stars",
+        "Parked skills": "shippingbox",
+        "Knowledge": "book.closed",
+        "Personas": "theatermasks",
+        "Scripts": "terminal",
+        "Mistakes": "exclamationmark.bubble",
+        "Open proposals": "lightbulb",
+        "Closed proposals": "archivebox",
+        "Scheduled": "clock",
+        "Cron duties": "repeat",
+        "Deploy queue": "icloud.and.arrow.up",
+        "Session": "cup.and.saucer",
+        "Drives": "externaldrive",
+        "Repos": "arrow.triangle.branch",
+        "Services": "server.rack",
+        "Dev servers": "network",
+        "Local models": "cpu",
+        "Schedules": "calendar.badge.clock",
+        "Sound": "speaker.wave.2",
+        "Display": "sun.max",
+        "Wi-Fi": "wifi",
+        "Bluetooth": "dot.radiowaves.left.and.right",
+        "Lights": "lightbulb.led",
+        "Console": "server.rack",
+        "Hosts": "laptopcomputer.and.iphone",
+        "Feed": "arrow.triangle.2.circlepath",
+        "Pushes": "arrow.up.circle",
+        "Policy asks": "questionmark.bubble",
+        "Approved, waiting to run": "checkmark.circle",
+        "Left by ended sessions": "moon.zzz",
+        "Tabs": "square.grid.2x2",
+        "Hover preview": "cursorarrow.rays",
+        "Notes folder": "folder",
+    ]
+}
+
 /// Moves `dragged` to `target`'s place in an id order.
 func reordered(_ order: [String], moving dragged: String, to target: String) -> [String] {
     guard let from = order.firstIndex(of: dragged), let to = order.firstIndex(of: target), from != to else { return order }
@@ -198,12 +286,12 @@ enum Visibility {
     /// The spaces along the top of the panel, each holding related tabs.
     /// Settings and Approvals belong to none: they live in the header.
     static let spaces: [(id: String, title: String, icon: String, tabs: [String])] = [
-        ("claude", "Claude", "sparkle", ["agents", "usage", "plugins", "rules", "library"]),
-        ("records", "Records", "archivebox", ["ledger", "queue"]),
-        ("desk", "Desk", "cup.and.saucer", ["notes", "timers"]),
-        ("mac", "Mac", "laptopcomputer", ["system", "runtime", "controls"]),
-        ("around", "Around", "globe", ["home", "remote"]),
-    ]
+        ("claude", "Claude", ["agents", "usage", "plugins", "rules", "library"]),
+        ("records", "Records", ["ledger", "queue"]),
+        ("desk", "Desk", ["notes", "timers"]),
+        ("mac", "Mac", ["system", "runtime", "controls"]),
+        ("around", "Around", ["home", "remote"]),
+    ].map { ($0.0, $0.1, Icons.space[$0.0] ?? "square", $0.2) }
     static func space(of tab: String) -> String? { spaces.first { $0.tabs.contains(tab) }?.id }
 
     /// The tab each space opens on: the one last used in it.

@@ -36,7 +36,9 @@ enum PlugsCatalog {
 ```
 
 Then register it with `catalogTab(...)` in `SwitchboardConcerns.registry`
-(`Sources/PolicyPanel.swift`), add its id to `tabOrder`, and add a
+(`Sources/PolicyPanel.swift`), give it and each of its sections a symbol in
+`Icons` (`Sources/AppSupport.swift`), place it in a space and in
+`Visibility.defaultTabOrder`, and add a
 `--snapshot --tab <id>` line to `tests/run-tests.sh`. The reader runs off the
 main thread when the tab opens. An empty section says "Nothing here yet", and
 a failed one says why, so neither ever reads as a blank tab.

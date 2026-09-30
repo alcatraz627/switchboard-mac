@@ -1686,6 +1686,17 @@ extension SwitchboardApp {
         check("a tab it never saw lands after its default neighbour",
               merged.count == Visibility.defaultTabOrder.count && merged.firstIndex(of: "plugins") == merged.firstIndex(of: "usage")! + 1)
 
+        // Icons: one map covers every tab, space and section, and a space never borrows a tab's symbol.
+        check("every tab has an icon", Visibility.defaultTabOrder.allSatisfy { Icons.tab[$0] != nil })
+        check("every space has its own icon", Visibility.spaces.allSatisfy { s in
+            Icons.space[s.id] != nil && !s.tabs.contains { Icons.tab[$0] == Icons.space[s.id] } })
+        let sectionTitles = Set(Visibility.sections.values.flatMap { $0 })
+            .union(Visibility.groupTab.keys)
+            .union(["Pushes", "Policy asks", "Approved, waiting to run", "Left by ended sessions",
+                    "Console", "Hosts", "Lights", "What acts on these numbers", "Tabs", "Hover preview", "Notes folder"])
+        let bare = sectionTitles.filter { Icons.section[$0] == nil }.sorted()
+        check("every section has an icon" + (bare.isEmpty ? "" : " (missing: \(bare.joined(separator: ", ")))"), bare.isEmpty)
+
         // Spaces: every tab but Settings and Approvals sits in exactly one, in the default order.
         let spaced = Visibility.spaces.flatMap(\.tabs)
         check("every tab sits in exactly one space", Set(spaced).count == spaced.count

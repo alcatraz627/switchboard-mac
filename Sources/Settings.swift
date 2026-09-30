@@ -129,7 +129,7 @@ struct SettingsTabView: View {
                                   store.requestSystemRefresh()
                               })
             c.key = "settings-section-" + key
-            c.icon = GroupHeader.icons[s]
+            c.icon = Icons.section[s]
             return c
         }
         return r

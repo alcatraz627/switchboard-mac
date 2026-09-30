@@ -80,7 +80,7 @@ enum SwitchboardConcerns {
         // Settings lists every other tab, so it is built from the rest. Approvals
         // cannot be hidden: it is how a waiting push reaches you.
         let listed = tabs.filter { $0.id != "approvals" }.map { (id: $0.id, title: $0.title, icon: $0.icon) }
-        let settings = SwitchboardConcern(id: "settings", title: "Settings", subtitle: "What the panel shows", icon: "gearshape",
+        let settings = SwitchboardConcern(id: "settings", title: "Settings", subtitle: "What the panel shows", icon: Icons.tab["settings"]!,
                                           footer: "Hidden tabs and sections are not read, so they cost nothing.", footerIcon: "eye.slash",
                                           content: AnyView(SettingsTabView(store: policy, tabs: listed)),
                                           pinned: AnyView(SearchField(text: Binding(get: { policy.queries["settings"] ?? "" },
@@ -91,67 +91,67 @@ enum SwitchboardConcerns {
 
     private static func registry(policy: PolicyStore, usage: UsageStore, lights: LightsStore, controls: ControlsStore) -> [SwitchboardConcern] {
         [
-            SwitchboardConcern(id: "approvals", title: "Approvals", subtitle: "Waiting on you", icon: "hand.raised",
+            SwitchboardConcern(id: "approvals", title: "Approvals", subtitle: "Waiting on you", icon: Icons.tab["approvals"]!,
                                footer: "Approve writes a one-time pass and wakes the session.", footerIcon: "checkmark.seal",
                                content: AnyView(SystemTabView(store: policy, source: .approvals)),
                                refresh: { policy.requestSystemRefresh() },
                                isShown: { !policy.needGroups.isEmpty },
                                badge: { policy.needsWaiting > 0 ? policy.needsWaiting : nil }),
-            SwitchboardConcern(id: "agents", title: "Agents", subtitle: "What agents may do", icon: "person.badge.shield.checkmark",
+            SwitchboardConcern(id: "agents", title: "Agents", subtitle: "What agents may do", icon: Icons.tab["agents"]!,
                                footer: "Applies to every session at once. Only you can change it.", footerIcon: "bolt.fill",
                                content: AnyView(AgentsTabView(store: policy)),
                                refresh: { policy.reload() }),
-            SwitchboardConcern(id: "usage", title: "Usage", subtitle: "Claude and Codex limits", icon: "gauge.with.dots.needle.67percent",
+            SwitchboardConcern(id: "usage", title: "Usage", subtitle: "Claude and Codex limits", icon: Icons.tab["usage"]!,
                                footer: "Bars mark the thresholds that act on them.", footerIcon: "line.diagonal",
                                content: AnyView(UsageTabView(usage: usage, policy: policy)),
                                refresh: { usage.reload() }),
-            SwitchboardConcern(id: "system", title: "Machine", subtitle: "This Mac's switches", icon: "desktopcomputer",
+            SwitchboardConcern(id: "system", title: "Machine", subtitle: "This Mac's switches", icon: Icons.tab["system"]!,
                                footer: "The timer icon flips a switch for a while.", footerIcon: "timer",
                                content: AnyView(SystemTabView(store: policy)),
                                refresh: { policy.requestSystemRefresh() }),
-            SwitchboardConcern(id: "home", title: "Home", subtitle: "Your home network", icon: "house",
+            SwitchboardConcern(id: "home", title: "Home", subtitle: "Your home network", icon: Icons.tab["home"]!,
                                footer: "Talks to the bulbs directly over the LAN.", footerIcon: "wifi",
                                content: AnyView(LightsTabView(lights: lights)),
                                refresh: { lights.discover() }),
-            SwitchboardConcern(id: "controls", title: "Controls", subtitle: "Sound, display, Wi-Fi, Bluetooth", icon: "slider.horizontal.3",
+            SwitchboardConcern(id: "controls", title: "Controls", subtitle: "Sound, display, Wi-Fi, Bluetooth", icon: Icons.tab["controls"]!,
                                footer: "Talks to macOS directly; nothing to install.", footerIcon: "apple.logo",
                                content: AnyView(ControlsTabView(controls: controls)),
                                refresh: { controls.load(devices: true) }),
-            SwitchboardConcern(id: "remote", title: "Remote", subtitle: "Machines you drive with csync", icon: "network.badge.shield.half.filled",
+            SwitchboardConcern(id: "remote", title: "Remote", subtitle: "Machines you drive with csync", icon: Icons.tab["remote"]!,
                                footer: "Every action is a csync command, recorded in its log.", footerIcon: "terminal",
                                content: AnyView(SystemTabView(store: policy, source: .remote)),
                                refresh: { policy.requestSystemRefresh() }),
-            SwitchboardConcern(id: "runtime", title: "Runtime", subtitle: "Everything that runs", icon: "bolt.horizontal",
+            SwitchboardConcern(id: "runtime", title: "Runtime", subtitle: "Everything that runs", icon: Icons.tab["runtime"]!,
                                footer: "Stop and Disable ask first; a command copies instead of opening a terminal.", footerIcon: "doc.on.doc",
                                content: AnyView(SystemTabView(store: policy, source: .catalog("runtime"))),
                                refresh: { policy.requestSystemRefresh() },
                                pinned: AnyView(SearchField(text: Binding(get: { policy.queries["runtime"] ?? "" },
                                                                          set: { policy.queries["runtime"] = $0 }),
                                                            prompt: "Search services, ports, models and jobs"))),
-            SwitchboardConcern(id: "plugins", title: "Claude MCP", subtitle: "Plugins and MCP servers", icon: "puzzlepiece.extension",
+            SwitchboardConcern(id: "plugins", title: "Claude MCP", subtitle: "Plugins and MCP servers", icon: Icons.tab["plugins"]!,
                                footer: "On and off apply to new sessions. MCP keys and tokens are never shown.", footerIcon: "lock",
                                content: AnyView(SystemTabView(store: policy, source: .catalog("plugins"))),
                                refresh: { policy.reloadCatalog("plugins", PluginsCatalog.groups) },
                                pinned: AnyView(ScopedSearch(store: policy, id: "plugins", prompt: "Search plugins and MCP servers"))),
-            SwitchboardConcern(id: "timers", title: "Timers", subtitle: "Countdowns that go off with a sound", icon: "timer",
+            SwitchboardConcern(id: "timers", title: "Timers", subtitle: "Countdowns that go off with a sound", icon: Icons.tab["timers"]!,
                                footer: "A timer keeps running if the app restarts. + adds a minute.", footerIcon: "bell",
                                content: AnyView(TimersTabView(timers: TimerStore.shared))),
-            SwitchboardConcern(id: "notes", title: "Notes", subtitle: "Notes at hand, one file each", icon: "note.text",
+            SwitchboardConcern(id: "notes", title: "Notes", subtitle: "Notes at hand, one file each", icon: Icons.tab["notes"]!,
                                footer: "Drag the grip to reorder. Each note is a markdown file; the link icon copies its path.",
                                footerIcon: "doc.text",
                                content: AnyView(NotesTabView(notes: NotesStore.shared)),
                                refresh: { NotesStore.shared.load() },
                                pinned: AnyView(NoteCompose(notes: NotesStore.shared))),
-            catalogTab(policy, id: "rules", title: "Hooks", subtitle: "Rules, gates and hook scripts", icon: "checklist",
+            catalogTab(policy, id: "rules", title: "Hooks", subtitle: "Rules, gates and hook scripts", icon: Icons.tab["rules"]!,
                        footer: "Problems sort first: a hook with no event, or one whose file is gone.",
                        search: "Search rules, gates and hooks", read: RulesCatalog.groups),
-            catalogTab(policy, id: "queue", title: "Queue", subtitle: "What gcc has lined up to happen", icon: "tray.full",
+            catalogTab(policy, id: "queue", title: "Queue", subtitle: "What gcc has lined up to happen", icon: Icons.tab["queue"]!,
                        footer: "A cron duty whose session has ended cannot fire; those sort first.",
                        search: "Search schedules, duties, deploys and proposals", read: QueueCatalog.groups),
-            catalogTab(policy, id: "ledger", title: "Ledger", subtitle: "Mistakes and the improvement backlog", icon: "list.bullet.clipboard",
+            catalogTab(policy, id: "ledger", title: "Ledger", subtitle: "Mistakes and the improvement backlog", icon: Icons.tab["ledger"]!,
                        footer: "Mistakes sort by how often they recur; each row copies its CLI line.",
                        search: "Search mistakes and proposals", read: LedgerCatalog.groups),
-            catalogTab(policy, id: "library", title: "Library", subtitle: "Skills, docs, personas, scripts", icon: "books.vertical",
+            catalogTab(policy, id: "library", title: "Library", subtitle: "Skills, docs, personas, scripts", icon: Icons.tab["library"]!,
                        footer: "Open a row for its details; the path copies on click.",
                        search: "Search skills, docs, personas and scripts", read: LibraryCatalog.groups),
         ]
@@ -303,14 +303,15 @@ struct PolicyPanel: View {
         .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.07)))
     }
 
-    /// The chosen space's tabs as plain words; the space above already carries the icon.
+    /// The chosen space's tabs, each with its own icon, the current one underlined.
     private var subTabs: some View {
         HStack(spacing: 14) {
             ForEach(currentSpaceTabs) { c in
                 let on = c.id == current.id
                 Button { open(c) } label: {
                     VStack(spacing: 3) {
-                        HStack(spacing: 3) {
+                        HStack(spacing: 4) {
+                            Image(systemName: c.icon).font(.system(size: 10.5))
                             Text(c.title).font(.system(size: 11.5, weight: on ? .semibold : .regular)).lineLimit(1)
                             if let n = c.badge() { TabBadge(count: n, onAccent: false) }
                         }
@@ -592,7 +593,7 @@ struct GroupHeader: View {
     let name: String
     var body: some View {
         HStack(spacing: 5) {
-            if let icon = Self.icons[name] {
+            if let icon = Icons.section[name] {
                 Image(systemName: icon).font(.system(size: 9.5, weight: .semibold))
             }
             Text(name.uppercased()).font(PT.section).tracking(0.7)
@@ -601,56 +602,6 @@ struct GroupHeader: View {
         .padding(.leading, 4)
     }
 
-    /// One symbol per group, named for what the group holds.
-    static let icons: [String: String] = [
-        "Acting as you": "person.wave.2",
-        "Code": "chevron.left.forwardslash.chevron.right",
-        "Deploy": "icloud.and.arrow.up",
-        "Models": "cpu",
-        "Machine": "desktopcomputer",
-        "Limits": "gauge.with.dots.needle.33percent",
-        "Gates": "checkmark.shield",
-        "Guards": "shield.lefthalf.filled",
-        "Context": "text.badge.minus",
-        "Services": "server.rack",
-        "Dev servers": "network",
-        "Repos": "arrow.triangle.branch",
-        "Drives": "externaldrive",
-        "Sound": "speaker.wave.2",
-        "Display": "sun.max",
-        "Wi-Fi": "wifi",
-        "Bluetooth": "dot.radiowaves.left.and.right",
-        "Local models": "cpu",
-        "Skills": "wand.and.stars",
-        "Parked skills": "shippingbox",
-        "Rules": "checklist",
-        "Hook scripts": "link",
-        "Mistakes": "exclamationmark.bubble",
-        "Plugins": "puzzlepiece.extension",
-        "Project plugins": "puzzlepiece",
-        "MCP servers": "server.rack",
-        "Project MCP servers": "folder.badge.gearshape",
-        "Open proposals": "lightbulb",
-        "Closed proposals": "archivebox",
-        "Knowledge": "book.closed",
-        "Personas": "theatermasks",
-        "Scripts": "terminal",
-        "Pushes": "arrow.up.circle",
-        "Policy asks": "questionmark.bubble",
-        "Left by ended sessions": "moon.zzz",
-        "Console": "server.rack",
-        "Hosts": "laptopcomputer.and.iphone",
-        "Schedules": "calendar.badge.clock",
-        "Scheduled": "clock",
-        "Cron duties": "repeat",
-        "Deploy queue": "icloud.and.arrow.up",
-        "Session": "cup.and.saucer",
-        "Feed": "arrow.triangle.2.circlepath",
-        "Claude": "sparkle",
-        "Codex": "terminal",
-        "What acts on these numbers": "slider.horizontal.3",
-        "Lights": "lightbulb.led",
-    ]
 }
 
 struct Card<Content: View>: View {
@@ -1393,7 +1344,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         if chosen.contains(.timers) {
             // At most two countdowns, soonest first, then the next note reminder.
             for t in TimerStore.shared.running.prefix(2) {
-                out.append(.note(icon: "timer", text: "\(t.label) · \(clock(t.fireAt.timeIntervalSinceNow))", tint: timerColor(t.color)))
+                out.append(.note(icon: Icons.tab["timers"]!, text: "\(t.label) · \(clock(t.fireAt.timeIntervalSinceNow))", tint: timerColor(t.color)))
             }
             if let n = NotesStore.shared.notes.filter({ ($0.remindAt ?? .distantPast) > Date() }).min(by: { $0.remindAt! < $1.remindAt! }) {
                 out.append(.note(icon: "bell", text: "\(n.title) · \(WhenText.describe(n.remindAt!))", tint: .secondary))
