@@ -313,8 +313,18 @@ enum PluginsCatalog {
             return a.replacingOccurrences(of: #"://[^/@\s:]+:[^/@\s]+@"#, with: "://•••@", options: .regularExpression)
         }
         let lower = a.lowercased()
-        if ["key", "token", "secret", "password", "auth"].contains(where: lower.contains), a.contains("=") {
+        let secretish = ["key", "token", "secret", "password", "auth"].contains(where: lower.contains)
+        if secretish, a.contains("=") {
             return String(a.split(separator: "=").first ?? "") + "=•••"
+        }
+        // A header argument: "Authorization: Bearer …", "X-Api-Key: …".
+        if secretish, let colon = a.firstIndex(of: ":"), !a.contains("://") {
+            return String(a[...colon]) + " •••"
+        }
+        // Known token shapes, whatever their length or position.
+        let shapes = #"(Bearer\s+\S+|xox[abprs]-[A-Za-z0-9-]+|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,})"#
+        if a.range(of: shapes, options: .regularExpression) != nil {
+            return a.replacingOccurrences(of: shapes, with: "•••", options: .regularExpression)
         }
         let token = a.range(of: #"^[A-Za-z0-9_\-\.]{28,}$"#, options: .regularExpression) != nil
         return token && !a.contains("/") ? "•••" : a
@@ -408,6 +418,14 @@ func probeRedaction() -> [String] {
         ("postgresql://localhost:5432/postgres", "postgresql://localhost:5432/postgres"),
         ("/Users/me/Code/server.js", "/Users/me/Code/server.js"),
         ("-y", "-y"),
+        ("Authorization: Bearer abc123def456", "Authorization: •••"),
+        ("X-Api-Key: 9f8e7d6c", "X-Api-Key: •••"),
+        ("xoxb-1234-5678-abcd", "•••"),
+        ("--header=AKIAABCDEFGHIJKLMNOP", "--header=•••"),
+        ("AKIAABCDEFGHIJKLMNOP", "•••"),
+        ("Bearer eyJhbGciOi", "•••"),
+        ("@modelcontextprotocol/server-filesystem", "@modelcontextprotocol/server-filesystem"),
+        ("--port", "--port"),
     ]
     return cases.map { raw, want in
         let got = PluginsCatalog.redact(raw)
@@ -476,7 +494,7 @@ enum QueueCatalog {
             if !about.isEmpty { details.append(("About", about)) }
             if let c = r["command"] as? String { details.append(("Runs", c)) }
             if let l = r["label"] as? String { details.append(("launchd label", l)) }
-            let cmd = "bash ~/.claude/scripts/schedule/schedule.sh list"
+            let cmd = "bash ~/.claude/scripts/schedule/schedule.sh show \(name)"
             return CatalogEntry(name: name, summary: about, details: details, path: r["plist"] as? String,
                                 tag: when == "custom-schedule" ? "recurring" : "at " + when,
                                 actions: [RowButton(label: "Copy", kind: .copy(cmd), help: "Copy: \(cmd)")])
@@ -496,7 +514,8 @@ enum QueueCatalog {
                   let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
             // No session recorded (a pm2 resident, say) means nothing to outlive.
             let pid = (o["harness_pid"] as? Int).map { Int32($0) }
-            let alive = pid.map { kill($0, 0) == 0 } ?? true
+            // EPERM means the process exists but belongs to another user: alive.
+            let alive = pid.map { kill($0, 0) == 0 || errno == EPERM } ?? true
             let sched = (o["schedule"] as? String) ?? "?"
             let head = (o["prompt_head"] as? String) ?? ""
             let details: [(String, String)] = [("Schedule", sched), ("Does", head.isEmpty ? "?" : head),
@@ -684,8 +703,11 @@ enum LibraryCatalog {
     /// loads it, and whether it is past its own review date.
     static func knowledge() throws -> [CatalogEntry] {
         var out: [CatalogEntry] = []
+        var unread: [String] = []
+        // A missing folder is left out; the section fails only when none can be read.
         for (folder, kind) in [("features", "feature"), ("conventions", "convention"), ("memory/global", "memory")] {
-            for path in try Catalog.markdownFiles(in: gcc + "/" + folder) {
+            guard let files = try? Catalog.markdownFiles(in: gcc + "/" + folder) else { unread.append(folder); continue }
+            for path in files {
                 let name = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
                 guard name != "README", name != "MEMORY",
                       let text = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
@@ -705,6 +727,7 @@ enum LibraryCatalog {
                                         summary: Catalog.firstSentence(about), details: details, path: path, tag: tag))
             }
         }
+        if unread.count == 3 { throw CatalogError("none of features, conventions or memory/global could be read") }
         return out.sorted { $0.name.lowercased() < $1.name.lowercased() }
     }
 

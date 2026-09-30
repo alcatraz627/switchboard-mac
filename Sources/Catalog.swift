@@ -144,7 +144,9 @@ enum Catalog {
             var value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
             if value.isEmpty {
                 var items: [String] = []
-                while i < lines.count, lines[i].hasPrefix(" ") || lines[i].hasPrefix("-") {
+                // The closing "---" starts with "-" too; it ends the list, never joins it.
+                while i < lines.count, lines[i].trimmingCharacters(in: .whitespaces) != "---",
+                      lines[i].hasPrefix(" ") || lines[i].hasPrefix("-") {
                     let t = lines[i].trimmingCharacters(in: .whitespaces)
                     if t.hasPrefix("- ") { items.append(unquote(String(t.dropFirst(2)))) }
                     i += 1
@@ -248,6 +250,9 @@ func probeCatalog() -> String {
     check("a quoted value loses its quotes", f["brief"] == "A quoted brief", f["brief"] ?? "nil")
     check("a list value comes back comma-joined", f["triggers"] == "topic:a, phrase:b", f["triggers"] ?? "nil")
     check("a folded block joins its lines", f["desc"] == "wrapped text", f["desc"] ?? "nil")
+    let last = Catalog.frontmatter("---\nbrief: kept\ntriggers:\n  - a\n---\nsummary: this line is body text")
+    check("a list as the last key stops at the closing line", last["summary"] == nil && last["triggers"] == "a",
+          "summary=\(last["summary"] ?? "nil"), triggers=\(last["triggers"] ?? "nil")")
     check("the first sentence survives an abbreviation", Catalog.firstSentence("Uses e.g. files. Then more.") == "Uses e.g. files.")
 
     let wrapped = dir + "/wrapped.sh"

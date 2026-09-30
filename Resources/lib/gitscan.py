@@ -29,7 +29,9 @@ TTL_S = 120
 
 def git(repo, *args, timeout=10):
     try:
-        r = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, timeout=timeout)
+        # --no-optional-locks: a background scan must never take the index lock
+        # an agent's `git commit` in the same repo needs.
+        r = subprocess.run(["git", "--no-optional-locks", "-C", repo, *args], capture_output=True, text=True, timeout=timeout)
         return r.returncode, r.stdout, r.stderr
     except subprocess.TimeoutExpired:
         return 1, "", f"git {args[0]} timed out"

@@ -56,11 +56,15 @@ def listeners():
 
 
 def launchd_owner(pid, parents, by_pid):
-    """The launchd job that started this process or one of its parents."""
+    """The launchd job that started this process or one of its parents.
+
+    A GUI app's own job (application.com.mitchellh.ghostty…) is not an owner:
+    a server started in that terminal is a one-off, so it is killed, not disabled."""
     seen = 0
     while pid and pid > 1 and seen < 12:
         if pid in by_pid:
-            return by_pid[pid]
+            label = by_pid[pid]
+            return None if label.startswith("application.") else label
         pid, seen = parents.get(pid), seen + 1
     return None
 
