@@ -142,6 +142,3 @@ never your notes, timers or `~/.claude`. `tests/run-tests.sh` runs them all.
 
 - `dev.switchboard.toggle` (distributed notification) opens or closes the
   panel. The claude-instances dropdown uses it.
-- `dev.switchboard.usage-zones-changed` is posted when the Usage tab's warn or
-  danger zone moves. The same values are written into claude-instances'
-  preferences, since its icon is coloured by them.

@@ -31,7 +31,7 @@ final class UsageStore: ObservableObject {
     @Published private(set) var codexPlan: String?
     @Published private(set) var codexResets: [CodexResetCredit] = []
 
-    /// The Claude usage zones, kept under the same keys claude-instances reads.
+    /// Where a Claude bar turns amber and red.
     @Published var warnPct: Int = UserDefaults.standard.integer(forKey: "rateLimitWarningThreshold") {
         didSet { saveZone("rateLimitWarningThreshold", warnPct) }
     }
@@ -45,7 +45,6 @@ final class UsageStore: ObservableObject {
         didSet { saveZone("codexWarningThreshold", codexWarnPct) }
     }
 
-    /// The same fallbacks claude-instances registers, so both apps start at 70 and 90.
     init() {
         UserDefaults.standard.register(defaults: ["rateLimitWarningThreshold": 70, "rateLimitDangerThreshold": 90,
                                                   "codexWarningThreshold": 60])
@@ -58,17 +57,9 @@ final class UsageStore: ObservableObject {
     static var codexGate = NSString(string: "~/.claude/adapters/codex/bin/codex-usage-gate.py").expandingTildeInPath
     private let queue = DispatchQueue(label: "usage.store", qos: .userInitiated)
 
-    /// claude-instances colours its menu bar icon by the same zones, so a
-    /// change is mirrored into its preferences and it is told to redraw.
-    static let instancesDomain = "claude-instances-bar"
-    static let zonesChanged = Notification.Name("dev.switchboard.usage-zones-changed")
-
     private func saveZone(_ key: String, _ v: Int) {
         guard UserDefaults.standard.integer(forKey: key) != v else { return }
         UserDefaults.standard.set(v, forKey: key)
-        UserDefaults(suiteName: Self.instancesDomain)?.set(v, forKey: key)
-        DistributedNotificationCenter.default().postNotificationName(Self.zonesChanged, object: nil,
-                                                                     userInfo: nil, deliverImmediately: true)
     }
 
     /// Both are file reads and cheap. Opening the panel never starts Codex:
