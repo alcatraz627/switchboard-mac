@@ -1,6 +1,8 @@
-<div align="center">
-  <img src="assets/banner.svg" alt="Switchboard: every switch on your Mac, one click away" width="720">
-</div>
+<p align="center">
+  <img src=".github/readme/banner.svg" alt="switchboard-mac banner: Operator with permission bulbs" width="100%">
+</p>
+
+# <img src=".github/readme/favicon.svg" alt="" width="32" height="32"> switchboard-mac
 
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-13%2B-black?logo=apple" alt="macOS 13+">
@@ -16,6 +18,13 @@ your AI agents are allowed to do on your behalf. One icon, one panel, four tabs.
 
 It is small on purpose. There is no server, no account and no cloud: the panel
 reads files and runs a few short scripts when you open it or flip a switch.
+
+<details>
+<summary>Riddle answer</summary>
+
+A for-a-while switch: any plain switch can be flipped for a set time, the timer survives a restart and never undoes a change you made by hand.
+
+</details>
 
 ## What's in the panel
 
@@ -38,6 +47,10 @@ change you made by hand in between.
 One rule shapes every switch: a click can put a protection back, but never
 take one away. The one exception, turning off a Claude Code permission prompt,
 asks you first.
+
+<p align="center">
+  <img src=".github/readme/art-1.svg" alt="switchboard-mac artwork" width="100%">
+</p>
 
 ## Quick start
 
