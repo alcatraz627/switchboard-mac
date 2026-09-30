@@ -162,7 +162,7 @@ The typed field reads these forms, and all of them work in every picker:
 |---|---|
 | `90m`, `3h`, `2d` | That long from now. A decimal such as `1.5h` works |
 | `in 3h` | The same, with an optional "in" |
-| `1h30m` or `1h 30m` | An hour and a half. Minutes can follow hours only |
+| `1h30m`, `1d 2h`, `5 min`, `2 hours`, `1 hr 15 min` | Parts add up, and units can be spelled out |
 | `tomorrow 9am`, `fri 5pm`, `2 Oct 14:00` | Any date or time phrase macOS itself recognises |
 | `9am` | The next 9 AM. If it has passed today, it means tomorrow, unless you typed "today" |
 

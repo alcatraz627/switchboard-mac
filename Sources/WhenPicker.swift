@@ -46,24 +46,54 @@ enum WhenText {
     /// Reads a typed time: "90m", "in 3h", "2d", "1h30m", or anything
     /// macOS recognises as a date ("tomorrow 9am", "fri 5pm", "2 Oct 14:00").
     static func parse(_ s: String, now: Date = Date()) -> Date? {
-        let t = s.lowercased().replacingOccurrences(of: "in ", with: "").trimmingCharacters(in: .whitespaces)
+        let raw = s.trimmingCharacters(in: .whitespaces)
+        var t = raw.lowercased()
+        if t.hasPrefix("in ") { t.removeFirst(3) }
         guard !t.isEmpty else { return nil }
-        if let r = t.range(of: #"^(\d+(\.\d+)?)\s*(d|h|m)(\s*(\d+)\s*m)?$"#, options: .regularExpression), r == t.startIndex..<t.endIndex {
-            let unit = t.first { "dhm".contains($0) }!
-            let n = Double(t.prefix { $0.isNumber || $0 == "." }) ?? 0
-            var secs = n * (unit == "d" ? 86400 : unit == "h" ? 3600 : 60)
-            if unit == "h", let m = t.range(of: #"(\d+)\s*m$"#, options: .regularExpression) {
-                secs += (Double(t[m].filter(\.isNumber)) ?? 0) * 60
-            }
-            return secs > 0 ? now.addingTimeInterval(secs) : nil
-        }
+        if let secs = duration(t) { return secs > 0 ? now.addingTimeInterval(secs) : nil }
+
+        // macOS reads the time of day; the day itself is worked out here from
+        // `now`, because the detector resolves "tomorrow" against the real clock.
         guard let d = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue),
-              let m = d.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)), var date = m.date else { return nil }
-        // "9am" with no day means the next 9 AM.
-        if date <= now, m.range.length == (s as NSString).length, !s.lowercased().contains("today") {
-            date = Calendar.current.date(byAdding: .day, value: 1, to: date) ?? date
+              let m = d.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw)), let found = m.date else { return nil }
+        let cal = Calendar.current
+        let time = cal.dateComponents([.hour, .minute], from: found)
+        func on(_ day: Date) -> Date? { cal.date(bySettingHour: time.hour ?? 9, minute: time.minute ?? 0, second: 0, of: day) }
+        let today = cal.startOfDay(for: now)
+        let words = t.split(whereSeparator: { !$0.isLetter }).map(String.init)
+        if words.contains("today") { return on(today) }
+        if words.contains("tomorrow") || words.contains("tmrw") {
+            return cal.date(byAdding: .day, value: 1, to: today).flatMap(on)
         }
-        return date
+        let days = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+        if let w = words.first(where: { w in days.contains { w.hasPrefix($0) } }), let idx = days.firstIndex(where: { w.hasPrefix($0) }) {
+            // The next such weekday; today's own weekday counts only while its time is ahead.
+            let ahead = (idx + 1 - cal.component(.weekday, from: now) + 7) % 7
+            guard let candidate = cal.date(byAdding: .day, value: ahead, to: today).flatMap(on) else { return nil }
+            return candidate > now ? candidate : cal.date(byAdding: .day, value: 7, to: candidate)
+        }
+        if t.range(of: #"^\d{1,2}(:\d{2})?\s*(am|pm)?$"#, options: .regularExpression) != nil {
+            // A time alone means its next occurrence.
+            guard let c = on(today) else { return nil }
+            return c > now ? c : cal.date(byAdding: .day, value: 1, to: c)
+        }
+        return found
+    }
+
+    /// Seconds in a typed duration: "90m", "1h30m", "1d 2h", "5 min", "2 hours", "1.5h".
+    static func duration(_ t: String) -> TimeInterval? {
+        var s = t
+        for (words, unit) in [(["minutes", "minute", "mins", "min"], "m"), (["hours", "hour", "hrs", "hr"], "h"), (["days", "day"], "d")] {
+            for w in words { s = s.replacingOccurrences(of: #"(\d)\s*"# + w + #"\b"#, with: "$1" + unit, options: .regularExpression) }
+        }
+        let pair = #"(\d+(?:\.\d+)?)\s*([dhm])"#
+        guard s.range(of: "^\\s*(" + pair + "\\s*)+$", options: .regularExpression) != nil,
+              let re = try? NSRegularExpression(pattern: pair) else { return nil }
+        return re.matches(in: s, range: NSRange(s.startIndex..., in: s)).reduce(0) { total, m in
+            let n = Double((s as NSString).substring(with: m.range(at: 1))) ?? 0
+            let unit = (s as NSString).substring(with: m.range(at: 2))
+            return total + n * (unit == "d" ? 86400 : unit == "h" ? 3600 : 60)
+        }
     }
 
     /// "Thu 2 Oct, 5:00 PM · in 3h 20m".
@@ -78,16 +108,29 @@ enum WhenText {
 
 /// Typed times the picker must read, checked against a fixed "now".
 func probeWhen() -> [String] {
-    let now = Calendar.current.date(from: DateComponents(year: 2026, month: 9, day: 30, hour: 14, minute: 0))!
+    let now = Calendar.current.date(from: DateComponents(year: 2025, month: 1, day: 15, hour: 14, minute: 0))!
     func mins(_ s: String) -> Int? { WhenText.parse(s, now: now).map { Int($0.timeIntervalSince(now) / 60) } }
     func line(_ name: String, _ ok: Bool, _ got: String) -> String { "\(ok ? "ok  " : "FAIL") \(name)\(ok ? "" : " (got: \(got))")" }
-    let tomorrow9 = WhenText.parse("tomorrow 9am", now: now).map { Calendar.current.dateComponents([.day, .hour], from: $0) }
-    return [line("90m is 90 minutes", mins("90m") == 90, "\(mins("90m") ?? -1)"),
-            line("in 3h is 180 minutes", mins("in 3h") == 180, "\(mins("in 3h") ?? -1)"),
-            line("1h30m is 90 minutes", mins("1h30m") == 90, "\(mins("1h30m") ?? -1)"),
-            line("2d is two days", mins("2d") == 2880, "\(mins("2d") ?? -1)"),
-            line("tomorrow 9am is the next day at 9", tomorrow9?.day == 1 && tomorrow9?.hour == 9, "\(String(describing: tomorrow9))"),
-            line("nonsense reads as nothing", WhenText.parse("blah", now: now) == nil, "a date")]
+    // Every relative day is judged against the injected "now" (Wed 15 Jan 2025, 14:00, far from any real today), never the real clock.
+    func at(_ s: String) -> String {
+        guard let d = WhenText.parse(s, now: now) else { return "nil" }
+        let c = Calendar.current.dateComponents([.month, .day, .hour, .minute], from: d)
+        return "\(c.month!)/\(c.day!) \(c.hour!):\(String(format: "%02d", c.minute!))"
+    }
+    let cases: [(String, Int)] = [("90m", 90), ("in 3h", 180), ("1h30m", 90), ("2d", 2880), ("1d30m", 1470),
+                                  ("5 min", 5), ("10 mins", 10), ("45 minutes", 45), ("2 hours", 120),
+                                  ("1 hr 15 min", 75), ("3 days", 4320), ("1.5h", 90)]
+    return cases.map { s, want in line("\"\(s)\" is \(want) minutes", mins(s) == want, "\(mins(s) ?? -1)") } + [
+        line("tomorrow 9am is the next day at 9", at("tomorrow 9am") == "1/16 9:00", at("tomorrow 9am")),
+        line("9am, already past today, is tomorrow at 9", at("9am") == "1/16 9:00", at("9am")),
+        line("\" 9am\" with a leading space reads the same", at(" 9am") == "1/16 9:00", at(" 9am")),
+        line("5pm, still ahead today, is today", at("5pm") == "1/15 17:00", at("5pm")),
+        line("today 9am stays today even though it has passed", at("today 9am") == "1/15 9:00", at("today 9am")),
+        line("fri 5pm is the coming Friday", at("fri 5pm") == "1/17 17:00", at("fri 5pm")),
+        line("wed 9am, today's weekday but passed, is next week", at("wed 9am") == "1/22 9:00", at("wed 9am")),
+        line("an absolute date is kept as written", at("2 Oct 14:30") == "10/2 14:30", at("2 Oct 14:30")),
+        line("nonsense reads as nothing", WhenText.parse("blah", now: now) == nil, "a date"),
+        line("zero is not a time", WhenText.parse("0m", now: now) == nil, "a date")]
 }
 
 /// The popover's body. `choices` adds a segmented pick above (Switch to
