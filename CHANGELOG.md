@@ -52,15 +52,12 @@
   on the icon.
 - **Claude MCP** (was Plugins & MCP): turn plugins and project MCP servers on
   and off; off ones are struck through. **Hooks** (was Rules & Hooks).
-- **Approvals** moved to the last tab and the Needs-you strip is gone. An
-  approved item waits in its own section and no longer counts in the badge.
+- **Approvals** replaced the Needs-you strip. An approved item waits in its own
+  section and no longer counts in the badge.
 - Bulbs reorder by drag. Search waits 250 ms after typing, and every text field
   takes ⌘A, ⌘X, ⌘C, ⌘V and ⌘Z.
 
-- **Sixteen tabs**, in this order: Agents, Usage, Hooks, Ledger, Queue,
-  Library, Notes, Timers, Runtime, Claude MCP, Machine, Controls, Home, Remote,
-  Settings, Approvals.
-  The list tabs share one search, rows that open to their details, and paths
+- **Sixteen tabs**, grouped into the spaces above. The list tabs share one search, rows that open to their details, and paths
   that copy; a long section shows six rows and a Show all row.
 - **Approvals**: shown while anything waits, with a yellow count of items a
   live session is waiting on. Pushes, policy asks, and what ended sessions
