@@ -358,13 +358,24 @@ enum Services {
         guard let url = URL(string: urlString) else { return false }
         var req = URLRequest(url: url)
         req.timeoutInterval = timeout
-        var ok = false
+        // A late answer (after the wait gave up) must not write a result that
+        // was already read, so the answer and the give-up share one lock.
+        final class Answer { let lock = NSLock(); var ok = false; var closed = false }
+        let answer = Answer()
         let sem = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: req) { _, resp, _ in
-            ok = (resp as? HTTPURLResponse)?.statusCode == 200
+        let task = URLSession.shared.dataTask(with: req) { _, resp, _ in
+            answer.lock.lock()
+            if !answer.closed { answer.ok = (resp as? HTTPURLResponse)?.statusCode == 200 }
+            answer.lock.unlock()
             sem.signal()
-        }.resume()
-        _ = sem.wait(timeout: .now() + timeout + 0.5)
+        }
+        task.resume()
+        let waited = sem.wait(timeout: .now() + timeout + 0.5)
+        if waited == .timedOut { task.cancel() }
+        answer.lock.lock()
+        answer.closed = true
+        let ok = waited == .success && answer.ok
+        answer.lock.unlock()
         return ok
     }
 

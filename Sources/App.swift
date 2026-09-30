@@ -489,9 +489,11 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             let note = s.hubReachable == nil ? "probing…" : ok ? "serving :5400"
                 : s.hubHost != nil ? "up, \(s.hubHost!) unreachable" : "not running"
             rows.append(SBRow(label: "Session Hub", badge: ok ? .on(menuGreen) : .off, note: note,
-                              onClick: { [weak self] in
-                                  let up = ok
+                              onClick: { [weak self, host = s.hubHost] in
                                   DispatchQueue.global(qos: .utility).async {
+                                      // Decide from the hub as it is now, not as the row last drew it.
+                                      let up = host.map { Services.probeHTTP("http://\($0):5400/healthz") }
+                                          ?? Services.probeHTTP("http://127.0.0.1:5400/healthz")
                                       // A restart waits for the port; the 4 s default killed it midway.
                                       _ = Services.run("/bin/bash", [hub, up ? "stop" : "restart"], timeout: 15)
                                       DispatchQueue.main.async { self?.refreshSnapshot() }
