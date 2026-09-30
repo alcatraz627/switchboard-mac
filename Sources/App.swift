@@ -74,11 +74,37 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             let args = Services.shell("/bin/ps", ["-o", "args=", "-p", String(pid)])
             return !args.contains(" --")
         }
+        // macOS may start the installed copy on its own (a notification click
+        // goes to whichever app owns the bundle id). An older copy must not
+        // stop a newer one, so it leaves instead; exit 0 keeps launchd from
+        // starting it again.
+        let mine = Self.version(ofExecutable: Bundle.main.executablePath ?? "")
+        if let newer = others.first(where: { Self.isNewer(Self.version(ofExecutable: Self.executablePath($0)), than: mine) }) {
+            dlog("dedupe: a newer copy runs as pid \(newer) (this is \(mine)); leaving it running and quitting")
+            exit(0)
+        }
         others.forEach { kill($0, SIGTERM) }
         if !others.isEmpty {
             dlog("dedupe: stopped \(others.count) older instance(s)")
             Thread.sleep(forTimeInterval: 0.3)
         }
+    }
+
+    static func executablePath(_ pid: Int32) -> String {
+        var buf = [CChar](repeating: 0, count: 4096)
+        return proc_pidpath(pid, &buf, UInt32(buf.count)) > 0 ? String(cString: buf) : ""
+    }
+
+    /// The short version in the Info.plist beside an app's executable, or "0".
+    static func version(ofExecutable path: String) -> String {
+        let plist = ((path as NSString).deletingLastPathComponent as NSString)
+            .deletingLastPathComponent + "/Info.plist"
+        let d = NSDictionary(contentsOfFile: plist)
+        return d?["CFBundleShortVersionString"] as? String ?? "0"
+    }
+
+    static func isNewer(_ a: String, than b: String) -> Bool {
+        a.compare(b, options: .numeric) == .orderedDescending
     }
 
     // ── Keep Awake ───────────────────────────────────────────────────────────
