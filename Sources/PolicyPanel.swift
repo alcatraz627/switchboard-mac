@@ -77,20 +77,17 @@ enum SwitchboardConcerns {
         let tabs = registry(policy: policy, usage: usage, lights: lights, controls: controls)
             .filter { $0.id != "agents" || Integrations.policyStore }
             .filter { $0.id != "remote" || Integrations.csync }
-            .sorted { (tabOrder.firstIndex(of: $0.id) ?? 99) < (tabOrder.firstIndex(of: $1.id) ?? 99) }
         // Settings lists every other tab, so it is built from the rest. Approvals
         // cannot be hidden: it is how a waiting push reaches you.
         let listed = tabs.filter { $0.id != "approvals" }.map { (id: $0.id, title: $0.title, icon: $0.icon) }
         let settings = SwitchboardConcern(id: "settings", title: "Settings", subtitle: "What the panel shows", icon: "gearshape",
                                           footer: "Hidden tabs and sections are not read, so they cost nothing.", footerIcon: "eye.slash",
-                                          content: AnyView(SettingsTabView(store: policy, tabs: listed)))
-        return (tabs + [settings]).sorted { (tabOrder.firstIndex(of: $0.id) ?? 99) < (tabOrder.firstIndex(of: $1.id) ?? 99) }
+                                          content: AnyView(SettingsTabView(store: policy, tabs: listed)),
+                                          pinned: AnyView(SearchField(text: Binding(get: { policy.queries["settings"] ?? "" },
+                                                                                    set: { policy.queries["settings"] = $0 }),
+                                                                      prompt: "Search tabs, sections and preview items")))
+        return tabs + [settings]
     }
-
-    /// Tab order (docs/plans/20260929-tabs-plan.md): what needs you, what
-    /// agents may do and how much, the gcc's own lists, then this Mac.
-    static let tabOrder = ["agents", "usage", "rules", "ledger", "queue", "library", "notes", "timers",
-                           "runtime", "plugins", "system", "controls", "home", "remote", "settings", "approvals"]
 
     private static func registry(policy: PolicyStore, usage: UsageStore, lights: LightsStore, controls: ControlsStore) -> [SwitchboardConcern] {
         [
@@ -185,8 +182,11 @@ struct PolicyPanel: View {
     @State private var contentHeight: CGFloat = 0
     @AppStorage("policyPanel.tab") private var storedTab = "agents"
 
+    /// Visible tabs in the owner's order, so a drag in Settings moves the bar at once.
     private var shown: [SwitchboardConcern] {
-        concerns.filter { $0.isShown() && !store.hiddenTabs.contains($0.id) }
+        let rank = Dictionary(store.tabOrder.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        return concerns.filter { $0.isShown() && !store.hiddenTabs.contains($0.id) }
+            .sorted { (rank[$0.id] ?? 99) < (rank[$1.id] ?? 99) }
     }
 
     /// The chosen tab, or the first other one when the chosen tab is hidden,
@@ -580,6 +580,9 @@ struct GroupHeader: View {
         "Console": "server.rack",
         "Hosts": "laptopcomputer.and.iphone",
         "Schedules": "calendar.badge.clock",
+        "Scheduled": "clock",
+        "Cron duties": "repeat",
+        "Deploy queue": "icloud.and.arrow.up",
         "Session": "cup.and.saucer",
         "Feed": "arrow.triangle.2.circlepath",
         "Claude": "sparkle",
@@ -623,7 +626,7 @@ struct SystemRowView: View {
         self.store = store
         self.indent = indent
         // Headless --expand opens the top rows only, so nested lists stay folded.
-        _expanded = State(initialValue: SystemRowView.startExpanded && indent == 0)
+        _expanded = State(initialValue: (SystemRowView.startExpanded && indent == 0) || row.startsOpen)
     }
 
     /// Headless renders set this (--expand) so opened rows can be checked.
@@ -702,6 +705,9 @@ struct SystemRowView: View {
 
     private var mainLine: some View {
         HStack(alignment: .center, spacing: 8) {
+            if let icon = row.icon {
+                Image(systemName: icon).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.label).font(PT.label).fixedSize(horizontal: false, vertical: true)
                     .strikethrough(row.struck)

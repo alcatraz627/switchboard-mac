@@ -72,15 +72,6 @@ func probeReorder() -> [String] {
             line("a saved order applies; new items go last", saved == ["a", "b", "x"], saved.joined())]
 }
 
-/// Moves `dragged` to `target`'s place in an id order.
-func reordered(_ order: [String], moving dragged: String, to target: String) -> [String] {
-    guard let from = order.firstIndex(of: dragged), let to = order.firstIndex(of: target), from != to else { return order }
-    var o = order
-    o.remove(at: from)
-    o.insert(dragged, at: to)
-    return o
-}
-
 /// Sorts items by a saved id order; ones not in it keep their order at the end.
 func applyOrder<T: Identifiable>(_ items: [T], _ order: [String]) -> [T] where T.ID == String {
     let rank = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })

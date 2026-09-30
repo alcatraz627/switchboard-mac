@@ -170,11 +170,43 @@ enum PreferenceMigration {
     }
 }
 
+/// Moves `dragged` to `target`'s place in an id order.
+func reordered(_ order: [String], moving dragged: String, to target: String) -> [String] {
+    guard let from = order.firstIndex(of: dragged), let to = order.firstIndex(of: target), from != to else { return order }
+    var o = order
+    o.remove(at: from)
+    o.insert(dragged, at: to)
+    return o
+}
+
 /// Which tabs and sections the owner has hidden in Settings. A hidden one is
 /// not drawn and not read: its helper never runs, so hiding saves the work.
 enum Visibility {
     static let tabsKey = "switchboard.hiddenTabs"
     static let sectionsKey = "switchboard.hiddenSections"
+    static let orderKey = "switchboard.tabOrder"
+
+    /// Related tabs sit together: Claude and its agents, Claude's own records,
+    /// your desk, this Mac, the things around it, then Settings and Approvals.
+    static let defaultTabOrder = ["agents", "usage", "plugins", "rules", "library",
+                                  "ledger", "queue",
+                                  "notes", "timers",
+                                  "system", "runtime", "controls",
+                                  "home", "remote",
+                                  "settings", "approvals"]
+
+    /// The owner's saved order, with any tab it does not know yet placed after
+    /// the tab it follows by default.
+    static var tabOrder: [String] {
+        var order = UserDefaults.standard.stringArray(forKey: orderKey) ?? []
+        guard !order.isEmpty else { return defaultTabOrder }
+        order = order.filter(defaultTabOrder.contains)
+        for (i, id) in defaultTabOrder.enumerated() where !order.contains(id) {
+            let after = defaultTabOrder[..<i].last { order.contains($0) }
+            order.insert(id, at: after.flatMap { order.firstIndex(of: $0) }.map { $0 + 1 } ?? 0)
+        }
+        return order
+    }
 
     static var hiddenTabs: Set<String> { Set(UserDefaults.standard.stringArray(forKey: tabsKey) ?? []) }
     static var hiddenSections: Set<String> { Set(UserDefaults.standard.stringArray(forKey: sectionsKey) ?? []) }

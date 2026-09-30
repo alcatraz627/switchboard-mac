@@ -1670,6 +1670,22 @@ extension SwitchboardApp {
         let hiddenCatalog = Visibility.hiddenTitles("runtime")
         check("the hidden title is known per tab", hiddenCatalog == ["Dev servers"])
 
+        // Tab order: a drag moves a tab to the target's place and is saved; a
+        // saved order from before a tab existed places it after its default neighbour.
+        let savedOrder = d.stringArray(forKey: Visibility.orderKey)
+        defer { d.set(savedOrder, forKey: Visibility.orderKey) }
+        d.removeObject(forKey: Visibility.orderKey)
+        let orderStore = PolicyStore()
+        check("with nothing saved the tabs use the default order", orderStore.tabOrder == Visibility.defaultTabOrder)
+        orderStore.moveTab("timers", to: "agents")
+        check("a drag puts the tab in the target's place", orderStore.tabOrder.prefix(2) == ["timers", "agents"])
+        check("and the new order is saved", Visibility.tabOrder == orderStore.tabOrder)
+        d.set(["remote", "agents", "usage"], forKey: Visibility.orderKey)
+        let merged = Visibility.tabOrder
+        check("a saved order keeps its own sequence", merged.firstIndex(of: "remote")! < merged.firstIndex(of: "agents")!)
+        check("a tab it never saw lands after its default neighbour",
+              merged.count == Visibility.defaultTabOrder.count && merged.firstIndex(of: "plugins") == merged.firstIndex(of: "usage")! + 1)
+
         // A timer far off on Keep Awake while its section and Services are hidden.
         let timersKey = systemTimersKey
         systemTimersKey = "switchboard.timers.probe-visibility"

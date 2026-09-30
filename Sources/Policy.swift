@@ -240,6 +240,10 @@ struct SystemRow: Identifiable {
     /// Turned off (a disabled plugin, an expired note): the name is struck
     /// through and the row dimmed, but it stays listed so it can come back.
     var struck = false
+    /// An SF Symbol before the name, matching the tab or section it stands for.
+    var icon: String? = nil
+    /// Opens on first show, as a search match does so the match is visible.
+    var startsOpen = false
 
     var id: String { key ?? label }
     /// A plain on/off with a single action renders as a switch.
@@ -310,6 +314,13 @@ final class PolicyStore: ObservableObject {
     /// List sections the owner opened past their first few rows, as "tab::section".
     @Published var shownInFull: Set<String> = []
     /// Tabs and sections hidden in Settings; kept in step with Visibility's store.
+    /// Tab ids in the owner's order; the tab bar and Settings both follow it.
+    @Published var tabOrder: [String] = Visibility.tabOrder {
+        didSet { UserDefaults.standard.set(tabOrder, forKey: Visibility.orderKey) }
+    }
+    func moveTab(_ dragged: String, to target: String) {
+        tabOrder = reordered(tabOrder, moving: dragged, to: target)
+    }
     @Published var hiddenTabs: Set<String> = Visibility.hiddenTabs {
         didSet { UserDefaults.standard.set(Array(hiddenTabs).sorted(), forKey: Visibility.tabsKey) }
     }
