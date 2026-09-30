@@ -16,7 +16,7 @@ It needs macOS 13 or later. It has no Dock icon and no window of its own, only t
 
 Click the icon to open the panel and click it again to close it. Clicking anywhere else also closes it. The panel opens on the tab you used last (Agents the first time, or the first visible tab if that one is hidden). A footer carries a hint for the tab and a reload arrow that reads the current tab again.
 
-The tabs are grouped into five spaces along the top: Claude, Records, Desk, Mac and Around. Click a space and its tabs appear under it as a row of words; the tab you are on is underlined. A space opens on the tab you last used in it, and a space with only one visible tab shows no second row. Settings (the gear) and Approvals (the raised hand, with its count) sit at the right of the header, beside one line about the current tab, because they are about the panel and about you rather than places among the others.
+The tabs are grouped into five spaces along the top: Claude, Records, Desk, Mac and Around. Click a space and its tabs appear under it, each with its icon; the tab you are on is underlined. A space opens on the tab you last used in it, and a space with only one visible tab shows no second row. Settings (the gear) and Approvals (the raised hand, with its count) sit at the right of the header, beside one line about the current tab, because they are about the panel and about you rather than places among the others.
 
 | Space | Tabs |
 |---|---|

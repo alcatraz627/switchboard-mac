@@ -4,7 +4,7 @@
 
 - **Spaces instead of sixteen tabs**: the panel's top row is five spaces
   (Claude, Records, Desk, Mac, Around), each opening on the tab you last used
-  in it, with its tabs as a row of words underneath. Settings and Approvals
+  in it, with its tabs and their icons underneath. Settings and Approvals
   moved to buttons in the header.
 - **Settings**: tab and section rows carry their icons, a search narrows
   everything, and tabs drag into any order within their space.
