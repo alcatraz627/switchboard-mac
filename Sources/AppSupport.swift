@@ -237,6 +237,7 @@ enum Icons {
         "Drives": "externaldrive",
         "Repos": "arrow.triangle.branch",
         "Services": "server.rack",
+        "Databases": "cylinder.split.1x2",
         "Dev servers": "network",
         "Local models": "cpu",
         "Schedules": "calendar.badge.clock",
@@ -341,7 +342,7 @@ enum Visibility {
         "ledger": ["Mistakes", "Open proposals", "Closed proposals"],
         "queue": ["Scheduled", "Cron duties", "Deploy queue", "Open proposals"],
         "library": ["Skills", "Parked skills", "Knowledge", "Personas", "Scripts"],
-        "runtime": ["Services", "Dev servers", "Local models", "Schedules"],
+        "runtime": ["Services", "Databases", "Dev servers", "Local models", "Schedules"],
         "plugins": ["Plugins", "MCP servers", "Project plugins", "Project MCP servers"],
         "system": ["Session", "Drives", "Repos"],
         "controls": ["Sound", "Display", "Wi-Fi", "Bluetooth"],
@@ -351,7 +352,7 @@ enum Visibility {
     /// Where each Machine group lives, so a probe can ask whether its section is shown.
     static let groupTab: [String: String] = [
         "Guards": "rules", "Context": "agents",
-        "Services": "runtime", "Dev servers": "runtime", "Local models": "runtime", "Schedules": "runtime",
+        "Services": "runtime", "Databases": "runtime", "Dev servers": "runtime", "Local models": "runtime", "Schedules": "runtime",
         "Session": "system", "Drives": "system", "Repos": "system",
     ]
 

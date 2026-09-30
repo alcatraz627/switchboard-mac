@@ -372,7 +372,9 @@ Switchboard never commits, pushes or resets. Hidden sections are described in [S
 
 Answers: what is running, and can I stop it?
 
-Four sections, with a search field pinned above them (prompt: "Search services, ports, models and jobs"). The footer says "Stop and Disable ask first; a command copies instead of opening a terminal."
+Five sections, with a search field pinned above them (prompt: "Search services, ports, models and jobs"). The footer says "Stop and Disable ask first; a command copies instead of opening a terminal."
+
+**Databases** lists the services Homebrew runs through launchd (the `homebrew.mxcl.*` agents in `~/Library/LaunchAgents`), such as mongod, redis, postgres and nginx, including ones `brew services` leaves out. A row shows its ports and pid, or "stopped". Start needs no confirmation; Stop and Restart ask first, since connected apps lose their connection. Stop unloads the service so launchd does not start it straight back, and it returns at the next login. Copy puts the connection string (`redis://127.0.0.1:6379`) on the clipboard, and Open shows its log. Opened, the row lists its ports, data folder, log and launchd label, each with a copy button. A button only reports success once the service has really started or exited.
 
 **Services** (each row appears only when its tool is installed; every switch here can take a timer, except the ipc Broker):
 

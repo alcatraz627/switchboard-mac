@@ -190,6 +190,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var jobs: [[String: Any]] = []
         var wolTargets: [[String: Any]] = []
         var devServers: [[String: Any]] = []
+        var dbServices: [[String: Any]] = []
         var models: [String: Any] = [:]
         var remote: [String: Any] = [:]
         var git: [String: Any] = [:]
@@ -256,7 +257,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             let lock = NSLock()
             func probe(_ name: String, _ args: [String], timeout: TimeInterval, _ apply: @escaping (Any) -> Void) {
                 // A section hidden in Settings is never read, so it costs nothing.
-                let owner: [String: String] = ["jobs.py": "Schedules", "drives.py": "Drives", "devservers.py": "Dev servers",
+                let owner: [String: String] = ["jobs.py": "Schedules", "drives.py": "Drives", "devservers.py": "Dev servers", "dbservices.py": "Databases",
                                                "models.py": "Local models", "gitscan.py": "Repos", "wol.py": "Session"]
                 if let section = owner[name], Visibility.groupHidden(section) { return }
                 if name == "remote.py", Visibility.tabHidden("remote") { return }
@@ -275,11 +276,14 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 }
             }
             p.jobs = previous.jobs; p.wolTargets = previous.wolTargets; p.drives = previous.drives
-            p.devServers = previous.devServers; p.models = previous.models; p.git = previous.git; p.remote = previous.remote
+            p.devServers = previous.devServers; p.dbServices = previous.dbServices; p.models = previous.models; p.git = previous.git; p.remote = previous.remote
             p.probeReadAt = previous.probeReadAt
             probe("jobs.py", ["list"], timeout: 8) { if let v = $0 as? [[String: Any]] { p.jobs = v } }
             probe("wol.py", ["list"], timeout: 8) { if let v = $0 as? [[String: Any]] { p.wolTargets = v } }
             probe("drives.py", ["list"], timeout: 30) { if let v = $0 as? [[String: Any]] { p.drives = v } }
+            probe("dbservices.py", ["list"], timeout: 20) {
+                if let d = $0 as? [String: Any], let v = d["services"] as? [[String: Any]] { p.dbServices = v }
+            }
             probe("devservers.py", ["list"], timeout: 50) {
                 guard let d = $0 as? [String: Any], let v = d["servers"] as? [[String: Any]] else { return }
                 p.devServers = v
@@ -325,7 +329,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             s.awakeHolders = Self.sleepHolders()
             group.wait()
             s.jobs = p.jobs; s.wolTargets = p.wolTargets; s.drives = p.drives
-            s.devServers = p.devServers; s.pm2Error = p.pm2Error; s.models = p.models; s.git = p.git; s.remote = p.remote
+            s.devServers = p.devServers; s.dbServices = p.dbServices; s.pm2Error = p.pm2Error; s.models = p.models; s.git = p.git; s.remote = p.remote
             s.probeReadAt = p.probeReadAt; s.probeFailures = p.probeFailures
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -667,7 +671,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         }
         // A helper-backed group shows while it has rows or while its helper is
         // failing, so a broken read never looks like "nothing there".
-        for (title, helper, rows) in [("Dev servers", "devservers.py", devServerRows()), ("Repos", "gitscan.py", gitRows()),
+        for (title, helper, rows) in [("Databases", "dbservices.py", databaseRows()), ("Dev servers", "devservers.py", devServerRows()), ("Repos", "gitscan.py", gitRows()),
                                       ("Drives", "drives.py", driveRows()), ("Local models", "models.py", modelRows()),
                                       ("Schedules", "jobs.py", scheduleRows())] {
             var st = probeStatus(helper)
@@ -737,6 +741,63 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
 
     /// Local services (tier 2), your pinned ports (tier 1), and one-off demos
     /// (tier 3), each opening to its ports. See features/dev-servers.md.
+    // ── Databases: services Homebrew runs through launchd ────────────────────
+
+    /// mongod, redis, postgres and the like: up or down, their ports, data and
+    /// log, a connection string to copy. Stop and Restart ask first.
+    private func databaseRows() -> [SystemRow] {
+        let script = AppPaths.lib("dbservices.py")
+        return sbSnapshot.dbServices.map { s in
+            let label = s["label"] as? String ?? "?", name = s["name"] as? String ?? label
+            let on = s["running"] as? Bool ?? false
+            let ports = (s["ports"] as? [Int] ?? []).map { ":\($0)" }.joined(separator: " ")
+            let act: (String) -> () -> String? = { [weak self] verb in {
+                let err = Self.helperError(Services.run("/usr/bin/env", ["python3", script, verb, label], timeout: 25))
+                self?.refreshSnapshot()
+                return err
+            } }
+            var r = SystemRow(label: name, state: on ? .on(menuGreen) : .off,
+                              note: on ? [ports, (s["pid"] as? Int).map { "pid \($0)" }].compactMap { $0 }.filter { !$0.isEmpty }
+                                      .joined(separator: " · ")
+                                   : (s["loaded"] as? Bool ?? false) ? "loaded, not running" : "stopped",
+                              tip: "Runs from \(abbreviateHome(s["plist"] as? String ?? "")) under launchd")
+            r.key = "db-" + label
+            if on {
+                r.buttons = [
+                    RowButton(label: "Stop", kind: .run(act("stop")), help: "Stop \(name) and keep it off until Start or the next login",
+                              doing: "stop \(name)",
+                              confirm: "Stop \(name)? Apps connected to it lose their connection. Start it again from here."),
+                    RowButton(label: "Restart", kind: .run(act("restart")), help: "Restart \(name)", icon: "arrow.clockwise",
+                              doing: "restart \(name)",
+                              confirm: "Restart \(name)? Open connections drop while it comes back."),
+                ]
+            } else {
+                r.buttons = [RowButton(label: "Start", kind: .run(act("start")), help: "Start \(name)", doing: "start \(name)")]
+            }
+            if let c = s["connect"] as? String {
+                r.buttons.append(RowButton(label: "Copy", kind: .copy(c), help: "Copy \(c)"))
+            }
+            if let log = s["log"] as? String {
+                r.buttons.append(RowButton(label: "Open", kind: .run({
+                    DispatchQueue.main.async { NSWorkspace.shared.open(URL(fileURLWithPath: log)) }
+                    return nil
+                }), help: "Open its log"))
+            }
+            let facts: [(String, String?)] = [("Ports", ports.isEmpty ? nil : ports), ("Data", s["data"] as? String),
+                                              ("Log", s["log"] as? String), ("launchd label", label)]
+            r.children = facts.compactMap { k, v in
+                guard let v = v else { return nil }
+                var c = SystemRow(label: k, state: .off, note: v, tip: v)
+                c.key = r.key! + "-" + k
+                c.showsBadge = false
+                c.noteLines = 0
+                c.buttons = [RowButton(label: "Copy", kind: .copy(v), help: "Copy \(v)")]
+                return c
+            }
+            return r
+        }
+    }
+
     private func devServerRows() -> [SystemRow] {
         let all = sbSnapshot.devServers
         guard !all.isEmpty else { return [] }
