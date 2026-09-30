@@ -39,15 +39,28 @@ struct SettingsTabView: View {
                                 .help("Put the tabs back in the default order")
                         }
                     }
-                    note(query.isEmpty ? "Drag the grip to change the order in the tab bar. Open a tab to choose its sections; hidden ones are not read at all."
+                    note(query.isEmpty ? "Drag the grip to change a tab's place within its space. Open a tab to choose its sections; hidden ones are not read at all."
                                        : "Matching tabs, opened to the matching sections.")
-                    Card {
-                        ReorderStack(items: orderedTabs, move: { store.moveTab($0, to: $1) }) { i, t, grip in
-                            VStack(spacing: 0) {
-                                if i > 0 { Divider().padding(.leading, PT.rowH) }
-                                HStack(spacing: 0) {
-                                    if query.isEmpty { grip.padding(.leading, 6) }
-                                    SystemRowView(row: tabRow(t), store: store)
+                    ForEach(Visibility.spaces, id: \.id) { s in
+                        let inSpace = orderedTabs.filter { s.tabs.contains($0.id) }
+                        if !inSpace.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: s.icon).font(.system(size: 9.5))
+                                Text(s.title).font(PT.caption)
+                            }
+                            .foregroundStyle(.secondary).padding(.leading, 4).padding(.top, 2)
+                            Card {
+                                // Dragging stays inside a space: a tab's space is fixed.
+                                ReorderStack(items: inSpace, move: { d, t in
+                                    if s.tabs.contains(d) { store.moveTab(d, to: t) }
+                                }) { i, t, grip in
+                                    VStack(spacing: 0) {
+                                        if i > 0 { Divider().padding(.leading, PT.rowH) }
+                                        HStack(spacing: 0) {
+                                            if query.isEmpty && inSpace.count > 1 { grip.padding(.leading, 6) }
+                                            SystemRowView(row: tabRow(t), store: store)
+                                        }
+                                    }
                                 }
                             }
                         }

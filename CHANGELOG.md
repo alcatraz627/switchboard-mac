@@ -2,6 +2,16 @@
 
 ## 0.3.0 (2026-09-30)
 
+- **Spaces instead of sixteen tabs**: the panel's top row is five spaces
+  (Claude, Records, Desk, Mac, Around), each opening on the tab you last used
+  in it, with its tabs as a row of words underneath. Settings and Approvals
+  moved to buttons in the header.
+- **Settings**: tab and section rows carry their icons, a search narrows
+  everything, and tabs drag into any order within their space.
+- An older copy of the app, such as one started by a notification click, now
+  quits instead of closing a newer one that is already running.
+- A user guide covering every tab: `docs/guide.md`.
+
 - **The panel opens fast again**: the Hooks tab read took about 19 s of CPU on
   every open and now takes 0.2 s, and one open runs one snapshot, not two.
 - **No false "did not turn on"**: a switch is judged by a reading taken after

@@ -1686,6 +1686,16 @@ extension SwitchboardApp {
         check("a tab it never saw lands after its default neighbour",
               merged.count == Visibility.defaultTabOrder.count && merged.firstIndex(of: "plugins") == merged.firstIndex(of: "usage")! + 1)
 
+        // Spaces: every tab but Settings and Approvals sits in exactly one, in the default order.
+        let spaced = Visibility.spaces.flatMap(\.tabs)
+        check("every tab sits in exactly one space", Set(spaced).count == spaced.count
+              && Set(spaced) == Set(Visibility.defaultTabOrder).subtracting(["settings", "approvals"]))
+        check("the default order walks the spaces in turn", spaced == Visibility.defaultTabOrder.filter(spaced.contains))
+        let spaceTabs = d.dictionary(forKey: Visibility.spaceTabKey)
+        defer { d.set(spaceTabs, forKey: Visibility.spaceTabKey) }
+        Visibility.rememberTab("queue")
+        check("a space reopens on the tab last used in it", Visibility.lastTab(in: "records") == "queue")
+
         // A timer far off on Keep Awake while its section and Services are hidden.
         let timersKey = systemTimersKey
         systemTimersKey = "switchboard.timers.probe-visibility"

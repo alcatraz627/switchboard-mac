@@ -48,6 +48,10 @@ A for-a-while switch: any plain switch can be flipped for a set time, the timer 
 | **Settings** | What does the panel show? | Hide any tab or section (hidden ones are never read), pick what the hover preview shows, choose the notes folder |
 | **Approvals** | What is waiting on me? | Approve or cancel a held push or a policy ask with one click; its badge counts what live sessions wait on |
 
+The tabs sit in five spaces along the top of the panel (Claude, Records, Desk,
+Mac, Around), with Settings and Approvals as buttons in the header. The
+[user guide](docs/guide.md) walks through every tab.
+
 Rest the pointer on the menu bar icon for a preview: the Claude limits, what
 waits on you, problems, and, if you choose them, running timers, the next
 reminder and a coloured dot on the icon.
@@ -112,6 +116,7 @@ tests/run-tests.sh                                                    # the suit
 
 | Document | What it covers |
 |---|---|
+| [User guide](docs/guide.md) | Every tab, button, permission and failure message, for people using the app |
 | [How it's put together](docs/architecture.md) | The pieces, where state lives, optional integrations, headless checks |
 | [Adding a tab](docs/adding-a-concern.md) | A new concern in four steps, with the Home tab as the worked example |
 | [The design kit](docs/design-kit.md) | The type scale, colour tokens and badge rules, and how to reuse them in another app |

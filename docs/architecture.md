@@ -10,7 +10,7 @@ small helper scripts when the panel opens or a switch is flipped.
  ┌──────────────────────────────────────────────────────────────────────┐
  │ main.swift        entry; headless flags (--dump, --snapshot, …)      │
  │ App.swift         the snapshot, Machine rows, Keep Awake, timed flips│
- │ PolicyPanel.swift the popover, tab bar, SwitchboardConcerns registry │
+ │ PolicyPanel.swift the popover, space bar, SwitchboardConcerns list   │
  │  ├─ Agents     Policy.swift     ──▶ pol.sh (optional, ~/.claude)     │
  │  ├─ Usage      Usage.swift      ──▶ rate-limit files, Codex gate     │
  │  ├─ Hooks, Ledger, Queue, Library, Claude MCP                        │

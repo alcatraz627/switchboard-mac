@@ -224,47 +224,108 @@ struct PolicyPanel: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 6) {
                 Label("Switchboard", systemImage: "slider.vertical.3").font(PT.title)
                 Spacer(minLength: 8)
-                Text(current.subtitle).font(PT.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(current.subtitle).font(PT.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
+                ForEach(shown.filter { Visibility.space(of: $0.id) == nil }) { c in headerButton(c) }
             }
-            headerTop
+            spaceBar
+            if currentSpaceTabs.count > 1 { subTabs }
         }
         .padding(.horizontal, PT.gap)
         .padding(.vertical, 10)
     }
 
-    private var headerTop: some View {
-        HStack(spacing: 0) {
-            // A drawn tab bar: the native segmented control drops a label's icon on macOS.
-            // Four to a row; a long label ("Rules & Hooks") shrinks a little to fit its cell.
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 4), spacing: 2) {
-                ForEach(shown) { c in
-                    let on = c.id == current.id
-                    Button {
-                        storedTab = c.id
-                        c.refresh()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: c.icon).font(.system(size: 10.5))
-                            Text(c.title).font(.system(size: 11.5, weight: on ? .semibold : .regular))
-                                .lineLimit(1).minimumScaleFactor(0.8)
-                            if let n = c.badge() { TabBadge(count: n, onAccent: on) }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
-                        .foregroundStyle(on ? Color.white : Color.primary.opacity(0.75))
-                        .background(RoundedRectangle(cornerRadius: 5).fill(on ? Color.accentColor : .clear))
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(c.subtitle)
-                }
+    private func open(_ c: SwitchboardConcern) {
+        storedTab = c.id
+        Visibility.rememberTab(c.id)
+        c.refresh()
+    }
+
+    /// Settings and Approvals: small icons in the header, since they are
+    /// about the panel and about you, not a place among the others.
+    private func headerButton(_ c: SwitchboardConcern) -> some View {
+        let on = c.id == current.id
+        return Button { open(c) } label: {
+            HStack(spacing: 3) {
+                Image(systemName: c.icon).font(.system(size: 12, weight: on ? .semibold : .regular))
+                if let n = c.badge() { TabBadge(count: n, onAccent: on) }
             }
-            .padding(2)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.07)))
+            .padding(.horizontal, 5).padding(.vertical, 3)
+            .foregroundStyle(on ? Color.white : Color.primary.opacity(0.7))
+            .background(RoundedRectangle(cornerRadius: 5).fill(on ? Color.accentColor : .clear))
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .help(c.title + ": " + c.subtitle)
+    }
+
+    /// Spaces that have at least one visible tab, with those tabs in the owner's order.
+    private var spaces: [(id: String, title: String, icon: String, tabs: [SwitchboardConcern])] {
+        Visibility.spaces.compactMap { s in
+            let tabs = shown.filter { s.tabs.contains($0.id) }
+            return tabs.isEmpty ? nil : (s.id, s.title, s.icon, tabs)
+        }
+    }
+
+    private var currentSpaceTabs: [SwitchboardConcern] {
+        spaces.first { $0.id == Visibility.space(of: current.id) }?.tabs ?? []
+    }
+
+    // A drawn bar: the native segmented control drops a label's icon on macOS.
+    private var spaceBar: some View {
+        HStack(spacing: 2) {
+            ForEach(spaces, id: \.id) { s in
+                let on = s.id == Visibility.space(of: current.id)
+                let badge = s.tabs.compactMap { $0.badge() }.reduce(0, +)
+                Button {
+                    let last = Visibility.lastTab(in: s.id)
+                    open(s.tabs.first { $0.id == last } ?? s.tabs[0])
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: s.icon).font(.system(size: 10.5))
+                        Text(s.title).font(.system(size: 11.5, weight: on ? .semibold : .regular)).lineLimit(1)
+                        if badge > 0 { TabBadge(count: badge, onAccent: on) }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+                    .foregroundStyle(on ? Color.white : Color.primary.opacity(0.75))
+                    .background(RoundedRectangle(cornerRadius: 5).fill(on ? Color.accentColor : .clear))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(s.tabs.map(\.title).joined(separator: ", "))
+            }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.07)))
+    }
+
+    /// The chosen space's tabs as plain words; the space above already carries the icon.
+    private var subTabs: some View {
+        HStack(spacing: 14) {
+            ForEach(currentSpaceTabs) { c in
+                let on = c.id == current.id
+                Button { open(c) } label: {
+                    VStack(spacing: 3) {
+                        HStack(spacing: 3) {
+                            Text(c.title).font(.system(size: 11.5, weight: on ? .semibold : .regular)).lineLimit(1)
+                            if let n = c.badge() { TabBadge(count: n, onAccent: false) }
+                        }
+                        .foregroundStyle(on ? Color.primary : Color.secondary)
+                        Capsule().fill(on ? Color.accentColor : .clear).frame(height: 2)
+                    }
+                    .fixedSize()
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(c.subtitle)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 6)
     }
 
     private var footer: some View {

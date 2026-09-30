@@ -195,6 +195,29 @@ enum Visibility {
                                   "home", "remote",
                                   "settings", "approvals"]
 
+    /// The spaces along the top of the panel, each holding related tabs.
+    /// Settings and Approvals belong to none: they live in the header.
+    static let spaces: [(id: String, title: String, icon: String, tabs: [String])] = [
+        ("claude", "Claude", "sparkle", ["agents", "usage", "plugins", "rules", "library"]),
+        ("records", "Records", "archivebox", ["ledger", "queue"]),
+        ("desk", "Desk", "cup.and.saucer", ["notes", "timers"]),
+        ("mac", "Mac", "laptopcomputer", ["system", "runtime", "controls"]),
+        ("around", "Around", "globe", ["home", "remote"]),
+    ]
+    static func space(of tab: String) -> String? { spaces.first { $0.tabs.contains(tab) }?.id }
+
+    /// The tab each space opens on: the one last used in it.
+    static let spaceTabKey = "switchboard.spaceTab"
+    static func lastTab(in space: String) -> String? {
+        (UserDefaults.standard.dictionary(forKey: spaceTabKey) as? [String: String])?[space]
+    }
+    static func rememberTab(_ tab: String) {
+        guard let s = space(of: tab) else { return }
+        var d = (UserDefaults.standard.dictionary(forKey: spaceTabKey) as? [String: String]) ?? [:]
+        d[s] = tab
+        UserDefaults.standard.set(d, forKey: spaceTabKey)
+    }
+
     /// The owner's saved order, with any tab it does not know yet placed after
     /// the tab it follows by default.
     static var tabOrder: [String] {
