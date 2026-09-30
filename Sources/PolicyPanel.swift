@@ -140,7 +140,7 @@ enum SwitchboardConcerns {
                                footer: "Drag the grip to reorder. Each note is a markdown file; the link icon copies its path.",
                                footerIcon: "doc.text",
                                content: AnyView(NotesTabView(notes: NotesStore.shared)),
-                               refresh: { NotesStore.shared.load() },
+                               refresh: { NotesStore.shared.loadInBackground() },
                                pinned: AnyView(NoteCompose(notes: NotesStore.shared))),
             catalogTab(policy, id: "rules", title: "Hooks", subtitle: "Rules, gates and hook scripts", icon: Icons.tab["rules"]!,
                        footer: "Problems sort first: a hook with no event, or one whose file is gone.",
@@ -1256,7 +1256,6 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         store.requestSystemRefresh = requestSystemRefresh
         if let b = item.button {
             b.image = switchboardGlyph()
-            b.toolTip = "Switchboard: agent policy and system switches"
             b.target = self
             b.action = #selector(toggle(_:))
             // The tooltip would cover the preview; the preview says more.
@@ -1265,8 +1264,10 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
                              panelOpen: { [weak self] in self?.popover.isShown ?? false })
             let d = IconDot(on: b)
             dot = d
+            // One writer for the dot: this and updateDot both go through renderDot,
+            // so a change in what waits never erases a red "something is wrong".
             dotWatch = store.$needsWaiting.combineLatest(store.$hoverItems)
-                .sink { n, items in d.show(n > 0 && items.contains(.iconDot), color: menuYellow) }
+                .sink { [weak self] n, items in self?.renderDot(waiting: n, items: items) }
         }
         concerns = SwitchboardConcerns.all(policy: store, usage: usage, lights: lights, controls: controls)
         let host = NSHostingController(rootView: PolicyPanel(concerns: concerns, store: store))
@@ -1355,8 +1356,14 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
 
     /// The icon dot: red while something is wrong, yellow while something waits.
     func updateDot(problems: Bool) {
-        let on = store.hoverItems.contains(.iconDot)
-        dot?.show(on && (problems || store.needsWaiting > 0), color: problems ? .systemRed : menuYellow)
+        lastProblems = problems
+        renderDot(waiting: store.needsWaiting, items: store.hoverItems)
+    }
+    private var lastProblems = false
+
+    /// Takes the values as arguments: a @Published sink fires before the store property changes.
+    private func renderDot(waiting n: Int, items: Set<HoverItem>) {
+        dot?.show(items.contains(.iconDot) && (lastProblems || n > 0), color: lastProblems ? .systemRed : menuYellow)
     }
 
     func popoverDidClose(_ notification: Notification) {
@@ -1430,7 +1437,6 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     if tab == "home" { lights.loadForSnapshot() }
     let controls = ControlsStore()
     // Paired Bluetooth devices would raise a permission prompt; a snapshot never does.
-    ControlsTabView.loadsOnAppear = false
     if tab == "controls" { controls.load(devices: false) }
     // --demo-states plants one failure per tab so their look can be checked.
     if CommandLine.arguments.contains("--demo-states") {

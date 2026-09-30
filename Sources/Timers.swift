@@ -27,7 +27,11 @@ func timerColor(_ name: String) -> Color { timerColors.first { $0.0 == name }?.1
 
 final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     static let shared = TimerStore()
-    private static let key = "switchboard.timers.countdowns"
+    /// Probes and demo snapshots point this elsewhere so they never touch real timers.
+    static var key = "switchboard.timers.countdowns"
+
+    /// Stops this store's clocks, for stores a probe makes and drops.
+    func stop() { tick?.invalidate(); tick = nil; silence() }
 
     @Published private(set) var timers: [SBTimer] = []
     /// Ticks once a second while a timer runs, so countdowns redraw.
@@ -140,9 +144,12 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
         now = Date()
         var changed = false
         for i in timers.indices where timers[i].running && timers[i].fireAt <= now {
-            timers[i].firedAt = now
+            // One that came due while the app was closed keeps its real time and
+            // does not ring at launch as if it just went off.
+            let late = now.timeIntervalSince(timers[i].fireAt) > 120
+            timers[i].firedAt = late ? timers[i].fireAt : now
             changed = true
-            fire(timers[i])
+            if late { dlog("timer went off while closed: \(timers[i].label)") } else { fire(timers[i]) }
         }
         if changed { save() }
         if !timers.contains(where: \.running) { tick?.invalidate(); tick = nil }
@@ -298,11 +305,13 @@ struct TimerRow: View {
 /// Starts a one-second timer, lets it go off, extends and clears it, and
 /// leaves the saved list as it found it.
 func probeTimers() -> String {
-    let key = "switchboard.timers.countdowns"
-    let before = UserDefaults.standard.data(forKey: key)
-    defer { UserDefaults.standard.set(before, forKey: key) }
-    UserDefaults.standard.removeObject(forKey: key)
+    // A key of the probe's own: real timers are never read, cleared or rewritten.
+    let realKey = TimerStore.key
+    TimerStore.key = "switchboard.timers.countdowns.probe"
+    defer { UserDefaults.standard.removeObject(forKey: TimerStore.key); TimerStore.key = realKey }
+    UserDefaults.standard.removeObject(forKey: TimerStore.key)
     let s = TimerStore()
+    defer { s.stop() }
     s.chimeAloud = false
     var lines: [String] = []
     func check(_ name: String, _ ok: Bool) { lines.append("\(ok ? "ok  " : "FAIL") \(name)") }
@@ -320,12 +329,26 @@ func probeTimers() -> String {
     let quiet = Date().addingTimeInterval(2.5)
     while Date() < quiet { pump(0.1) }
     check("opening the panel silences it", s.chimes == heard)
-    check("the fired state is saved", TimerStore().timers.first?.firedAt != nil)
+    let reopened = TimerStore()
+    check("the fired state is saved", reopened.timers.first?.firedAt != nil)
+    reopened.stop()
     s.extend(s.timers[0], by: 60)
     check("+ restarts a finished timer for a minute", s.running.count == 1 && abs(s.running[0].fireAt.timeIntervalSinceNow - 60) < 2)
     s.remove(s.timers[0])
     check("clearing removes it", s.timers.isEmpty)
     check("clock reads minutes and hours", clock(65) == "1:05" && clock(3725) == "1:02:05")
+
+    // One that came due ten minutes ago, while the app was closed.
+    let missed = SBTimer(label: "Missed", color: "red", start: Date().addingTimeInterval(-900), fireAt: Date().addingTimeInterval(-600))
+    if let d = try? JSONEncoder().encode([missed]) { UserDefaults.standard.set(d, forKey: TimerStore.key) }
+    let relaunched = TimerStore()
+    relaunched.chimeAloud = false
+    pump(1.5)
+    let m = relaunched.timers.first
+    check("a timer missed while closed keeps the time it was due",
+          m?.firedAt.map { abs($0.timeIntervalSince(missed.fireAt)) < 1 } ?? false)
+    check("and does not ring at launch", relaunched.chimes == 0)
+    relaunched.stop()
     lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
     return lines.joined(separator: "\n")
 }

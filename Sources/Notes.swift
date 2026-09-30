@@ -130,7 +130,10 @@ final class NotesStore: ObservableObject {
     static var dir: String {
         let chosen = UserDefaults.standard.string(forKey: folderKey)
         let d = (chosen?.isEmpty == false ? chosen! : defaultDir)
-        try? FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true)
+        // Rows read a note's path on every redraw: a stat, not a create, when it exists.
+        if !FileManager.default.fileExists(atPath: d) {
+            try? FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true)
+        }
         return d
     }
     /// The saved order lives beside the default notes, but never inside a
@@ -143,7 +146,18 @@ final class NotesStore: ObservableObject {
 
     // ── Reading and writing the files ───────────────────────────────────────
 
-    func load() {
+    /// Reads the folder off the main thread, for the panel and at launch; a
+    /// big chosen folder then never makes the panel stutter as it opens.
+    func loadInBackground() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let read = Self.readAll()
+            DispatchQueue.main.async { self.notes = read }
+        }
+    }
+
+    func load() { notes = Self.readAll() }
+
+    private static func readAll() -> [Note] {
         let fm = FileManager.default
         let files = ((try? fm.contentsOfDirectory(atPath: Self.dir)) ?? []).filter { $0.hasSuffix(".md") }
         let read = files.compactMap { f -> Note? in
@@ -152,7 +166,7 @@ final class NotesStore: ObservableObject {
         }
         let order = (fm.contents(atPath: Self.orderPath).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String] }) ?? []
         // Newest first where the saved order has no place for a note yet.
-        notes = applyOrder(read.sorted { $0.created > $1.created }, order)
+        return applyOrder(read.sorted { $0.created > $1.created }, order)
     }
 
     /// Live notes in the owner's order, then expired ones.

@@ -204,8 +204,11 @@ struct NoteRow: View {
     }
 
     /// First line of the body, the tags, and a word for any expiry or reminder.
+    private static let shortDate: DateFormatter = { let f = DateFormatter(); f.dateFormat = "d MMM, h:mm a"; return f }()
+    private static let longDate: DateFormatter = { let f = DateFormatter(); f.dateFormat = "EEE d MMM, h:mm a"; return f }()
+
     private var summary: String {
-        let f = DateFormatter(); f.dateFormat = "d MMM, h:mm a"
+        let f = Self.shortDate
         var parts: [String] = []
         if let first = note.body.components(separatedBy: "\n").first(where: { !$0.isEmpty }) { parts.append(first) }
         if !note.tags.isEmpty { parts.append(note.tags.map { "#" + $0 }.joined(separator: " ")) }
@@ -232,7 +235,7 @@ struct NoteRow: View {
     /// Save button to find; collapsing the row saves too.
     private var editor: some View {
         let d = Binding(get: { draft ?? note }, set: { draft = $0 })
-        let f = DateFormatter(); f.dateFormat = "EEE d MMM, h:mm a"
+        let f = Self.longDate
         return VStack(alignment: .leading, spacing: 8) {
             TextField("Title", text: d.title).textFieldStyle(.roundedBorder).font(PT.label)
             TextEditor(text: d.body).font(PT.label).frame(height: 80)

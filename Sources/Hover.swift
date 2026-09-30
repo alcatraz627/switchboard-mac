@@ -1,8 +1,8 @@
 // Hover.swift
 // The hover preview: a small card under the menu bar icon while the pointer
 // rests on it, carrying only what the owner chose in Settings (limits, what
-// waits, problems, timers, services). Everything shown is already in memory;
-// hovering never starts a read.
+// waits, problems, timers, services). Everything shown is already in memory
+// except the Claude limits, which are one small file read per hover.
 
 import AppKit
 import SwiftUI
@@ -88,6 +88,8 @@ final class HoverPeek: NSObject {
         // A tracking area on a status item never reaches a non-view owner, so the
         // pointer is checked against the icon's frame five times a second instead.
         poll = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.check() }
+        // Lets macOS batch this wake-up with others; a hover a tenth of a second late is unnoticeable.
+        poll?.tolerance = 0.1
     }
 
     private func check() {
@@ -124,8 +126,9 @@ final class HoverPeek: NSObject {
 }
 
 /// Draws the preview offscreen in dark or light, for checking without a pointer.
+/// `dark` is ignored: the live card is always vibrant dark, so the snapshot is too.
 func snapshotHover(_ lines: [HoverLine], to path: String, dark: Bool) -> Bool {
-    let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)!
+    let appearance = NSAppearance(named: .vibrantDark)!
     let host = NSHostingView(rootView: HoverPreview(lines: lines).background(Color(nsColor: .windowBackgroundColor)))
     host.appearance = appearance
     host.frame = NSRect(origin: .zero, size: host.fittingSize)

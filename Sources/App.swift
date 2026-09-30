@@ -34,6 +34,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         PreferenceMigration.run()
         EditMenu.install()
         killOtherInstances()
+        // The hover card's "next reminder" needs the notes before the panel is ever opened.
+        NotesStore.shared.loadInBackground()
         if UserDefaults.standard.bool(forKey: keepAwakeKey) { setKeepAwake(true) }
 
         policyController = PolicyStatusController(
@@ -245,6 +247,9 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         let timersPending = !systemTimers.isEmpty
         DispatchQueue.global(qos: .utility).async { [weak self] in
             var s = SBSnapshot()
+            // Helper results land in `p` on worker threads, under the lock; `s` is
+            // written only by this thread. They meet after every probe has finished.
+            var p = SBSnapshot()
             // The helpers are separate processes, so they run side by side; a
             // snapshot takes as long as its slowest probe, not all of them.
             let group = DispatchGroup()
@@ -263,27 +268,27 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                     guard let v = try? JSONSerialization.jsonObject(with: Data(r.out.utf8)) else {
                         let why = r.failure ?? "\(name) gave no answer"
                         dwarn("probe failed, keeping the last value: \(why)")
-                        lock.lock(); s.probeFailures[name] = why; lock.unlock()
+                        lock.lock(); p.probeFailures[name] = why; lock.unlock()
                         return
                     }
-                    lock.lock(); apply(v); s.probeReadAt[name] = Date(); lock.unlock()
+                    lock.lock(); apply(v); p.probeReadAt[name] = Date(); lock.unlock()
                 }
             }
-            s.jobs = previous.jobs; s.wolTargets = previous.wolTargets; s.drives = previous.drives
-            s.devServers = previous.devServers; s.models = previous.models; s.git = previous.git; s.remote = previous.remote
-            s.probeReadAt = previous.probeReadAt
-            probe("jobs.py", ["list"], timeout: 8) { if let v = $0 as? [[String: Any]] { s.jobs = v } }
-            probe("wol.py", ["list"], timeout: 8) { if let v = $0 as? [[String: Any]] { s.wolTargets = v } }
-            probe("drives.py", ["list"], timeout: 30) { if let v = $0 as? [[String: Any]] { s.drives = v } }
+            p.jobs = previous.jobs; p.wolTargets = previous.wolTargets; p.drives = previous.drives
+            p.devServers = previous.devServers; p.models = previous.models; p.git = previous.git; p.remote = previous.remote
+            p.probeReadAt = previous.probeReadAt
+            probe("jobs.py", ["list"], timeout: 8) { if let v = $0 as? [[String: Any]] { p.jobs = v } }
+            probe("wol.py", ["list"], timeout: 8) { if let v = $0 as? [[String: Any]] { p.wolTargets = v } }
+            probe("drives.py", ["list"], timeout: 30) { if let v = $0 as? [[String: Any]] { p.drives = v } }
             probe("devservers.py", ["list"], timeout: 50) {
                 guard let d = $0 as? [String: Any], let v = d["servers"] as? [[String: Any]] else { return }
-                s.devServers = v
-                s.pm2Error = d["pm2_error"] as? String
+                p.devServers = v
+                p.pm2Error = d["pm2_error"] as? String
             }
-            probe("models.py", ["list"], timeout: 25) { if let v = $0 as? [String: Any] { s.models = v } }
-            probe("gitscan.py", ["list"], timeout: 90) { if let v = $0 as? [String: Any] { s.git = v } }
+            probe("models.py", ["list"], timeout: 25) { if let v = $0 as? [String: Any] { p.models = v } }
+            probe("gitscan.py", ["list"], timeout: 90) { if let v = $0 as? [String: Any] { p.git = v } }
             if Integrations.csync {
-                probe("remote.py", ["list"], timeout: 70) { if let v = $0 as? [String: Any] { s.remote = v } }
+                probe("remote.py", ["list"], timeout: 70) { if let v = $0 as? [String: Any] { p.remote = v } }
             }
             if Integrations.guardHooks && (timersPending || !Visibility.groupHidden("Guards")) {
                 s.muted = Guards.muted()
@@ -319,9 +324,17 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             let kanban = servicesShown && Integrations.kanban ? Services.probeHTTP("http://127.0.0.1:5106/api/boards") : nil
             s.awakeHolders = Self.sleepHolders()
             group.wait()
+            s.jobs = p.jobs; s.wolTargets = p.wolTargets; s.drives = p.drives
+            s.devServers = p.devServers; s.pm2Error = p.pm2Error; s.models = p.models; s.git = p.git; s.remote = p.remote
+            s.probeReadAt = p.probeReadAt; s.probeFailures = p.probeFailures
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.sbSnapshot = s
+                if self.snapshotsDone == 0, !Visibility.tabHidden("rules") {
+                    // Read Hooks once at launch too (0.2 s), so the problem count is complete.
+                    self.policyController?.store.reloadCatalog("rules", RulesCatalog.groups)
+                }
+                self.snapshotsDone += 1
                 if !self.kanbanBusy { self.kanbanUp = kanban }
                 self.refreshPanel(); self.policyController?.updateDot(problems: !self.problemTexts().isEmpty)
                 let waiters = self.snapshotWaiters
@@ -342,6 +355,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
     private var snapshotWaiters: [() -> Void] = []
     private var rerunWaiters: [() -> Void] = []
     private var snapshotRunsStarted = 0
+    private(set) var snapshotsDone = 0
 
     /// Other processes holding the Mac awake: pmset's per-process list, minus
     /// macOS's own daemons and this app. A caffeinate is named by the process
@@ -980,8 +994,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             ]
             if let editor = editor {
                 row.buttons.append(RowButton(label: "Editor", kind: .run({
-                    let out = Services.shell("/usr/bin/open", ["-a", editor, path])
-                    return out.isEmpty ? nil : out
+                    // open reports a missing app on stderr with a non-zero exit, never on stdout.
+                    Services.run("/usr/bin/open", ["-a", editor, path]).failure
                 }), help: "Open in \((editor as NSString).lastPathComponent.replacingOccurrences(of: ".app", with: ""))"))
             }
             row.buttons.append(RowButton(label: "Fetch", kind: .run({ [weak self] in
@@ -1009,10 +1023,14 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             b.children = items.map(repoRow)
             return b
         }
-        let unpushed = repos.filter { ($0["ahead"] as? Int ?? 0) > 0 }
-        let changed = repos.filter { ($0["ahead"] as? Int ?? 0) == 0 && ($0["dirty"] as? Int ?? 0) > 0 }
-        let other = repos.filter { ($0["ahead"] as? Int ?? 0) == 0 && ($0["dirty"] as? Int ?? 0) == 0 }
+        // A repo git could not read is its own kind of attention, not a worktree to tidy.
+        let unreadable = repos.filter { $0["error"] != nil }
+        let read = repos.filter { $0["error"] == nil }
+        let unpushed = read.filter { ($0["ahead"] as? Int ?? 0) > 0 }
+        let changed = read.filter { ($0["ahead"] as? Int ?? 0) == 0 && ($0["dirty"] as? Int ?? 0) > 0 }
+        let other = read.filter { ($0["ahead"] as? Int ?? 0) == 0 && ($0["dirty"] as? Int ?? 0) == 0 }
         var rows = [
+            bucket("Could not read", unreadable, tint: .systemRed, tip: "git status failed here; open one for the reason."),
             bucket("Unpushed commits", unpushed, tint: menuYellow, tip: "Commits on a branch that its own remote branch does not have yet."),
             bucket("Uncommitted changes", changed, tint: menuTeal, tip: "Files changed and not committed."),
             bucket("Worktrees to tidy", other, tint: menuTeal, tip: "Detached checkouts and worktree records whose folders are gone."),
@@ -1439,11 +1457,16 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         refreshSnapshot()
     }
 
+    /// Timers already being handled; a tick during a slow snapshot must not flip them twice.
+    private var firingDue: Set<String> = []
+
     private func fireDueSystemTimers() {
-        let due = systemTimers.filter { $0.value.until <= Date() }
+        let due = systemTimers.filter { $0.value.until <= Date() && !firingDue.contains($0.key) }
         guard !due.isEmpty else { return }
+        firingDue.formUnion(due.keys)
         refreshSnapshot { [weak self] in
             guard let self = self else { return }
+            defer { self.firingDue.subtract(due.keys) }
             for (key, t) in due {
                 self.systemTimers[key] = nil
                 if let row = self.systemRow(key), row.isOn != t.restoreOn {
@@ -1571,7 +1594,12 @@ extension SwitchboardApp {
         var out: [HoverLine] = []
         if chosen.contains(.problems) {
             let problems = problemTexts()
-            if problems.isEmpty { out.append(.note(icon: "checkmark.circle", text: "All clear", tint: .green)) }
+            // "All clear" only once there has been something to judge.
+            if snapshotsDone == 0 {
+                out.append(.note(icon: "hourglass", text: "Checking…", tint: .secondary))
+            } else if problems.isEmpty {
+                out.append(.note(icon: "checkmark.circle", text: "All clear", tint: .green))
+            }
             out += problems.prefix(3).map { .note(icon: "exclamationmark.triangle.fill", text: $0, tint: .orange) }
             if problems.count > 3 { out.append(.note(icon: "ellipsis", text: "\(problems.count - 3) more in the panel", tint: .secondary)) }
         }
@@ -1595,21 +1623,19 @@ extension SwitchboardApp {
     func problemTexts() -> [String] {
         let s = sbSnapshot
         var problems: [String] = []
-        do {
-            if !s.probeFailures.isEmpty {
-                problems.append("\(s.probeFailures.count == 1 ? "1 source" : "\(s.probeFailures.count) sources") could not be read: "
-                                + s.probeFailures.keys.sorted().joined(separator: ", "))
-            }
-            for j in s.jobs where j["failing"] as? Bool == true {
-                problems.append("\((j["name"] as? String) ?? "a job") failed (exit \((j["last_exit"] as? Int).map(String.init) ?? "?"))")
-            }
-            let off = s.gates.filter { if case .on = $0.kind { return false }; return true }.count
-            if off > 0 { problems.append(off == 1 ? "1 gate is off" : "\(off) gates are off") }
-            problems.append(contentsOf: timerFailures.map { "\($0.key): \($0.value)" })
-            let unwired = (policyController?.store.catalogs["rules"] ?? []).flatMap(\.rows)
-                .filter { $0.note.hasPrefix("not wired") || $0.note.hasPrefix("missing file") }.count
-            if unwired > 0 { problems.append(unwired == 1 ? "1 hook has no event" : "\(unwired) hooks have no event") }
+        if !s.probeFailures.isEmpty {
+            problems.append("\(s.probeFailures.count == 1 ? "1 source" : "\(s.probeFailures.count) sources") could not be read: "
+                            + s.probeFailures.keys.sorted().joined(separator: ", "))
         }
+        for j in s.jobs where j["failing"] as? Bool == true {
+            problems.append("\((j["name"] as? String) ?? "a job") failed (exit \((j["last_exit"] as? Int).map(String.init) ?? "?"))")
+        }
+        let off = s.gates.filter { if case .on = $0.kind { return false }; return true }.count
+        if off > 0 { problems.append(off == 1 ? "1 gate is off" : "\(off) gates are off") }
+        problems.append(contentsOf: timerFailures.map { "\($0.key): \($0.value)" })
+        let unwired = (policyController?.store.catalogs["rules"] ?? []).flatMap(\.rows)
+            .filter { $0.note.hasPrefix("not wired") || $0.note.hasPrefix("missing file") }.count
+        if unwired > 0 { problems.append(unwired == 1 ? "1 hook has no event" : "\(unwired) hooks have no event") }
         return problems
     }
 }

@@ -93,8 +93,11 @@ enum NeedsYou {
             out.append(item)
         }
 
-        // Approvals already typed whose session ended before using them.
-        for a in PushApprovals.armed(liveSessionIDs: Set(live.keys)) where !a.sessionIsLive {
+        // Approvals already typed whose session ended before using them. A session
+        // with a held push already lists its approval file there, so it gets one row.
+        let pushSessions = Set(out.filter { $0.kind == .push }.map(\.sessionID))
+        for a in PushApprovals.armed(liveSessionIDs: Set(live.keys), root: root)
+        where !a.sessionIsLive && !pushSessions.contains(a.sessionID) {
             out.append(NeedItem(id: root + "/" + a.file, kind: .armedApproval,
                                 title: "Unused push approval", sessionID: a.sessionID, sessionDir: nil,
                                 since: a.armedAt, approveLine: nil, files: [root + "/" + a.file],
@@ -287,6 +290,12 @@ func probeApprove() -> String {
         check("approve reports success", NeedsYou.approve(item) == nil)
         check("the approval file the gate reads exists", fm.fileExists(atPath: dir + "/.push-approved-" + sid))
         check("the held push itself is left for the gate to clear", fm.fileExists(atPath: dir + "/.push-nonce-" + sid))
+        let after = NeedsYou.items()
+        check("an ended session holding a push and its approval shows one row",
+              after.filter { $0.sessionID == sid && $0.kind != .ask }.count == 1,
+              after.filter { $0.sessionID == sid }.map(\.title).joined(separator: ", "))
+        check("every item is read from the probe folder, never ~/.claude",
+              after.allSatisfy { $0.files.allSatisfy { $0.hasPrefix(dir) } })
         // Cancel after approve must leave neither file, as typing "cancel push" does.
         check("cancel reports success", NeedsYou.cancel(item) == nil)
         check("cancel removes the held push", !fm.fileExists(atPath: dir + "/.push-nonce-" + sid))

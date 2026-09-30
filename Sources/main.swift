@@ -131,6 +131,11 @@ if let out = argAfter("--snapshot") {
     let tab = argAfter("--tab") ?? "agents"
     BulbRow.startExpanded = args.contains("--expand")
     SystemRowView.startExpanded = args.contains("--expand")
+    // Demo timers go under a key of their own, set before the store first loads.
+    if args.contains("--demo-states") {
+        TimerStore.key = "switchboard.timers.countdowns.demo"
+        UserDefaults.standard.removeObject(forKey: TimerStore.key)
+    }
     if args.contains("--notifications-off") { TimerStore.shared.notificationsOff = true }
     // Tabs that draw Machine groups, their own or ones moved to them, need the probe.
     let usesSystem = tab == "system" || tab == "remote" || SystemTabView.groupHome.values.contains(tab)

@@ -185,13 +185,14 @@ struct PushApproval {
 }
 
 enum PushApprovals {
-    static func armed(liveSessionIDs: Set<String>) -> [PushApproval] {
+    /// `root` lets a probe point this at a scratch folder instead of ~/.claude.
+    static func armed(liveSessionIDs: Set<String>, root: String = SwitchboardPaths.gccRoot) -> [PushApproval] {
         let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(atPath: SwitchboardPaths.gccRoot)
+        guard let files = try? fm.contentsOfDirectory(atPath: root)
         else { return [] }
         return files.filter { $0.hasPrefix(".push-approved-") }.map { f in
             let sid = String(f.dropFirst(".push-approved-".count))
-            let when = (try? fm.attributesOfItem(atPath: SwitchboardPaths.gccRoot + "/" + f)[.creationDate]) as? Date
+            let when = (try? fm.attributesOfItem(atPath: root + "/" + f)[.creationDate]) as? Date
             return PushApproval(file: f, sessionID: sid, armedAt: when,
                                 sessionIsLive: liveSessionIDs.contains(sid))
         }.sorted { ($0.armedAt ?? .distantPast) < ($1.armedAt ?? .distantPast) }

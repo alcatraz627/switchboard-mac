@@ -346,11 +346,7 @@ struct ControlsTabView: View {
             }
         }
         .padding(SBStyle.gap)
-        .onAppear { if Self.loadsOnAppear { controls.load(devices: true) } }
     }
-
-    /// Off for headless snapshots, which must never raise a permission prompt.
-    static var loadsOnAppear = true
 
     // ── Pieces ──
 
