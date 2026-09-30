@@ -16,7 +16,7 @@ private func lazyRead(_ read: @escaping () throws -> [CatalogEntry]) -> () throw
     }
 }
 
-// ── Rules & Hooks: behavioural rules and every hook script ──────────────────
+// ── Hooks: behavioural rules and every hook script ──────────────────
 
 enum RulesCatalog {
     static func groups() -> [SystemGroup] {
@@ -172,7 +172,7 @@ enum RulesCatalog {
     }
 }
 
-// ── Plugins & MCP: what extends Claude Code, everywhere or in one project ───
+// ── Claude MCP: what extends Claude Code, everywhere or in one project ───
 
 enum PluginsCatalog {
     /// Section titles starting "Project" hold things that apply in one repo;
@@ -283,7 +283,7 @@ enum PluginsCatalog {
             if let url = s["url"] as? String {
                 how = "\(type) to \(URL(string: url)?.host ?? "a URL")"
             } else {
-                let cmd = ((s["command"] as? String) ?? "?" as NSString as String)
+                let cmd = ((s["command"] as? String) ?? "?")
                 let args = (s["args"] as? [String] ?? []).map(redact)
                 how = ([(cmd as NSString).lastPathComponent] + args).joined(separator: " ")
             }
@@ -757,7 +757,7 @@ enum LibraryCatalog {
         .sorted { $0.name.lowercased() < $1.name.lowercased() }
     }
 
-    /// Every script except hooks (Rules & Hooks lists those) and tests, named
+    /// Every script except hooks (Hooks lists those) and tests, named
     /// by its path under scripts/, summarised by its own header comment.
     static func scripts() throws -> [CatalogEntry] {
         let root = gcc + "/scripts"

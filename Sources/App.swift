@@ -1362,7 +1362,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                     let err = Self.helperError(Services.run("/usr/bin/env", ["python3", wol, "remove", mac]))
                     self?.refreshSnapshot()
                     return err
-                }), help: "Remove it from the saved devices"),
+                }), help: "Remove it from the saved devices",
+                   confirm: "Forget this device (\(mac))? Waking it again means adding it back by hand."),
             ]
             return r
         }

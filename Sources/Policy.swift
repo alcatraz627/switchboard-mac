@@ -305,7 +305,7 @@ final class PolicyStore: ObservableObject {
     @Published var systemGroups: [SystemGroup] = []
     /// The Remote tab's rows (csync hosts), built by the same snapshot.
     @Published var remoteGroups: [SystemGroup] = []
-    /// Each list tab's sections (Library, Rules & Hooks, Ledger…), by tab id.
+    /// Each list tab's sections (Library, Hooks, Ledger…), by tab id.
     @Published var catalogs: [String: [SystemGroup]] = [:]
     /// What each list tab's search field holds, by tab id.
     @Published var queries: [String: String] = [:]

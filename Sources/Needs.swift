@@ -191,7 +191,8 @@ enum NeedsYou {
             let errs = items.compactMap { i in cancel(i).map { "\(i.title): \($0)" } }
             DispatchQueue.main.async(execute: refresh)
             return errs.isEmpty ? nil : "\(errs.count) of \(items.count) not cleared. " + errs.joined(separator: "; ")
-        }), help: "Clear all \(items.count)", doing: "clear them")
+        }), help: "Clear all \(items.count)", doing: "clear them",
+           confirm: "Clear all \(items.count) left by ended sessions? Their held pushes and approvals are removed.")
     }
 
     private static func itemRows(_ items: [NeedItem], refresh: @escaping () -> Void) -> [SystemRow] {

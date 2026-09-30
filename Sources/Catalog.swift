@@ -1,6 +1,6 @@
 // Catalog.swift
-// The shared machinery behind every list tab (Library, Rules & Hooks, Ledger,
-// Plugins & MCP): one entry shape, one row that opens to its details, a path
+// The shared machinery behind every list tab (Library, Hooks, Ledger,
+// Claude MCP): one entry shape, one row that opens to its details, a path
 // that copies on click, and a section that says so when its source could not
 // be read. The readers that fill it live in CatalogReaders.swift.
 
@@ -48,9 +48,6 @@ enum Catalog {
         }
     }
 
-    /// Longest summary under a name; the whole text is one click away in the details.
-    static let summaryChars = 180
-
     /// A tab's sections, skipping those hidden in Settings without reading them.
     static func sections(_ tab: String, _ readers: [(String, () throws -> [CatalogEntry])]) -> [SystemGroup] {
         let hidden = Visibility.hiddenTitles(tab)
@@ -58,11 +55,8 @@ enum Catalog {
     }
 
     static func row(_ e: CatalogEntry, key: String) -> SystemRow {
-        var summary = e.summary.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "\n", with: " ")
-        if summary.count > summaryChars {
-            let cut = summary.prefix(summaryChars)
-            summary = String(cut[..<(cut.lastIndex(of: " ") ?? cut.endIndex)]) + "…"
-        }
+        // The summary is already one sentence; it wraps in full rather than ending in "…".
+        let summary = e.summary.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "\n", with: " ")
         let note = [e.tag, summary.isEmpty ? nil : summary].compactMap { $0 }.joined(separator: " · ")
         let state: SystemRow.State = e.count.map { .count($0.0, $0.1) } ?? .off
         var r = SystemRow(label: e.name, state: state, note: note, tip: e.summary)
@@ -213,7 +207,7 @@ enum Catalog {
             break
         }
         let sentence = firstSentence(text)
-        return sentence.count > 220 ? String(sentence.prefix(217)) + "…" : sentence
+        return sentence
     }
 
     /// The .md files directly in a folder, or a CatalogError saying the

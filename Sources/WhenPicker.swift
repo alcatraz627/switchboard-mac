@@ -141,6 +141,7 @@ struct WhenPanel: View {
     var choices: [String] = []
     var extra: [(String, () -> Void)] = []
     var initial: Date? = nil
+    var initialChoice = 0
     let onPick: (Date, Int) -> Void
     var dismiss: () -> Void = {}
 
@@ -153,6 +154,10 @@ struct WhenPanel: View {
     private var typedDate: Date? { WhenText.parse(typed) }
 
     var body: some View {
+        panel.onAppear { choice = initialChoice }
+    }
+
+    private var panel: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(.system(size: 12, weight: .semibold))
             if choices.count > 1 {
@@ -226,6 +231,8 @@ struct WhenButton<Label: View>: View {
     var choices: [String] = []
     var extra: [(String, () -> Void)] = []
     var initial: Date? = nil
+    /// Which of `choices` is picked when it opens, such as a reminder's current repeat.
+    var initialChoice = 0
     let onPick: (Date, Int) -> Void
     @ViewBuilder let label: () -> Label
     @State private var open = false
@@ -235,7 +242,7 @@ struct WhenButton<Label: View>: View {
             .buttonStyle(.plain)
             .popover(isPresented: $open, arrowEdge: .bottom) {
                 WhenPanel(title: title, presets: presets, choices: choices, extra: extra, initial: initial,
-                          onPick: onPick, dismiss: { open = false })
+                          initialChoice: initialChoice, onPick: onPick, dismiss: { open = false })
             }
     }
 }

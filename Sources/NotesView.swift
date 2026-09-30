@@ -29,9 +29,15 @@ struct NoteCompose: View {
                 .focused($focused)
                 icon(expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                      expanded ? "Back to one line" : "More room: a title line, then the body") { expanded.toggle() }
+                if expanded {
+                    // Enter makes a new line here, so saving is ⌘↩ or this button; the clipboard is left alone.
+                    icon("checkmark", "Save (⌘↩)") { save(copyPath: false) }
+                        .keyboardShortcut(.return, modifiers: .command)
+                }
                 icon("doc.on.clipboard", "Save what is on the clipboard as a note") {
                     guard let s = NSPasteboard.general.string(forType: .string), !s.isEmpty else { show("The clipboard has no text"); return }
-                    if notes.add(s) != nil { show("Saved from the clipboard") }
+                    let before = notes.notes.count
+                    if notes.add(s) != nil { show(notes.notes.count == before ? "Already saved" : "Saved from the clipboard") }
                 }
                 icon("tray.and.arrow.down", "Save and copy the note's path") { save(copyPath: true) }
             }
@@ -48,7 +54,10 @@ struct NoteCompose: View {
 
     private func save(copyPath: Bool) {
         let before = notes.notes.count
-        guard let n = notes.add(text) else { if text.isEmpty { show("Type something first") }; return }
+        guard let n = notes.add(text) else {
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { show("Type something first") }
+            return
+        }
         text = ""
         if copyPath {
             NSPasteboard.general.clearContents()
@@ -260,6 +269,7 @@ struct NoteRow: View {
                            choices: ["Once", "Every day", "Every week", "Every month"],
                            extra: d.wrappedValue.remindAt == nil ? [] : [("No reminder", { d.wrappedValue.remindAt = nil; expireWithReminder = false })],
                            initial: d.wrappedValue.remindAt,
+                           initialChoice: [.never, .daily, .weekly, .monthly].firstIndex(of: d.wrappedValue.remindRepeat) ?? 0,
                            onPick: { t, i in
                                d.wrappedValue.remindAt = t
                                d.wrappedValue.remindRepeat = [.never, .daily, .weekly, .monthly][i]

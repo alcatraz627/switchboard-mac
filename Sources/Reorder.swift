@@ -34,9 +34,24 @@ struct ReorderStack<Item: Identifiable, Row: View>: View where Item.ID == String
             .contentShape(Rectangle())
             .onDrag {
                 dragging = id
+                watchDragEnd()
                 return NSItemProvider(object: id as NSString)
             }
             .help("Drag to reorder")
+    }
+
+    /// A drop outside every row, or Esc, never reaches performDrop. Once the
+    /// button is up, a drag still marked live is ended here and its order saved.
+    private func watchDragEnd() {
+        Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { t in
+            guard NSEvent.pressedMouseButtons == 0 else { return }
+            t.invalidate()
+            DispatchQueue.main.async {
+                guard dragging != nil else { return }   // performDrop already finished it
+                dragging = nil
+                commit()
+            }
+        }
     }
 }
 

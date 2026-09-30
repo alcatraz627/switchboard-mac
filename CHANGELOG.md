@@ -11,6 +11,13 @@
 - An older copy of the app, such as one started by a notification click, now
   quits instead of closing a newer one that is already running.
 - A user guide covering every tab: `docs/guide.md`.
+- **Review fixes**: typed times read "5 min", "2 hours" and "1d30m", and take
+  "tomorrow" from the picker's own clock; a terminal-started dev server offers
+  Kill; the git scan never takes the index lock; more token shapes are
+  redacted; a due timer never fires twice and one missed while the app was
+  closed stays quiet; notes load off the main thread; an ended session shows
+  one row; Clear all and Forget ask first; list summaries wrap instead of
+  ending in "…"; ⌘↩ saves an expanded note; a reminder reopens on its repeat.
 
 - **The panel opens fast again**: the Hooks tab read took about 19 s of CPU on
   every open and now takes 0.2 s, and one open runs one snapshot, not two.
