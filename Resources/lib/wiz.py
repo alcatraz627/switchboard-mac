@@ -65,11 +65,14 @@ def load_names(strict=False):
 
 def local_ip():
     # The address the machine would use to reach the internet: the LAN one.
-    # No packet is sent; connect() on UDP only picks a route.
+    # No packet is sent; connect() on UDP only picks a route. With no route
+    # (Wi-Fi off, no network) the bulbs only use it to reply, so any will do.
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("8.8.8.8", 80))
         return s.getsockname()[0]
+    except OSError:
+        return "0.0.0.0"
     finally:
         s.close()
 
@@ -152,20 +155,29 @@ def discover(timeout):
     next_send = 0.0
     while time.time() < end:
         if time.time() >= next_send:
-            s.sendto(msg, ("255.255.255.255", PORT))
-            for mac, ip in known.items():
-                if mac not in found:
-                    s.sendto(msg, (ip, PORT))
+            # A send fails with no network or no route to one address; the
+            # others, and the next round, still go out.
+            for target in [("255.255.255.255", PORT)] + [(ip, PORT) for mac, ip in known.items() if mac not in found]:
+                try:
+                    s.sendto(msg, target)
+                except OSError:
+                    pass
             next_send = time.time() + 0.6
         try:
             data, addr = s.recvfrom(4096)
-            r = json.loads(data).get("result", {})
-            if r.get("mac"):
-                found[r["mac"]] = addr[0]
         except socket.timeout:
-            pass
-        except (OSError, ValueError):
+            continue
+        except OSError:
             break
+        # Anything on the LAN can answer on this port; a packet that is not a
+        # bulb's reply is skipped, never the end of the search.
+        try:
+            reply = json.loads(data)
+        except ValueError:
+            continue
+        r = reply.get("result") if isinstance(reply, dict) else None
+        if isinstance(r, dict) and r.get("mac"):
+            found[r["mac"]] = addr[0]
     s.close()
     if found:
         known.update(found)
@@ -241,7 +253,23 @@ def main():
         if not r or r.get("success") is not True:
             out({"error": f"bulb {ip} did not confirm the change"}, 1)
         mac = (ask_retry(ip, "getSystemConfig") or {}).get("mac", "")
-        out(bulb_state(ip, mac, load_names()))
+        b = bulb_state(ip, mac, load_names())
+        if not b["reachable"]:
+            # The bulb confirmed the change, then missed the read-back: show
+            # what it confirmed rather than an off bulb.
+            b.update(reachable=True, confirmed_only=True)
+            if "state" in params:
+                b["on"] = params["state"]
+            for k in ("dimming", "temp", "speed"):
+                if k in params:
+                    b[k] = params[k]
+            if "sceneId" in params:
+                b["scene"], b["scene_name"] = params["sceneId"], SCENES.get(params["sceneId"])
+            if "r" in params:
+                b["rgb"] = [params["r"], params["g"], params["b"]]
+            if "state" not in params:
+                b["on"] = True   # every other change is made to a lit bulb
+        out(b)
     elif cmd == "name" and len(args) == 3:
         names = load_names(strict=True)
         if args[2]:
@@ -261,4 +289,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except OSError as e:
+        # A save that could not be written (disk full, permissions): say so in
+        # the helper's own JSON shape instead of a traceback.
+        out({"error": f"could not save: {e.strerror or e}"}, 1)

@@ -35,6 +35,10 @@ def git(repo, *args, timeout=10):
         return r.returncode, r.stdout, r.stderr
     except subprocess.TimeoutExpired:
         return 1, "", f"git {args[0]} timed out"
+    except FileNotFoundError:
+        # No git at all: every repo would fail the same way, so the whole
+        # scan fails with the reason instead of reading as "0 clean".
+        raise RuntimeError("git is not installed or not on PATH, so no repo could be read")
 
 
 def find_repos():
@@ -157,13 +161,20 @@ def main():
     a = sys.argv[1:]
     cmd = a[0] if a else "help"
     if cmd == "list":
-        print(json.dumps(("--fresh" not in a and cached()) or scan()))
+        try:
+            print(json.dumps(("--fresh" not in a and cached()) or scan()))
+        except RuntimeError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(2)
     elif cmd in ("fetch", "prune") and len(a) == 2:
         repo = os.path.realpath(a[1])
         # Only repos under the scan root: the panel never touches anything else.
         if not repo.startswith(os.path.realpath(ROOT) + os.sep) or not os.path.exists(os.path.join(repo, ".git")):
             answer(1, "not a repository under ~/Code")
-        code, _, err = git(repo, *(["fetch", "--quiet"] if cmd == "fetch" else ["worktree", "prune"]), timeout=60)
+        try:
+            code, _, err = git(repo, *(["fetch", "--quiet"] if cmd == "fetch" else ["worktree", "prune"]), timeout=60)
+        except RuntimeError as e:
+            answer(1, str(e))
         if code == 0:
             try:
                 os.remove(CACHE)   # the next list shows the new state

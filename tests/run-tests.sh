@@ -103,6 +103,8 @@ kept="$(python3 Resources/lib/wiz.py discover --timeout 1)"
 [[ "$kept" == *'"mac": "aa0000000001"'*'"reachable": false'* ]] \
   && ok "a known bulb that misses a scan stays listed as not answering" \
   || bad "known bulb dropped from the scan: ${kept:0:160}"
+eq "discovery survives noise on the port; a confirmed change reads as done" "discover:found set:on" \
+   "$(env SWITCHBOARD_STATE="$WORK/wiz-probe" python3 tests/fixtures/wiz-probe.py)"
 check "the Home tab renders with colour strips open" "$BIN" --snapshot "$WORK/home-expanded.png" --tab home --expand
 
 section "machine helpers (jobs.py, wol.py)"
@@ -125,6 +127,8 @@ eq "dbservices.py refuses a label outside homebrew.mxcl" 1 "$(rc python3 Resourc
 eq "dbservices.py stop of an unknown homebrew label fails" 1 "$(rc python3 Resources/lib/dbservices.py stop homebrew.mxcl.no-such-db)"
 check "models.py list reports pressure and mem-guard" python3 -c "import json,subprocess;d=json.loads(subprocess.run(['python3','Resources/lib/models.py','list'],capture_output=True,text=True,timeout=30).stdout);assert d['pressure'] and 'guard' in d"
 eq "models.py refuses an unknown verb"      64 "$(rc python3 Resources/lib/models.py warm sideways)"
+check "models.py says the warm tool is missing instead of a traceback" python3 -c "import json,subprocess,os;r=subprocess.run(['python3','Resources/lib/models.py','warm','on'],capture_output=True,text=True,env=dict(os.environ,HOME='$WORK'));assert r.returncode==1 and 'warm tool is missing' in json.loads(r.stdout)['error'], r"
+check "gitscan.py fails the list with the reason when git is missing" python3 -c "import subprocess,sys;r=subprocess.run([sys.executable,'Resources/lib/gitscan.py','list','--fresh'],capture_output=True,text=True,timeout=120,env={'PATH':'/bin','HOME':'$HOME'});assert r.returncode==2 and 'git is not installed' in r.stderr, r"
 check "remote.py list reports hosts and checks" python3 -c "import json,subprocess;d=json.loads(subprocess.run(['python3','Resources/lib/remote.py','list'],capture_output=True,text=True,timeout=90).stdout);assert isinstance(d['hosts'],list) and isinstance(d['checks'],list)"
 eq "remote.py refuses an unknown host"     1 "$(rc python3 Resources/lib/remote.py shot no-such-host-xyz)"
 check "gitscan.py list reports repos and a clean count" python3 -c "import json,subprocess;d=json.loads(subprocess.run(['python3','Resources/lib/gitscan.py','list'],capture_output=True,text=True,timeout=120).stdout);assert isinstance(d['repos'],list) and d['clean']>=0"

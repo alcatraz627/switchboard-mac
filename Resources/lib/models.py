@@ -106,7 +106,12 @@ def main():
         except OSError as e:
             answer(False, f"Ollama did not answer: {e}")
     elif cmd == "warm" and len(a) == 2 and a[1] in ("on", "off"):
-        r = subprocess.run([os.path.join(SUITE, "bin", "warm"), a[1]], capture_output=True, text=True, timeout=120)
+        try:
+            r = subprocess.run([os.path.join(SUITE, "bin", "warm"), a[1]], capture_output=True, text=True, timeout=120)
+        except FileNotFoundError:
+            answer(False, f"the warm tool is missing: {os.path.join(SUITE, 'bin', 'warm')}")
+        except subprocess.TimeoutExpired:
+            answer(False, "warm did not finish within 2 minutes")
         answer(r.returncode == 0, (r.stderr or r.stdout).strip())
     elif cmd == "guard" and len(a) == 2 and a[1] in ("on", "off"):
         if a[1] == "off":
@@ -126,8 +131,11 @@ def main():
         except OSError:
             pass
         py = os.path.join(SUITE, ".venv", "bin", "python")
-        subprocess.Popen([py if os.path.exists(py) else "python3", os.path.join(SUITE, "scripts", "mem-guard.py")],
-                         cwd=SUITE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        try:
+            subprocess.Popen([py if os.path.exists(py) else "python3", os.path.join(SUITE, "scripts", "mem-guard.py")],
+                             cwd=SUITE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError as e:
+            answer(False, f"mem-guard could not be started: {e.strerror or e}")
         # It writes its pid file once it is up; wait briefly so the answer is honest.
         for _ in range(20):
             if guard_running():
