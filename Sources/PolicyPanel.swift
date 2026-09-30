@@ -180,7 +180,8 @@ struct PolicyPanel: View {
     /// Pins a tab for snapshots; nil follows the owner's last choice.
     var forcedTab: String? = nil
     @State private var contentHeight: CGFloat = 0
-    @AppStorage("policyPanel.tab") private var storedTab = "agents"
+    static let tabKey = "policyPanel.tab"
+    @AppStorage(PolicyPanel.tabKey) private var storedTab = "agents"
 
     /// Visible tabs in the owner's order, so a drag in Settings moves the bar at once.
     private var shown: [SwitchboardConcern] {
@@ -288,6 +289,7 @@ struct PolicyPanel: View {
                         Image(systemName: s.icon).font(.system(size: 10.5))
                         Text(s.title).font(.system(size: 11.5, weight: on ? .semibold : .regular)).lineLimit(1)
                         if badge > 0 { TabBadge(count: badge, onAccent: on) }
+                        else if s.tabs.contains(where: { store.problemTabs.contains($0.id) }) { ProblemMark(onAccent: on) }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
@@ -314,6 +316,7 @@ struct PolicyPanel: View {
                             Image(systemName: c.icon).font(.system(size: 10.5))
                             Text(c.title).font(.system(size: 11.5, weight: on ? .semibold : .regular)).lineLimit(1)
                             if let n = c.badge() { TabBadge(count: n, onAccent: false) }
+                            else if store.problemTabs.contains(c.id) { ProblemMark() }
                         }
                         .foregroundStyle(on ? Color.primary : Color.secondary)
                         Capsule().fill(on ? Color.accentColor : .clear).frame(height: 2)
@@ -586,6 +589,19 @@ struct TabBadge: View {
             .background(Capsule().fill(Color(nsColor: menuYellow)))
             .overlay(Capsule().strokeBorder(onAccent ? Color.white.opacity(0.7) : .clear, lineWidth: 1))
             .help("\(count) waiting on you")
+    }
+}
+
+/// The red dot beside a space or tab showing something wrong: the same cause
+/// that turns the menu bar dot red.
+struct ProblemMark: View {
+    var onAccent = false
+
+    var body: some View {
+        Circle().fill(Color(nsColor: menuRed))
+            .frame(width: 7, height: 7)
+            .overlay(Circle().strokeBorder(onAccent ? Color.white.opacity(0.8) : .clear, lineWidth: 1))
+            .help("Something here needs a look")
     }
 }
 
@@ -1300,6 +1316,11 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         // what made the click feel slow.
         guard let b = item.button, !popover.isShown else { return }
         peek?.hide()
+        // Open on whatever turned the dot red or yellow, once per new cause.
+        if let tab = attentionTab() {
+            UserDefaults.standard.set(tab, forKey: PolicyPanel.tabKey)
+            Visibility.rememberTab(tab)
+        }
         // Looking at the panel answers a ringing timer, and picks up a
         // notification setting changed in System Settings.
         TimerStore.shared.silence()
@@ -1355,11 +1376,43 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     }
 
     /// The icon dot: red while something is wrong, yellow while something waits.
-    func updateDot(problems: Bool) {
-        lastProblems = problems
+    func updateDot(problems: [(text: String, tab: String)]) {
+        lastProblems = !problems.isEmpty
+        problemList = problems
+        let tabs = Set(problems.map(\.tab))
+        if store.problemTabs != tabs { store.problemTabs = tabs }
         renderDot(waiting: store.needsWaiting, items: store.hoverItems)
     }
     private var lastProblems = false
+    private var problemList: [(text: String, tab: String)] = []
+    /// What the panel last jumped to, so an unchanged problem does not pull
+    /// the owner away from the tab they chose on every open.
+    private var lastAttention = ""
+
+    /// The tab behind the dot: the first problem's tab when it is red, Approvals
+    /// when it is yellow. Nil when nothing asks, when it is the same thing the
+    /// panel already jumped to, or when that tab is hidden.
+    func attentionTab() -> String? {
+        let r = Self.attention(problems: problemList, hidden: store.hiddenTabs, waiting: store.needsWaiting,
+                               waitingKeys: store.needGroups.flatMap(\.rows).compactMap(\.key), last: lastAttention)
+        lastAttention = r.signature
+        return r.tab
+    }
+
+    /// The decision behind `attentionTab`, without the panel, so a probe can drive it.
+    static func attention(problems: [(text: String, tab: String)], hidden: Set<String>, waiting: Int,
+                          waitingKeys: [String], last: String) -> (tab: String?, signature: String) {
+        let visible = problems.filter { !hidden.contains($0.tab) }
+        if let p = visible.first {
+            let sig = "p:" + visible.map(\.text).joined(separator: "|")
+            return (sig == last ? nil : p.tab, sig)
+        }
+        if waiting > 0 {
+            let sig = "n:" + waitingKeys.joined(separator: ",")
+            return (sig == last ? nil : "approvals", sig)
+        }
+        return (nil, "")
+    }
 
     /// Takes the values as arguments: a @Published sink fires before the store property changes.
     private func renderDot(waiting n: Int, items: Set<HoverItem>) {
@@ -1415,6 +1468,9 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     if tab == "notes" { NotesStore.remindersOff = true; NotesStore.shared.load(); NoteRow.startOpen = CommandLine.arguments.contains("--expand") }
     if let f = CommandLine.arguments.firstIndex(of: "--filter").flatMap({ $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }) {
         store.queries[tab + "::scope"] = f
+    }
+    if let m = CommandLine.arguments.firstIndex(of: "--problem-tabs").flatMap({ $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }) {
+        store.problemTabs = Set(m.split(separator: ",").map(String.init))
     }
     if let q = CommandLine.arguments.firstIndex(of: "--query").flatMap({ $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }) { store.queries[tab] = q }
     var needs = NeedsYou.items()

@@ -335,6 +335,9 @@ final class PolicyStore: ObservableObject {
     @Published var needGroups: [SystemGroup] = []
     /// Items a live session is waiting on, for the tab's badge.
     @Published var needsWaiting = 0
+    /// Tabs showing something wrong, which turns the menu bar dot red, so
+    /// their space and sub-tab can carry a mark.
+    @Published var problemTabs: Set<String> = []
 
     /// Repositories the owner is working in right now, from the live sessions.
     var liveDirs: () -> [String] = { [] }

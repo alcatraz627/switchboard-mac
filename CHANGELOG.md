@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Opening the panel while the menu bar dot is red or yellow lands on the tab
+  that raised it: the problem's tab when red, Approvals when yellow. It jumps
+  once per new cause, so a problem you have already seen does not pull you
+  away from the tab you chose. Spaces and tabs holding a problem carry a red dot.
+- Runtime > Databases: start, stop and inspect Homebrew services.
+- The Usage thresholds are no longer copied into claude-instances'
+  preferences, which stopped reading them.
+
 ## 0.3.0 (2026-09-30)
 
 - **Spaces instead of sixteen tabs**: the panel's top row is five spaces

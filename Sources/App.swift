@@ -205,6 +205,12 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var pm2Error: String? = nil
     }
 
+    /// The Machine group each helper script fills.
+    static let helperSection: [String: String] = [
+        "jobs.py": "Schedules", "drives.py": "Drives", "devservers.py": "Dev servers", "dbservices.py": "Databases",
+        "models.py": "Local models", "gitscan.py": "Repos", "wol.py": "Session",
+    ]
+
     /// How a helper-backed group should read: nil when its last probe worked.
     func probeStatus(_ name: String) -> ReadingState? {
         guard let why = sbSnapshot.probeFailures[name] else { return nil }
@@ -257,9 +263,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             let lock = NSLock()
             func probe(_ name: String, _ args: [String], timeout: TimeInterval, _ apply: @escaping (Any) -> Void) {
                 // A section hidden in Settings is never read, so it costs nothing.
-                let owner: [String: String] = ["jobs.py": "Schedules", "drives.py": "Drives", "devservers.py": "Dev servers", "dbservices.py": "Databases",
-                                               "models.py": "Local models", "gitscan.py": "Repos", "wol.py": "Session"]
-                if let section = owner[name], Visibility.groupHidden(section) { return }
+                if let section = Self.helperSection[name], Visibility.groupHidden(section) { return }
                 if name == "remote.py", Visibility.tabHidden("remote") { return }
                 group.enter()
                 DispatchQueue.global(qos: .utility).async {
@@ -340,7 +344,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 }
                 self.snapshotsDone += 1
                 if !self.kanbanBusy { self.kanbanUp = kanban }
-                self.refreshPanel(); self.policyController?.updateDot(problems: !self.problemTexts().isEmpty)
+                self.refreshPanel(); self.policyController?.updateDot(problems: self.problems())
                 let waiters = self.snapshotWaiters
                 self.snapshotWaiters = self.rerunWaiters
                 self.rerunWaiters = []
@@ -1682,23 +1686,36 @@ extension SwitchboardApp {
     }
 
     /// Everything wrong right now, in a sentence each, from the last snapshot.
-    func problemTexts() -> [String] {
+    func problemTexts() -> [String] { problems().map(\.text) }
+
+    /// Everything wrong right now, each with the tab that shows it, so opening
+    /// the panel from a red icon can go straight there.
+    func problems() -> [(text: String, tab: String)] {
         let s = sbSnapshot
-        var problems: [String] = []
+        var out: [(text: String, tab: String)] = []
         if !s.probeFailures.isEmpty {
-            problems.append("\(s.probeFailures.count == 1 ? "1 source" : "\(s.probeFailures.count) sources") could not be read: "
-                            + s.probeFailures.keys.sorted().joined(separator: ", "))
+            let names = s.probeFailures.keys.sorted()
+            let first = names[0] == "remote.py" ? "remote" : Self.helperSection[names[0]].flatMap { Visibility.groupTab[$0] } ?? "system"
+            out.append(("\(names.count == 1 ? "1 source" : "\(names.count) sources") could not be read: "
+                        + names.joined(separator: ", "), first))
         }
         for j in s.jobs where j["failing"] as? Bool == true {
-            problems.append("\((j["name"] as? String) ?? "a job") failed (exit \((j["last_exit"] as? Int).map(String.init) ?? "?"))")
+            out.append(("\((j["name"] as? String) ?? "a job") failed (exit \((j["last_exit"] as? Int).map(String.init) ?? "?"))", "runtime"))
         }
         let off = s.gates.filter { if case .on = $0.kind { return false }; return true }.count
-        if off > 0 { problems.append(off == 1 ? "1 gate is off" : "\(off) gates are off") }
-        problems.append(contentsOf: timerFailures.map { "\($0.key): \($0.value)" })
+        if off > 0 { out.append((off == 1 ? "1 gate is off" : "\(off) gates are off", "rules")) }
+        if !timerFailures.isEmpty {
+            // A timed switch can sit in any Machine group; find the one holding its row.
+            let groups = allSystemGroups()
+            for (label, why) in timerFailures.sorted(by: { $0.key < $1.key }) {
+                let title = groups.first { $0.rows.contains { $0.label == label } }?.title
+                out.append(("\(label): \(why)", title.flatMap { Visibility.groupTab[$0] } ?? "system"))
+            }
+        }
         let unwired = (policyController?.store.catalogs["rules"] ?? []).flatMap(\.rows)
             .filter { $0.note.hasPrefix("not wired") || $0.note.hasPrefix("missing file") }.count
-        if unwired > 0 { problems.append(unwired == 1 ? "1 hook has no event" : "\(unwired) hooks have no event") }
-        return problems
+        if unwired > 0 { out.append((unwired == 1 ? "1 hook has no event" : "\(unwired) hooks have no event", "rules")) }
+        return out
     }
 }
 
@@ -1794,6 +1811,26 @@ extension SwitchboardApp {
         defer { d.set(spaceTabs, forKey: Visibility.spaceTabKey) }
         Visibility.rememberTab("queue")
         check("a space reopens on the tab last used in it", Visibility.lastTab(in: "records") == "queue")
+
+        // Opening from a red or yellow icon lands on what raised it, once per new cause.
+        let jobFail = [(text: "nightly failed (exit 1)", tab: "runtime")]
+        let first = PolicyStatusController.attention(problems: jobFail, hidden: [], waiting: 1, waitingKeys: ["a"], last: "")
+        check("a red icon opens the problem's tab, ahead of a waiting approval", first.tab == "runtime")
+        let again = PolicyStatusController.attention(problems: jobFail, hidden: [], waiting: 1, waitingKeys: ["a"], last: first.signature)
+        check("the same problem does not pull the panel there on every open", again.tab == nil)
+        let more = jobFail + [(text: "1 gate is off", tab: "rules")]
+        check("a new problem jumps again",
+              PolicyStatusController.attention(problems: more, hidden: [], waiting: 0, waitingKeys: [], last: first.signature).tab == "runtime")
+        check("a problem on a hidden tab falls through to the next cause",
+              PolicyStatusController.attention(problems: jobFail, hidden: ["runtime"], waiting: 2, waitingKeys: ["a", "b"], last: "").tab == "approvals")
+        let yellow = PolicyStatusController.attention(problems: [], hidden: [], waiting: 1, waitingKeys: ["a"], last: "")
+        check("a yellow icon opens Approvals", yellow.tab == "approvals")
+        check("a new approval jumps again",
+              PolicyStatusController.attention(problems: [], hidden: [], waiting: 2, waitingKeys: ["a", "b"], last: yellow.signature).tab == "approvals")
+        check("nothing asking leaves the owner's tab alone",
+              PolicyStatusController.attention(problems: [], hidden: [], waiting: 0, waitingKeys: [], last: yellow.signature).tab == nil)
+        check("a failing job is filed under Runtime", Visibility.groupTab["Schedules"] == "runtime"
+              && Self.helperSection["jobs.py"] == "Schedules")
 
         // A timer far off on Keep Awake while its section and Services are hidden.
         let timersKey = systemTimersKey
