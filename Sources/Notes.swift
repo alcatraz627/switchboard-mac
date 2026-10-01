@@ -99,6 +99,29 @@ func probeNotes() -> String {
     check("editing it keeps the body in the file", onDisk.contains("- milk\n- eggs"), onDisk)
     check("the saved order is not written into the owner's folder", !FileManager.default.fileExists(atPath: own + "/order.json"))
     ud.set(chosenBefore, forKey: NotesStore.folderKey)
+
+    // Title and body, either one optional, never both empty; a colour tag survives the file.
+    check("a note with only a body is saved", s.add(title: "", body: "just the text")?.heading == "just the text")
+    check("a note with neither is refused", s.add(title: "  ", body: "\n") == nil)
+    let tinted = s.add(title: "Tinted", body: "", color: "green")!
+    s.load()
+    check("a colour tag survives the file", s.notes.first { $0.id == tinted.id }?.color == "green")
+    let nobody = InputRules.copyButtons(title: "Only title", body: "")
+    let notitle = InputRules.copyButtons(title: "", body: "only body")
+    check("a title-only note offers only the title copy", nobody.title && !nobody.body)
+    check("a body-only note offers only the text copy", notitle.body && !notitle.title)
+
+    // Enter in a title: the rest of the line goes to the top of the body.
+    let mid = InputRules.splitTitle(before: "Buy ", after: "milk and eggs", body: "")
+    check("Enter mid-title moves the rest into an empty body", mid == ("Buy", "milk and eggs"), "\(mid)")
+    let onto = InputRules.splitTitle(before: "Buy ", after: "milk", body: "at the shop")
+    check("into a body that has text, on its own line above it", onto == ("Buy", "milk\nat the shop"), "\(onto)")
+    let end = InputRules.splitTitle(before: "Buy milk", after: "", body: "at the shop")
+    check("Enter at the end of a title leaves the body as it was", end == ("Buy milk", "at the shop"), "\(end)")
+
+    // Opening a tab: the new input takes the keyboard unless something is being edited.
+    check("the new input is focused when nothing is being edited", InputRules.focusNewInput(editing: nil))
+    check("an edit in progress keeps the keyboard", !InputRules.focusNewInput(editing: "20261001-120000"))
     lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
     return lines.joined(separator: "\n")
 }
@@ -118,11 +141,17 @@ struct Note: Identifiable, Equatable {
     var reminderID: String?
     /// Pinned notes are the ones the menu-bar quick page lists.
     var pinned = false
+    /// A colour tag, one of the timer colours by name; nil for none.
+    var color: String? = nil
 
     var expired: Bool { expires.map { $0 <= Date() } ?? false }
     var path: String { NotesStore.dir + "/" + id + ".md" }
     /// Title and body as one text, the way Copy content hands it over.
-    var content: String { body.isEmpty ? title : title + "\n\n" + body }
+    var content: String { body.isEmpty ? title : title.isEmpty ? body : title + "\n\n" + body }
+    /// What a list shows as the note's name: the title, or the body's first line when there is no title.
+    var heading: String {
+        title.isEmpty ? (body.components(separatedBy: "\n").first { !$0.isEmpty } ?? "") : title
+    }
 }
 
 final class NotesStore: ObservableObject {
@@ -186,14 +215,23 @@ final class NotesStore: ObservableObject {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return nil }
         let lines = t.components(separatedBy: "\n")
-        let title = lines[0].trimmingCharacters(in: .whitespaces)
-        let body = lines.dropFirst().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return add(title: lines[0], body: lines.dropFirst().joined(separator: "\n"))
+    }
+
+    /// Saves a new note from a title and a body, either of which may be empty
+    /// but not both; the same note twice is saved once.
+    @discardableResult
+    func add(title rawTitle: String, body rawBody: String, color: String? = nil) -> Note? {
+        let title = rawTitle.trimmingCharacters(in: .whitespaces)
+        let body = rawBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard InputRules.canSave(title: title, body: body) else { return nil }
         // Enter on a note already saved does not make a second copy.
         if let same = notes.first(where: { $0.title == title && $0.body == body }) { return same }
         let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
         var id = f.string(from: Date())
         while notes.contains(where: { $0.id == id }) { id += "x" }
-        let n = Note(id: id, title: title, body: body, tags: [], created: Date())
+        var n = Note(id: id, title: title, body: body, tags: [], created: Date())
+        n.color = color
         guard write(n) else { return nil }
         notes.insert(n, at: 0)
         saveOrder()
@@ -263,6 +301,7 @@ final class NotesStore: ObservableObject {
         }
         if let id = n.reminderID { lines.append("reminder_id: " + q(id)) }
         if n.pinned { lines.append("pinned: true") }
+        if let c = n.color { lines.append("color: " + c) }
         lines.append("---")
         return lines.joined(separator: "\n") + "\n" + n.body + (n.body.isEmpty ? "" : "\n")
     }
@@ -295,7 +334,8 @@ final class NotesStore: ObservableObject {
                     remindAt: fields["remind_at"].flatMap(iso.date),
                     remindRepeat: fields["remind_repeat"].flatMap(Note.Repeat.init) ?? .never,
                     reminderID: fields["reminder_id"],
-                    pinned: fields["pinned"] == "true")
+                    pinned: fields["pinned"] == "true",
+                    color: fields["color"].flatMap { c in timerColors.contains { $0.0 == c } ? c : nil })
     }
 
     // ── Reminders ───────────────────────────────────────────────────────────

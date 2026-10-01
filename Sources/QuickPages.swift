@@ -459,7 +459,7 @@ struct QuickCard: View {
             ForEach(pins) { n in
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Image(systemName: "pin.fill").font(.system(size: 9.5)).foregroundStyle(.secondary)
-                    Text(n.title).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                    Text(n.heading).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
                     Spacer()
                     Button {
                         NSPasteboard.general.clearContents()
@@ -474,7 +474,7 @@ struct QuickCard: View {
             }
             if !rest.isEmpty {
                 ChipFlow(items: rest.map { n in
-                    ChipItem(id: n.id, icon: "pin", text: chipLabel(n.title), enabled: true, help: "Pin \u{201C}\(n.title)\u{201D}") {
+                    ChipItem(id: n.id, icon: "pin", text: chipLabel(n.heading), enabled: true, help: "Pin \u{201C}\(n.heading)\u{201D}") {
                         var m = n; m.pinned = true; notes.update(m)
                     }
                 }, overflow: { more in

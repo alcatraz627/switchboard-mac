@@ -5,60 +5,83 @@
 import AppKit
 import SwiftUI
 
-/// The bar above the list: one field, and icon buttons to open it up, save
-/// what is on the clipboard, or save and copy the new note's path.
+/// The bar above the list: a title line that opens into a title and body
+/// sheet, with buttons to save, save what is on the clipboard, or save and
+/// copy the new note's path. Enter in the title opens the body; ⌘↩ saves.
 struct NoteCompose: View {
     @ObservedObject var notes: NotesStore
+    @State private var title = ""
     @State private var text = ""
     @State private var expanded = false
     @State private var flash: String?
-    @FocusState private var focused: Bool
+    @State private var focus: NoteSheet.Field?
+    /// Snapshots draw the composer opened up.
+    static var startExpanded = false
+
+    init(notes: NotesStore) {
+        self.notes = notes
+        if Self.startExpanded { _expanded = State(initialValue: true) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: expanded ? .top : .center, spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
                 Group {
                     if expanded {
-                        TextEditor(text: $text).font(PT.label).frame(height: 90).scrollContentBackground(.hidden)
+                        NoteSheet(title: $title, text: $text, focus: $focus, titlePrompt: "Title", bodyPrompt: "Note", bodyMax: 160)
                     } else {
-                        // Enter saves; a note already saved is not saved twice.
-                        TextField("A note. Enter saves it.", text: $text).textFieldStyle(.plain).font(PT.label)
-                            .onSubmit { save(copyPath: false) }
+                        ZStack(alignment: .leading) {
+                            if title.isEmpty { Text("New note").font(PT.label).foregroundStyle(.tertiary).allowsHitTesting(false) }
+                            EditorText(text: $title, focused: Binding(get: { focus == .title }, set: { focus = $0 ? .title : nil }),
+                                       font: .systemFont(ofSize: 12), singleLine: true, onReturn: { before, after in
+                                           let r = InputRules.splitTitle(before: before, after: after, body: text)
+                                           title = r.title; text = r.body
+                                           withAnimation(.easeOut(duration: 0.12)) { expanded = true }
+                                           focus = .body
+                                       })
+                        }
+                        .padding(.horizontal, 9).padding(.vertical, 6)
                     }
                 }
-                .focused($focused)
-                icon(expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                     expanded ? "Back to one line" : "More room: a title line, then the body") { expanded.toggle() }
-                if expanded {
-                    // Enter makes a new line here, so saving is ⌘↩ or this button; the clipboard is left alone.
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.07)))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(focus != nil ? Color.accentColor.opacity(0.6) : .clear))
+                // expanded, the buttons stack down the side so the sheet keeps its width
+                let buttons = Group {
+                    icon(expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                         expanded ? "Back to one line" : "Open a title and body") {
+                        withAnimation(.easeOut(duration: 0.12)) { expanded.toggle() }
+                    }
                     icon("checkmark", "Save (⌘↩)") { save(copyPath: false) }
                         .keyboardShortcut(.return, modifiers: .command)
+                    icon("doc.on.clipboard", "Save what is on the clipboard as a note") {
+                        guard let s = NSPasteboard.general.string(forType: .string), !s.isEmpty else { show("The clipboard has no text"); return }
+                        let before = notes.notes.count
+                        if notes.add(s) != nil { show(notes.notes.count == before ? "Already saved" : "Saved from the clipboard") }
+                    }
+                    icon("tray.and.arrow.down", "Save and copy the note's path") { save(copyPath: true) }
                 }
-                icon("doc.on.clipboard", "Save what is on the clipboard as a note") {
-                    guard let s = NSPasteboard.general.string(forType: .string), !s.isEmpty else { show("The clipboard has no text"); return }
-                    let before = notes.notes.count
-                    if notes.add(s) != nil { show(notes.notes.count == before ? "Already saved" : "Saved from the clipboard") }
-                }
-                icon("tray.and.arrow.down", "Save and copy the note's path") { save(copyPath: true) }
+                if expanded { VStack(spacing: 8) { buttons }.padding(.top, 6) } else { HStack(spacing: 6) { buttons }.padding(.top, 6) }
             }
-            .padding(.horizontal, 9).padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.07)))
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(focused ? Color.accentColor.opacity(0.6) : .clear))
-            .onTapGesture { NSApp.activate(ignoringOtherApps: true); focused = true }
             if let f = flash {
                 Text(f).font(PT.caption).foregroundStyle(.secondary).padding(.leading, 4).transition(.opacity)
             }
         }
         .padding(.horizontal, PT.gap).padding(.top, PT.gap - 2).padding(.bottom, 2)
+        .onAppear {
+            // the new note gets the keyboard, unless a note below is open for editing
+            guard InputRules.focusNewInput(editing: EditingState.shared.note) else { return }
+            DispatchQueue.main.async { if focus == nil { focus = .title } }
+        }
     }
 
     private func save(copyPath: Bool) {
         let before = notes.notes.count
-        guard let n = notes.add(text) else {
-            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { show("Type something first") }
+        guard let n = notes.add(title: title, body: text) else {
+            if !InputRules.canSave(title: title, body: text) { show("Type a title or a note first") }
             return
         }
-        text = ""
+        title = ""; text = ""
         if copyPath {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(n.path, forType: .string)
@@ -170,6 +193,9 @@ struct NoteRow: View {
     @State private var expireWithReminder = false
     @State private var copied: String?
     @State private var savedAt: Date?
+    /// The last save was refused because the note was empty.
+    @State private var refused = false
+    @State private var focus: NoteSheet.Field?
     /// Snapshots open the first note's editor so its look can be checked.
     static var startOpen = false
 
@@ -179,8 +205,9 @@ struct NoteRow: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 6) {
                 grip
+                if let c = note.color { Circle().fill(timerColor(c)).frame(width: 8, height: 8) }
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(note.title).font(PT.label).fixedSize(horizontal: false, vertical: true)
+                    Text(note.heading).font(PT.label).fixedSize(horizontal: false, vertical: true)
                         .strikethrough(note.expired)
                     if let url = firstLink {
                         // a note that starts with a link shows it as one, opening on click
@@ -198,10 +225,11 @@ struct NoteRow: View {
                 }
                 Spacer(minLength: 4)
                 // copy actions stay out of the way until the row is pointed at
+                let has = InputRules.copyButtons(title: note.title, body: note.body)
                 HStack(spacing: 2) {
                     copyButton("link", "Copy the file's full path", note.path)
-                    copyButton("doc.on.doc", "Copy the whole note", note.content)
-                    copyButton("textformat", "Copy the title", note.title)
+                    if has.body { copyButton("doc.on.doc", "Copy the note's text", note.body) }
+                    if has.title { copyButton("textformat", "Copy the title", note.title) }
                 }
                 .opacity(hovering || open ? 1 : 0)
                 // a pinned note shows on the menu-bar quick page
@@ -222,8 +250,9 @@ struct NoteRow: View {
             .contextMenu {
                 Button(note.pinned ? "Unpin" : "Pin to the quick page") { setPinned(!note.pinned) }
                 Divider()
-                Button("Copy title") { copy(note.title) }
-                Button("Copy whole note") { copy(note.content) }
+                if !note.title.isEmpty { Button("Copy title") { copy(note.title) } }
+                if !note.body.isEmpty { Button("Copy text") { copy(note.body) } }
+                Button("Copy title and text") { copy(note.content) }
                 Button("Copy file path") { copy(note.path) }
             }
             if open, draft != nil { editor.transition(.opacity) }
@@ -272,7 +301,9 @@ struct NoteRow: View {
     private var summary: String {
         let f = Self.shortDate
         var parts: [String] = []
-        if firstLink == nil, let first = note.body.components(separatedBy: "\n").first(where: { !$0.isEmpty }) { parts.append(first) }
+        // with no title the body's first line is already the heading; show the next one
+        let bodyLines = note.body.components(separatedBy: "\n").filter { !$0.isEmpty }
+        if firstLink == nil, let first = bodyLines.dropFirst(note.title.isEmpty ? 1 : 0).first { parts.append(first) }
         if !note.tags.isEmpty { parts.append(note.tags.map { "#" + $0 }.joined(separator: " ")) }
         if let r = note.remindAt {
             parts.append("reminds " + f.string(from: r) + (note.remindRepeat == .never ? "" : ", " + note.remindRepeat.rawValue))
@@ -291,6 +322,7 @@ struct NoteRow: View {
                 expireWithReminder = note.remindAt != nil && note.expires == note.remindAt
             }
         }
+        if open { EditingState.shared.note = note.id } else if EditingState.shared.note == note.id { EditingState.shared.note = nil }
     }
 
     /// The editor saves by itself shortly after each change, so there is no
@@ -301,12 +333,7 @@ struct NoteRow: View {
         return VStack(alignment: .leading, spacing: 8) {
             // title and body are one sheet, like a note app, not two boxed fields
             VStack(alignment: .leading, spacing: 0) {
-                TextField("Title", text: d.title).textFieldStyle(.plain).font(.system(size: 13, weight: .semibold))
-                    .padding(.horizontal, 8).padding(.top, 7).padding(.bottom, 4)
-                Divider().opacity(0.5).padding(.horizontal, 8)
-                TextEditor(text: d.body).font(PT.label)
-                    .frame(height: min(220, max(90, CGFloat(d.wrappedValue.body.components(separatedBy: "\n").count + 1) * 17)))
-                    .scrollContentBackground(.hidden).padding(.horizontal, 3).padding(.vertical, 4)
+                NoteSheet(title: d.title, text: d.body, focus: $focus)
                 HStack(spacing: 3) {
                     Text("#").font(PT.caption).foregroundStyle(.tertiary)
                     TextField("tags, separated by commas", text: Binding(get: { tagsText }, set: { t in
@@ -355,11 +382,14 @@ struct NoteRow: View {
                     d.wrappedValue.expires = on ? d.wrappedValue.remindAt : nil
                 })).toggleStyle(.checkbox).font(PT.caption)
             }
+            ColorBalls(selection: d.color, allowNone: true, size: 12)
             HStack(spacing: 10) {
-                Text(savedAt.map { "Saved " + age($0) } ?? "Saves as you type").font(PT.caption).foregroundStyle(.tertiary)
+                Text(refused ? "Empty notes are not saved; delete removes a note"
+                     : savedAt.map { "Saved " + age($0) } ?? "Saves as you type")
+                    .font(PT.caption).foregroundStyle(refused ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
                 Spacer()
                 Button {
-                    let a = NSAlert(); a.messageText = "Delete \u{201C}\(note.title)\u{201D}?"
+                    let a = NSAlert(); a.messageText = "Delete \u{201C}\(note.heading)\u{201D}?"
                     a.informativeText = "The file and any reminder it set are removed."
                     a.addButton(withTitle: "Delete"); a.addButton(withTitle: "Cancel")
                     NSApp.activate(ignoringOtherApps: true)
@@ -394,8 +424,11 @@ struct NoteRow: View {
     }
 
     private func save() {
-        guard var n = draft, n != note else { return }
-        if n.title.trimmingCharacters(in: .whitespaces).isEmpty { n.title = note.title }
+        guard var n = draft, n != note else { refused = false; return }
+        // a note with neither title nor text is refused, not saved; Delete is how a note goes
+        guard InputRules.canSave(title: n.title, body: n.body) else { refused = true; return }
+        n.title = n.title.trimmingCharacters(in: .whitespaces)
+        refused = false
         notes.update(n)
         savedAt = Date()
     }

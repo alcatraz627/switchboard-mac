@@ -184,32 +184,37 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
 struct TimersTabView: View {
     @ObservedObject var timers: TimerStore
     @State private var label = ""
-    @State private var color = "blue"
+    @State private var color: String? = "blue"
+    @State private var picking = false
+    @FocusState private var focused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: PT.gap) {
-            // New timer: a name, a colour, then when.
+            // New timer: a name, a colour, then when. Enter in the name opens "when".
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
-                    TextField("Label, e.g. Tea", text: $label).textFieldStyle(.roundedBorder).font(PT.label)
+                    TextField("Label", text: $label).textFieldStyle(.plain).font(PT.label)
+                        .focused($focused)
+                        .onSubmit { picking = true }
+                        .onExitCommand { focused = false }
+                        .inputBox(focused: focused)
                     WhenButton(title: "Start a timer for", presets: WhenPreset.timer,
-                               onPick: { d, _ in timers.add(label: label, color: color, fireAt: d); label = "" }) {
+                               onPick: { d, _ in timers.add(label: label, color: color ?? "blue", fireAt: d); label = "" },
+                               isOpen: $picking) {
                         Label("Start", systemImage: "timer").font(.system(size: 11.5, weight: .medium))
                             .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background(Capsule().fill(timerColor(color).opacity(0.25)))
+                            .background(Capsule().fill(timerColor(color ?? "blue").opacity(0.25)))
                     }
-                    .help("Pick how long; the timer starts at once")
+                    .help("Pick how long; the timer starts at once (Enter in the label opens this)")
                 }
-                HStack(spacing: 7) {
-                    ForEach(timerColors, id: \.0) { name, c in
-                        Circle().fill(c).frame(width: 14, height: 14)
-                            .overlay(Circle().strokeBorder(Color.primary.opacity(color == name ? 0.8 : 0), lineWidth: 2))
-                            .onTapGesture { color = name }
-                            .help(name)
-                    }
-                }
+                ColorBalls(selection: $color)
             }
             .padding(.horizontal, 4)
+            .onAppear {
+                // the new timer's label gets the keyboard, unless a timer is being renamed
+                guard InputRules.focusNewInput(editing: EditingState.shared.timer) else { return }
+                DispatchQueue.main.async { focused = true }
+            }
             if timers.notificationsOff {
                 RowFailure(message: "macOS has Switchboard's notifications off, so a timer rings here with no banner.",
                            retry: {
@@ -260,11 +265,13 @@ struct TimerRow: View {
                             .focused($focused)
                             .onSubmit { finish() }
                             .onChange(of: focused) { f in if !f { finish() } }
-                            .onExitCommand { editing = false }
+                            // Escape lets go of the keyboard; letting go saves, as clicking away does
+                            .onExitCommand { focused = false }
                     } else {
                         Text(timer.label).font(PT.label)
                             .onTapGesture {
                                 draft = timer.label; editing = true
+                                EditingState.shared.timer = timer.id
                                 NSApp.activate(ignoringOtherApps: true)
                                 DispatchQueue.main.async { focused = true }
                             }
@@ -298,6 +305,7 @@ struct TimerRow: View {
     private func finish() {
         guard editing else { return }
         editing = false
+        if EditingState.shared.timer == timer.id { EditingState.shared.timer = nil }
         timers.rename(timer, to: draft)
     }
 }

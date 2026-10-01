@@ -234,15 +234,18 @@ struct WhenButton<Label: View>: View {
     /// Which of `choices` is picked when it opens, such as a reminder's current repeat.
     var initialChoice = 0
     let onPick: (Date, Int) -> Void
+    /// Lets the owner of the button open it too, as Enter in a field beside it does.
+    var isOpen: Binding<Bool>? = nil
     @ViewBuilder let label: () -> Label
     @State private var open = false
 
     var body: some View {
-        Button { open.toggle() } label: { label() }
+        let shown = isOpen ?? $open
+        Button { shown.wrappedValue.toggle() } label: { label() }
             .buttonStyle(.plain)
-            .popover(isPresented: $open, arrowEdge: .bottom) {
+            .popover(isPresented: shown, arrowEdge: .bottom) {
                 WhenPanel(title: title, presets: presets, choices: choices, extra: extra, initial: initial,
-                          initialChoice: initialChoice, onPick: onPick, dismiss: { open = false })
+                          initialChoice: initialChoice, onPick: onPick, dismiss: { shown.wrappedValue = false })
             }
     }
 }
