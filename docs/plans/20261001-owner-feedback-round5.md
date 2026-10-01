@@ -293,6 +293,44 @@ app and collect candidates for the owner) has not run yet.
   middle-truncates names only (prose still wraps). `--probe-quick`.
 - Not yet seen live: scroll direction feel on a real wheel and trackpad.
 
+- Step 5 done in e141587 and 94e75e6: Ollama keep-loaded menu, Unload all,
+  companion Reload, default eviction read-only; models.py `keep` verifies
+  the model actually loaded. Selectable text in opened details. List tabs
+  read at launch and not re-read within 20 s (measured reads: plugins 603 to
+  878 ms, rules 306 ms, library 129 ms, ledger 60 ms, queue 29 ms;
+  `--time-tabs`). Settings "Hover pages": drag to order, switch to hide.
+
+## Step 6: the final list (for the owner)
+
+Every must item is built, except the session-index fix (below), which is a
+gcc change awaiting approval. Not seen live yet: title-bar scroll, number
+keys, badge click landing on its rows, focus on tab open, Escape not closing
+the panel, scroll direction feel, the Ollama expand (the headless snapshot
+does not build the Local models group).
+
+Candidates found while applying the model, for the owner to rule on:
+
+1. More hover pages (asked for): Timers (running timers with +1 min and
+   stop), Controls (volume and brightness sliders, Wi-Fi and Bluetooth
+   switches), Repos (unpushed and uncommitted counts, open in editor),
+   Local models (what is loaded, keep or unload). Each is a page in the
+   Settings list, off by default.
+2. Inputs still on their own rules: the Lights rename field and the policy
+   ask field cancel on Escape; the When picker's typed field keeps the white
+   rounded-border look. Move them onto the shared input.
+3. The lm suite's `warm` reports success when Ollama refuses (curl -s exits
+   0 on an error body). Switchboard now checks; the tool itself is in
+   ~/Code/local-models and is unchanged.
+4. The test suite writes "catalog probe read in 0 ms" lines into the owner's
+   real Switchboard log. Point test runs at a scratch log.
+5. The old hover preview path (HoverPreview, hoverLines, --snapshot-hover)
+   only serves its own test now. Remove it, or keep it as the fallback.
+6. Colour at note creation: the composer has no colour balls; a colour is
+   picked after saving.
+7. Middle truncation is applied to Controls names only. Device, repo and
+   model names elsewhere (Machine repos, Runtime services) could use it too.
+8. Uppercase section labels (still awaiting the sentence-case ruling).
+
 ## Why "refresh session index" fails (investigated 2026-10-01)
 
 `com.alcatraz.refresh-session-index` runs
