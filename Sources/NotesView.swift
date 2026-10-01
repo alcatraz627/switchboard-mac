@@ -173,32 +173,70 @@ struct NoteRow: View {
     /// Snapshots open the first note's editor so its look can be checked.
     static var startOpen = false
 
+    @State private var hovering = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 6) {
                 grip
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(note.title).font(PT.label).fixedSize(horizontal: false, vertical: true)
                         .strikethrough(note.expired)
+                    if let url = firstLink {
+                        // a note that starts with a link shows it as one, opening on click
+                        Button { NSWorkspace.shared.open(url) } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: url.isFileURL ? "doc" : "link").font(.system(size: 9.5))
+                                Text(linkLabel(url)).font(PT.caption).lineLimit(2).multilineTextAlignment(.leading)
+                            }
+                        }
+                        .buttonStyle(.link).help("Open \(url.absoluteString)")
+                    }
                     if !summary.isEmpty {
                         Text(summary).font(PT.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .contentShape(Rectangle())
-                .onTapGesture { toggleOpen() }
                 Spacer(minLength: 4)
-                copyButton("link", "Copy the file's full path", note.path)
-                copyButton("doc.on.doc", "Copy the whole note", note.content)
-                copyButton("textformat", "Copy the title", note.title)
-                Button { toggleOpen() } label: {
-                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
-                        .rotationEffect(.degrees(open ? 90 : 0)).foregroundStyle(.secondary)
+                // copy actions stay out of the way until the row is pointed at
+                HStack(spacing: 2) {
+                    copyButton("link", "Copy the file's full path", note.path)
+                    copyButton("doc.on.doc", "Copy the whole note", note.content)
+                    copyButton("textformat", "Copy the title", note.title)
                 }
-                .buttonStyle(.plain)
+                .opacity(hovering || open ? 1 : 0)
+                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                    .rotationEffect(.degrees(open ? 90 : 0)).foregroundStyle(.secondary)
             }
             .padding(.leading, 4).padding(.trailing, PT.rowH).padding(.vertical, PT.rowV)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(hovering && !open ? 0.05 : 0)))
+            .contentShape(Rectangle())
+            .onTapGesture { toggleOpen() }
+            .onHover { hovering = $0 }
+            .contextMenu {
+                Button("Copy title") { copy(note.title) }
+                Button("Copy whole note") { copy(note.content) }
+                Button("Copy file path") { copy(note.path) }
+            }
             if open, draft != nil { editor.transition(.opacity) }
         }
+    }
+
+    /// The first body line, when it is a link (http or a file URL).
+    private var firstLink: URL? {
+        guard let first = note.body.components(separatedBy: "\n").first(where: { !$0.isEmpty })?
+                .trimmingCharacters(in: .whitespaces),
+              first.hasPrefix("http") || first.hasPrefix("file://"),
+              let u = URL(string: first) else { return nil }
+        return u
+    }
+    /// A link as a person reads it: the file name, or the site and path.
+    private func linkLabel(_ u: URL) -> String {
+        if u.isFileURL { return u.lastPathComponent }
+        return (u.host ?? "") + u.path
+    }
+    private func copy(_ s: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(s, forType: .string)
     }
 
     init(note: Note, notes: NotesStore, grip: AnyView) {
@@ -219,7 +257,7 @@ struct NoteRow: View {
     private var summary: String {
         let f = Self.shortDate
         var parts: [String] = []
-        if let first = note.body.components(separatedBy: "\n").first(where: { !$0.isEmpty }) { parts.append(first) }
+        if firstLink == nil, let first = note.body.components(separatedBy: "\n").first(where: { !$0.isEmpty }) { parts.append(first) }
         if !note.tags.isEmpty { parts.append(note.tags.map { "#" + $0 }.joined(separator: " ")) }
         if let r = note.remindAt {
             parts.append("reminds " + f.string(from: r) + (note.remindRepeat == .never ? "" : ", " + note.remindRepeat.rawValue))
@@ -246,25 +284,37 @@ struct NoteRow: View {
         let d = Binding(get: { draft ?? note }, set: { draft = $0 })
         let f = Self.longDate
         return VStack(alignment: .leading, spacing: 8) {
-            TextField("Title", text: d.title).textFieldStyle(.roundedBorder).font(PT.label)
-            TextEditor(text: d.body).font(PT.label).frame(height: 80)
-                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.primary.opacity(0.12)))
-            TextField("Tags, separated by commas", text: Binding(get: { tagsText }, set: { t in
-                tagsText = t
-                d.wrappedValue.tags = t.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-            })).textFieldStyle(.roundedBorder).font(PT.caption)
+            // title and body are one sheet, like a note app, not two boxed fields
+            VStack(alignment: .leading, spacing: 0) {
+                TextField("Title", text: d.title).textFieldStyle(.plain).font(.system(size: 13, weight: .semibold))
+                    .padding(.horizontal, 8).padding(.top, 7).padding(.bottom, 4)
+                Divider().opacity(0.5).padding(.horizontal, 8)
+                TextEditor(text: d.body).font(PT.label)
+                    .frame(height: min(220, max(90, CGFloat(d.wrappedValue.body.components(separatedBy: "\n").count + 1) * 17)))
+                    .scrollContentBackground(.hidden).padding(.horizontal, 3).padding(.vertical, 4)
+                HStack(spacing: 3) {
+                    Text("#").font(PT.caption).foregroundStyle(.tertiary)
+                    TextField("tags, separated by commas", text: Binding(get: { tagsText }, set: { t in
+                        tagsText = t
+                        d.wrappedValue.tags = t.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                    })).textFieldStyle(.plain).font(PT.caption)
+                }
+                .padding(.horizontal, 8).padding(.bottom, 7)
+            }
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08)))
+            // when it expires and when it reminds: one row, each an action until it is set
             HStack(spacing: 6) {
-                Image(systemName: "hourglass").font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
                 WhenButton(title: "Expire this note at", presets: WhenPreset.long,
                            extra: d.wrappedValue.expires == nil ? [] : [("No expiry", { d.wrappedValue.expires = nil; expireWithReminder = false })],
                            initial: d.wrappedValue.expires,
                            onPick: { t, _ in d.wrappedValue.expires = t; expireWithReminder = false }) {
-                    chip(d.wrappedValue.expires.map { "Expires " + f.string(from: $0) } ?? "No expiry", set: d.wrappedValue.expires != nil)
+                    chip(icon: "hourglass", d.wrappedValue.expires.map { "Expires " + f.string(from: $0) } ?? "Add expiry",
+                         set: d.wrappedValue.expires != nil)
                 }
-                Spacer()
-            }
-            HStack(spacing: 6) {
-                Image(systemName: "bell").font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
+                if d.wrappedValue.expires != nil {
+                    clearButton("Remove the expiry") { d.wrappedValue.expires = nil; expireWithReminder = false }
+                }
                 WhenButton(title: "Remind me in macOS Reminders", presets: WhenPreset.long,
                            choices: ["Once", "Every day", "Every week", "Every month"],
                            extra: d.wrappedValue.remindAt == nil ? [] : [("No reminder", { d.wrappedValue.remindAt = nil; expireWithReminder = false })],
@@ -275,9 +325,12 @@ struct NoteRow: View {
                                d.wrappedValue.remindRepeat = [.never, .daily, .weekly, .monthly][i]
                                if expireWithReminder { d.wrappedValue.expires = t }
                            }) {
-                    chip(d.wrappedValue.remindAt.map { "Reminds " + f.string(from: $0)
-                        + (d.wrappedValue.remindRepeat == .never ? "" : ", " + d.wrappedValue.remindRepeat.rawValue) } ?? "No reminder",
+                    chip(icon: "bell", d.wrappedValue.remindAt.map { "Reminds " + f.string(from: $0)
+                        + (d.wrappedValue.remindRepeat == .never ? "" : ", " + d.wrappedValue.remindRepeat.rawValue) } ?? "Add reminder",
                          set: d.wrappedValue.remindAt != nil)
+                }
+                if d.wrappedValue.remindAt != nil {
+                    clearButton("Remove the reminder") { d.wrappedValue.remindAt = nil; expireWithReminder = false }
                 }
                 Spacer()
             }
@@ -309,10 +362,20 @@ struct NoteRow: View {
         }
     }
 
-    private func chip(_ text: String, set: Bool) -> some View {
-        Text(text).font(.system(size: 11)).padding(.horizontal, 8).padding(.vertical, 3)
-            .background(Capsule().fill(Color.primary.opacity(set ? 0.12 : 0.06)))
-            .foregroundStyle(set ? .primary : .secondary)
+    /// A set value is a filled pill; an unset one reads as an action ("+ Add reminder").
+    private func chip(icon: String, _ text: String, set: Bool) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: set ? icon : "plus").font(.system(size: 10, weight: .medium))
+            Text(text).font(.system(size: 11))
+        }
+        .padding(.horizontal, 9).padding(.vertical, 4)
+        .background(Capsule().fill(set ? Color.accentColor.opacity(0.14) : Color.clear))
+        .overlay(Capsule().strokeBorder(set ? Color.clear : Color.primary.opacity(0.15), style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
+        .foregroundStyle(set ? Color.accentColor : .secondary)
+    }
+    private func clearButton(_ help: String, _ act: @escaping () -> Void) -> some View {
+        Button(action: act) { Image(systemName: "xmark.circle.fill").font(.system(size: 11)) }
+            .buttonStyle(.borderless).foregroundStyle(.tertiary).help(help)
     }
 
     private func save() {

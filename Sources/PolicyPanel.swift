@@ -137,7 +137,7 @@ enum SwitchboardConcerns {
                                footer: "A timer keeps running if the app restarts. + adds a minute.", footerIcon: "bell",
                                content: AnyView(TimersTabView(timers: TimerStore.shared))),
             SwitchboardConcern(id: "notes", title: "Notes", subtitle: "Notes at hand, one file each", icon: Icons.tab["notes"]!,
-                               footer: "Drag the grip to reorder. Each note is a markdown file; the link icon copies its path.",
+                               footer: "Drag the grip to reorder. Point at a note, or right-click it, to copy it.",
                                footerIcon: "doc.text",
                                content: AnyView(NotesTabView(notes: NotesStore.shared)),
                                refresh: { NotesStore.shared.loadInBackground() },
