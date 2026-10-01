@@ -151,10 +151,7 @@ final class HoverPeek: NSObject {
         guard !panelOpen() else { return }
         cycle.pages = state.pages
         cycle.show(state.page)   // a pill clicked on the card moved the page
-        let phase: QuickCycle.Phase = e.phase.contains(.began) ? .began
-            : e.phase.contains(.ended) || e.phase.contains(.cancelled) ? .ended
-            : e.phase.isEmpty ? .none : .changed
-        guard cycle.scroll(delta: e.scrollingDeltaY, precise: e.hasPreciseScrollingDeltas, phase: phase,
+        guard cycle.scroll(delta: e.scrollingDeltaY, precise: e.hasPreciseScrollingDeltas, phase: .init(e),
                            momentum: !e.momentumPhase.isEmpty, at: e.timestamp) else { return }
         closeWork?.cancel()
         if !popover.isShown { refresh(); present() }

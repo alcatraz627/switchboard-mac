@@ -270,11 +270,11 @@ struct ControlsTabView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: SBStyle.gap) {
+            // Sound and Display take two rows each: the name with its buttons, then the slider with its level.
             section("Sound") {
                 row(icon: controls.muted == true ? "speaker.slash.fill" : "speaker.wave.2.fill",
                     title: controls.outputs.first { $0.id == controls.output }?.name ?? "No output",
-                    caption: controls.volume.map { "\(Int(($0 * 100).rounded()))%" + (controls.muted == true ? " · muted" : "") }
-                        ?? "volume set on the device") {
+                    caption: controls.volume == nil ? "volume set on the device" : nil) {
                     if controls.muted != nil {
                         Button { controls.toggleMute() } label: {
                             Image(systemName: controls.muted == true ? "speaker.slash" : "speaker.wave.1")
@@ -286,15 +286,17 @@ struct ControlsTabView: View {
                     outputMenu
                 }
                 if let v = controls.volume {
-                    slider(value: volumeDraft ?? v, low: "speaker", high: "speaker.wave.3",
+                    let shown = volumeDraft ?? v
+                    slider("controls.volume", value: shown, level: controls.muted == true ? "muted" : "\(Int((shown * 100).rounded()))%",
                            set: { volumeDraft = $0 }, commit: { controls.setVolume($0); volumeDraft = nil })
                 }
                 failure("output"); failure("volume")
             }
             if let b = controls.brightness {
                 section("Display") {
-                    row(icon: "sun.max.fill", title: "Built-in display", caption: "\(Int(((brightDraft ?? b) * 100).rounded()))%") { EmptyView() }
-                    slider(value: brightDraft ?? b, low: "sun.min", high: "sun.max",
+                    row(icon: "sun.max.fill", title: "Built-in display", caption: nil) { EmptyView() }
+                    let shown = brightDraft ?? b
+                    slider("controls.brightness", value: shown, level: "\(Int((shown * 100).rounded()))%",
                            set: { brightDraft = $0; controls.setBrightness($0) }, commit: { _ in brightDraft = nil })
                     failure("brightness")
                 }
@@ -302,7 +304,8 @@ struct ControlsTabView: View {
             if let on = controls.wifiOn {
                 section("Wi-Fi") {
                     row(icon: on ? "wifi" : "wifi.slash", title: "Wi-Fi",
-                        caption: !on ? "off" : controls.ssid ?? (controls.locationAllowed ? "not connected" : "connected · name hidden by macOS")) {
+                        caption: !on ? "off" : controls.ssid ?? (controls.locationAllowed ? "not connected" : "connected · name hidden by macOS"),
+                        captionIsName: on && controls.ssid != nil) {
                         if on && controls.ssid == nil && !controls.locationAllowed {
                             Button("Show name") { controls.askLocation() }.buttonStyle(.link).font(SBStyle.caption)
                                 .help("macOS shows the network name only to apps with Location access")
@@ -359,30 +362,44 @@ struct ControlsTabView: View {
         }
     }
 
-    private func row<C: View>(icon: String, title: String, caption: String, indent: CGFloat = 0,
+    /// A row's title is always a name (a device, a network), so it stays on
+    /// one line and gives up its middle when it does not fit.
+    private func row<C: View>(icon: String, title: String, caption: String?, captionIsName: Bool = false, indent: CGFloat = 0,
                               @ViewBuilder trailing: () -> C) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon).font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 18)
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(SBStyle.label).lineLimit(3).fixedSize(horizontal: false, vertical: true)
-                Text(caption).font(SBStyle.caption).foregroundStyle(.secondary).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                Text(title).font(SBStyle.label).nameFit(title)
+                if let caption {
+                    if captionIsName {
+                        Text(caption).font(SBStyle.caption).foregroundStyle(.secondary).nameFit(caption)
+                    } else {
+                        Text(caption).font(SBStyle.caption).foregroundStyle(.secondary).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
+            .layoutPriority(1)
             Spacer(minLength: 6)
             trailing()
         }
         .padding(.leading, SBStyle.rowH + indent).padding(.trailing, SBStyle.rowH).padding(.vertical, SBStyle.rowV + 1)
     }
 
-    private func slider(value: Float, low: String, high: String,
+    /// The level slider: scrolling over it moves it 5% a notch, and its level reads at the end.
+    private func slider(_ id: String, value: Float, level: String,
                         set: @escaping (Float) -> Void, commit: @escaping (Float) -> Void) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: low).font(.system(size: 10)).foregroundStyle(.secondary)
             Slider(value: Binding(get: { Double(value) }, set: { set(Float($0)) }), in: 0...1,
                    onEditingChanged: { editing in if !editing { commit(value) } })
                 .controlSize(.mini)
-            Image(systemName: high).font(.system(size: 10)).foregroundStyle(.secondary)
+            Text(level).font(SBStyle.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 40, alignment: .trailing)
         }
         .padding(.leading, SBStyle.rowH + 26).padding(.trailing, SBStyle.rowH).padding(.bottom, SBStyle.rowV + 2)
+        // up raises it, down lowers it, the way a volume wheel turns
+        .scrollSteps(id, inContent: true, stepper: .slider()) { by in
+            let v = sliderStep(value, by: -by)
+            set(v); commit(v)
+        }
     }
 
     private var outputMenu: some View {

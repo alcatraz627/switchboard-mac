@@ -44,55 +44,32 @@ enum QuickPage: String, CaseIterable {
 /// Turns scroll-wheel movement into page turns: one page per push of the
 /// wheel or swipe, never a run of pages from a single trackpad flick.
 struct QuickCycle {
-    /// Where a trackpad or Magic Mouse gesture is; a mouse wheel has none.
-    enum Phase { case none, began, changed, ended }
+    typealias Phase = ScrollStepper.Phase
 
     /// The pages in the owner's order; scrolling and number keys walk this list.
     var pages: [QuickPage] = QuickPage.allCases
     private(set) var page: QuickPage = .home
-    private var acc: CGFloat = 0
-    private var lastTurn: TimeInterval = -.infinity
-    private var lastEvent: TimeInterval = -.infinity
-    private var turnedThisGesture = false
-    /// Points of travel a swipe needs before it turns a page.
-    static let threshold: CGFloat = 6
-    /// The shortest gap between two wheel turns, so a fast spin steps rather than races.
-    static let wheelPause: TimeInterval = 0.2
-    /// Travel older than this belongs to an earlier gesture and is forgotten.
-    static let staleAfter: TimeInterval = 0.5
+    /// A swipe turns one page however long it runs; each wheel notch turns one, 0.2 s apart at most.
+    private var stepper = ScrollStepper(perGesture: true, distance: 6, wheelPause: 0.2)
 
     /// One scroll event; true when the page changed. Content-style direction:
-    /// scrolling the way that moves a list down goes forward. A swipe turns
-    /// at most one page however long it runs; each wheel notch turns one.
+    /// scrolling the way that moves a list down goes forward.
     mutating func scroll(delta: CGFloat, precise: Bool, phase: Phase, momentum: Bool, at t: TimeInterval) -> Bool {
-        if momentum { return false }                 // inertia after the finger lifts turns nothing
-        guard delta != 0 || phase != .none else { return false }
-        if !precise {
-            guard delta != 0, t - lastTurn >= Self.wheelPause else { return false }
-            turn(delta < 0 ? 1 : -1, at: t)
-            return true
-        }
-        if phase == .began || t - lastEvent > Self.staleAfter { acc = 0; turnedThisGesture = false }
-        lastEvent = t
-        if phase == .ended { acc = 0; turnedThisGesture = false; return false }
-        guard !turnedThisGesture else { return false }
-        acc += delta
-        guard abs(acc) >= Self.threshold else { return false }
-        turn(acc < 0 ? 1 : -1, at: t)
-        turnedThisGesture = true
+        let s = stepper.step(delta: delta, precise: precise, phase: phase, momentum: momentum, at: t)
+        guard s != 0 else { return false }
+        turn(s)
         return true
     }
 
-    mutating func turn(_ by: Int, at t: TimeInterval) {
+    /// Wraps around at either end, so the card can be cycled in one direction.
+    mutating func turn(_ by: Int) {
         let all = pages.isEmpty ? QuickPage.allCases : pages
         let i = all.firstIndex(of: page) ?? 0
         page = all[(i + by % all.count + all.count) % all.count]
-        lastTurn = t
-        acc = 0
     }
 
     /// Forgets any half-made gesture; the page stays where it was.
-    mutating func forgetGesture() { acc = 0; lastTurn = -.infinity; lastEvent = -.infinity; turnedThisGesture = false }
+    mutating func forgetGesture() { stepper.reset() }
     /// Goes to a page. One that is no longer in the list falls back to the first.
     mutating func show(_ p: QuickPage) { page = pages.contains(p) ? p : (pages.first ?? .home) }
 
@@ -161,6 +138,28 @@ func probeQuickCycle() -> String {
         if d.page != want { check("pages come in order", false, d.page.rawValue); return lines.joined(separator: "\n") }
     }
     check("pages come in order: now, limits, approvals, bulbs, pinned notes", true)
+
+    // The panel's tabs and sliders: a swipe steps every so many points, not once per swipe.
+    var tabs = ScrollStepper.tabs()
+    var moved = 0
+    _ = tabs.step(delta: -3, precise: true, phase: .began, momentum: false, at: 0)
+    for i in 1...30 { moved += tabs.step(delta: -3, precise: true, phase: .changed, momentum: false, at: Double(i) * 0.01) }
+    check("a long swipe over the tabs steps several tabs, one per stretch", moved == 3, "\(moved)")
+    check("inertia over the tabs steps nothing", tabs.step(delta: -50, precise: true, phase: .none, momentum: true, at: 1) == 0)
+    var slide = ScrollStepper.slider()
+    check("each wheel notch over a slider steps it", slide.step(delta: 1, precise: false, phase: .none, momentum: false, at: 0) == -1
+          && slide.step(delta: 1, precise: false, phase: .none, momentum: false, at: 0.05) == -1)
+    check("a slider moves 5% a step and stops at the ends",
+          sliderStep(0.5, by: 1) == 0.55 && sliderStep(0.98, by: 1) == 1 && sliderStep(0.02, by: -1) == 0)
+    check("a slider off the 5% grid lands on it", sliderStep(0.43, by: 1) == 0.5)
+    check("tabs stop at the ends rather than wrap",
+          stepped(["a", "b", "c"], from: "c", by: 1) == nil && stepped(["a", "b", "c"], from: "a", by: 1) == "b")
+    let targets = ScrollTargets()
+    targets.contentFrame = CGRect(x: 0, y: 100, width: 300, height: 400)
+    targets.set("tabs", frame: CGRect(x: 0, y: 60, width: 300, height: 20), inContent: false, stepper: .tabs())
+    targets.set("slider", frame: CGRect(x: 0, y: 50, width: 300, height: 20), inContent: true, stepper: .slider())
+    check("a slider scrolled up under the header does not catch a scroll", targets.target(at: CGPoint(x: 10, y: 55)) == nil)
+    check("the tab row does", targets.target(at: CGPoint(x: 10, y: 65)) == "tabs")
 
     // Where the card reopens: the page it last showed, or the first when that page is gone.
     var m = QuickCycle()

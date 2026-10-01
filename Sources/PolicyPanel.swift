@@ -215,12 +215,14 @@ struct PolicyPanel: View {
                     })
                 }
                 .frame(height: min(max(contentHeight, 120), PT.maxHeight))
+                .scrollContentFrame()
                 .onPreferenceChange(ContentHeightKey.self) { contentHeight = $0 }
             }
             Divider()
             footer
         }
         .frame(width: PT.width)
+        .coordinateSpace(name: ScrollTargets.space)
     }
 
     private var header: some View {
@@ -303,6 +305,14 @@ struct PolicyPanel: View {
         }
         .padding(2)
         .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.07)))
+        // scrolling over the spaces moves between them, each opening on its last-used tab
+        .scrollSteps("panel.spaces") { by in
+            let ids = spaces.map(\.id)
+            guard let here = Visibility.space(of: current.id), let next = stepped(ids, from: here, by: by),
+                  let s = spaces.first(where: { $0.id == next }) else { return }
+            let last = Visibility.lastTab(in: s.id)
+            open(s.tabs.first { $0.id == last } ?? s.tabs[0])
+        }
     }
 
     /// The chosen space's tabs, each with its own icon, the current one underlined.
@@ -330,6 +340,12 @@ struct PolicyPanel: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 6)
+        // scrolling over the tab row moves along it, on its own, without changing space
+        .scrollSteps("panel.tabs") { by in
+            let tabs = currentSpaceTabs.map(\.id)
+            guard let next = stepped(tabs, from: current.id, by: by), let c = currentSpaceTabs.first(where: { $0.id == next }) else { return }
+            open(c)
+        }
     }
 
     private var footer: some View {
@@ -1268,6 +1284,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     private var peek: HoverPeek?
     private var dot: IconDot?
     private var dotWatch: AnyCancellable?
+    private var panelScroll: Any?
     /// The hover lines only the app can write (problems, timers, services),
     /// for the items chosen in Settings.
     var appHoverLines: (Set<HoverItem>) -> [HoverLine] = { _ in [] }
@@ -1344,6 +1361,13 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         popover.behavior = .transient
         popover.animates = true
         popover.delegate = self
+        // Scrolling over a row of tabs or a slider steps it; anywhere else scrolls as usual.
+        panelScroll = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
+            guard let self, self.popover.isShown, let v = self.popover.contentViewController?.view, e.window === v.window else { return e }
+            let p = v.convert(e.locationInWindow, from: nil)
+            let at = CGPoint(x: p.x, y: v.isFlipped ? p.y : v.bounds.height - p.y)
+            return ScrollTargets.shared.handle(e, at: at) ? nil : e
+        }
 
         // Pay the first-open costs now, not on the owner's click: load the
         // values and lay out the view once while nobody is waiting.

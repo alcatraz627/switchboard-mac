@@ -61,6 +61,13 @@ struct InputBox: ViewModifier {
 
 extension View {
     func inputBox(focused: Bool) -> some View { modifier(InputBox(focused: focused)) }
+
+    /// How a name (a device, a network, a file) fits a line: whole when it
+    /// fits, otherwise its middle gives way so both ends stay readable. Prose
+    /// wraps instead; this is only for names. The full name is the tooltip.
+    func nameFit(_ full: String) -> some View {
+        lineLimit(1).truncationMode(.middle).help(full)
+    }
 }
 
 // ── A text view that knows Enter, Escape and focus ──────────────────────────
