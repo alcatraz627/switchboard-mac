@@ -277,4 +277,12 @@ app and collect candidates for the owner) has not run yet.
 - Not yet seen with a real pointer: title-bar scroll, number keys (they need
   a click into the card first, so a hover never steals the keyboard), badge
   click landing on the searched rows in a live panel.
-- Next: step 3 (shared input and editor components).
+- Step 3 done in 27ef07f: Sources/Inputs.swift (InputRules, EditorText,
+  NoteSheet, ColorBalls, EditingState) under Notes, Timers and search
+  (`--probe-notes`). Defaults: collapsed composer Enter now opens the body
+  instead of saving (owner's spec); ⌘↩ or the check saves. Search Escape
+  keeps the text. Lights rename and the policy ask field keep their own
+  Escape (cancel), which also drops focus.
+- Not yet seen live: keyboard focus landing on tab open (depends on the
+  panel re-running onAppear when it reopens), Escape not closing the panel.
+- Next: step 4 (tab and slider scroll, Controls layout, middle truncation).
