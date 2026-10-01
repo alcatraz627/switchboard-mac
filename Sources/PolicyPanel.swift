@@ -309,8 +309,10 @@ struct PolicyPanel: View {
         // scrolling over the spaces moves between them, each opening on its last-used tab
         .scrollSteps("panel.spaces") { by in
             let ids = spaces.map(\.id)
-            guard let here = Visibility.space(of: current.id), let next = stepped(ids, from: here, by: by),
-                  let s = spaces.first(where: { $0.id == next }) else { return }
+            // from Settings or Approvals, which sit outside the spaces, forward enters the first and back the last
+            let next = Visibility.space(of: current.id).flatMap { stepped(ids, from: $0, by: by) }
+                ?? (Visibility.space(of: current.id) == nil ? (by > 0 ? ids.first : ids.last) : nil)
+            guard let next, let s = spaces.first(where: { $0.id == next }) else { return }
             let last = Visibility.lastTab(in: s.id)
             open(s.tabs.first { $0.id == last } ?? s.tabs[0])
         }

@@ -347,6 +347,29 @@ make sure its truly obsolete; on color picker just show 8 pre-picked colors".
 - `warm` fixed at source: ~/Code/local-models c83d26a.
 - Session index fixed: ~/.claude 60ee471 (not pushed).
 
+### Live pointer tests (2026-10-01, real CGEvent moves and wheel notches, no clicks)
+
+Scripts in the session scratchpad (drive-hover, drive-content, drive-panel,
+drive-focus). Each line is a screenshot read back.
+
+- Hover opens on Now with the gear, grid and one warn badge: pass.
+- Wheel over the icon turns pages in the owner's order (Now, Approvals,
+  Limits); the pill row drops to icons when a long name does not fit: pass.
+- Limits shows Claude 5h, Claude 7d and Codex 7d (90%, red): pass.
+- Wheel over the card's title bar turns the page: pass.
+- Wheel over a tall page's content leaves the page alone: pass.
+- Leaving: card still up at 1 s, gone at 3.6 s with a 3 s delay: pass.
+- Coming back reopens on the page it last showed: pass.
+- Panel space bar steps spaces (from Settings it enters the first space),
+  each opening on its last-used tab; the tab row steps tabs within the space
+  on its own: pass (from-Settings case fixed during the test).
+- Warn marks on Claude and Hooks are orange: pass.
+- Opening Notes shows the new-note field with the focus edge: pass (caret
+  not captured).
+- Not driven: number keys and Escape (a key event could land in the owner's
+  app), badge click (needs a click), slider wheel (would change the owner's
+  volume). These are covered by probes only.
+
 ## Why "refresh session index" fails (investigated 2026-10-01)
 
 `com.alcatraz.refresh-session-index` runs
