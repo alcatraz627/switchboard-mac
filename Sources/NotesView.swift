@@ -204,6 +204,13 @@ struct NoteRow: View {
                     copyButton("textformat", "Copy the title", note.title)
                 }
                 .opacity(hovering || open ? 1 : 0)
+                // a pinned note shows on the menu-bar quick page
+                Button { setPinned(!note.pinned) } label: {
+                    Image(systemName: note.pinned ? "pin.fill" : "pin").font(.system(size: 11))
+                        .foregroundStyle(note.pinned ? Color.accentColor : .secondary).frame(width: 16)
+                }
+                .buttonStyle(.borderless).help(note.pinned ? "Unpin: leave the menu-bar quick page" : "Pin to the menu-bar quick page")
+                .opacity(note.pinned || hovering || open ? 1 : 0)
                 Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
                     .rotationEffect(.degrees(open ? 90 : 0)).foregroundStyle(.secondary)
             }
@@ -213,6 +220,8 @@ struct NoteRow: View {
             .onTapGesture { toggleOpen() }
             .onHover { hovering = $0 }
             .contextMenu {
+                Button(note.pinned ? "Unpin" : "Pin to the quick page") { setPinned(!note.pinned) }
+                Divider()
                 Button("Copy title") { copy(note.title) }
                 Button("Copy whole note") { copy(note.content) }
                 Button("Copy file path") { copy(note.path) }
@@ -233,6 +242,12 @@ struct NoteRow: View {
     private func linkLabel(_ u: URL) -> String {
         if u.isFileURL { return u.lastPathComponent }
         return (u.host ?? "") + u.path
+    }
+    private func setPinned(_ on: Bool) {
+        var n = draft ?? note
+        n.pinned = on
+        if draft != nil { draft = n }
+        notes.update(n)
     }
     private func copy(_ s: String) {
         NSPasteboard.general.clearContents()

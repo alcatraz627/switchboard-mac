@@ -111,6 +111,39 @@ if let out = argAfter("--snapshot-when") {
     print(ok ? "wrote \(out)" : "snapshot failed")
     exit(ok ? 0 : 1)
 }
+if args.contains("--probe-quick") {
+    let r = probeQuickCycle()
+    print(r)
+    exit(r.contains("FAIL") ? 1 : 0)
+}
+if let out = argAfter("--snapshot-quick") {
+    // One quick page, drawn from the real stores (read only): --page home|limits|approvals|bulbs|notes
+    let page = QuickPage(rawValue: argAfter("--page") ?? "home") ?? .home
+    let policy = PolicyStore()
+    policy.setNeeds(NeedsYou.items(), refresh: {})
+    let usage = UsageStore()
+    usage.loadClaude()
+    let lights = LightsStore()
+    if page == .bulbs {
+        lights.discover()
+        let until = Date().addingTimeInterval(8)
+        while lights.discovering && Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.1)) }
+    }
+    NotesStore.shared.load()
+    let state = QuickState()
+    state.page = page
+    state.homeLines = delegate.hoverLines(Set(HoverItem.allCases))
+    if policy.needsWaiting > 0 {
+        state.chips.append(StatusChip(id: "approvals", icon: "hand.raised.fill", text: "\(policy.needsWaiting) waiting",
+                                      tint: Color(nsColor: menuYellow), help: "", opens: .approvals, tab: nil))
+    }
+    state.chips.append(StatusChip(id: "sample", icon: "exclamationmark.triangle.fill", text: "1 problem", tint: .red,
+                                  help: "", opens: nil, tab: "system"))
+    let card = QuickCard(state: state, policy: policy, usage: usage, lights: lights, notes: NotesStore.shared, openTab: { _ in })
+    let ok = snapshotCard(AnyView(card), to: out)
+    print(ok ? "wrote \(out)" : "snapshot failed")
+    exit(ok ? 0 : 1)
+}
 if let out = argAfter("--snapshot-hover") {
     // Every item on, from a real snapshot and the real limits file, plus one waiting push.
     _ = delegate.panelSystemGroupsFresh()

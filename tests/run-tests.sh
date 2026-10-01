@@ -50,6 +50,10 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   check "the Settings tab renders" "$BIN" --snapshot "$WORK/settings.png" --tab settings
   check "notes save, read back, expire, reorder and delete (scratch folder)" env SWITCHBOARD_STATE="$WORK/notes-state" "$BIN" --probe-notes
   check "the hover preview renders with every item on" "$BIN" --snapshot-hover "$WORK/hover.png"
+  check "scrolling turns one quick page per push, wraps, and ignores inertia" "$BIN" --probe-quick
+  for p in home limits approvals bulbs notes; do
+    check "the $p quick page renders" env SWITCHBOARD_STATE="$WORK/notes-state" "$BIN" --snapshot-quick "$WORK/quick-$p.png" --page "$p"
+  done
   check "timers run, go off, extend and clear" "$BIN" --probe-timers-tab
   check "the Queue tab renders" "$BIN" --snapshot "$WORK/queue.png" --tab queue
   check "the time picker renders" "$BIN" --snapshot-when "$WORK/when.png"

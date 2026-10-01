@@ -24,12 +24,25 @@ struct HoverPreview: View {
     let lines: [HoverLine]
 
     var body: some View {
+        HoverLinesView(lines: lines)
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .frame(width: 300, alignment: .leading)
+            .background(GlassBackground())
+    }
+}
+
+/// The preview's lines on their own, so the quick pages can show them too.
+struct HoverLinesView: View {
+    let lines: [HoverLine]
+    var labelWidth: CGFloat = 34
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(lines) { line in
                 switch line {
                 case .bar(let label, let pct, let color, let resets):
                     HStack(spacing: 8) {
-                        Text(label).font(.system(size: 11, weight: .medium)).frame(width: 34, alignment: .leading)
+                        Text(label).font(.system(size: 11, weight: .medium)).frame(width: labelWidth, alignment: .leading)
                         GeometryReader { g in
                             ZStack(alignment: .leading) {
                                 Capsule().fill(Color.primary.opacity(0.1))
@@ -48,9 +61,6 @@ struct HoverPreview: View {
                 }
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 10)
-        .frame(width: 300, alignment: .leading)
-        .background(GlassBackground())
     }
 }
 
@@ -71,25 +81,54 @@ struct GlassBackground: NSViewRepresentable {
 final class HoverPeek: NSObject {
     private weak var button: NSStatusBarButton?
     private let popover = NSPopover()
-    private let lines: () -> [HoverLine]
+    private let state: QuickState
+    /// Fills the Now page (its lines and status chips) from what is in memory.
+    private let refresh: () -> Void
     private let panelOpen: () -> Bool
     private var closeWork: DispatchWorkItem?
     private var poll: Timer?
+    private var scrollWatch: Any?
+    private var cycle = QuickCycle()
     private var inside = false
+    /// How long the card stays after the pointer leaves, so a chip can still be reached.
+    static let linger: TimeInterval = 3
 
-    init(button: NSStatusBarButton, lines: @escaping () -> [HoverLine], panelOpen: @escaping () -> Bool) {
+    init(button: NSStatusBarButton, state: QuickState, card: AnyView,
+         refresh: @escaping () -> Void, panelOpen: @escaping () -> Bool) {
         self.button = button
-        self.lines = lines
+        self.state = state
+        self.refresh = refresh
         self.panelOpen = panelOpen
         super.init()
         popover.behavior = .applicationDefined   // it follows the pointer, not clicks
         popover.animates = false
         popover.appearance = NSAppearance(named: .vibrantDark)
+        let host = NSHostingController(rootView: card)
+        host.sizingOptions = [.preferredContentSize]   // the card resizes as pages change
+        popover.contentViewController = host
         // A tracking area on a status item never reaches a non-view owner, so the
         // pointer is checked against the icon's frame five times a second instead.
         poll = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.check() }
         // Lets macOS batch this wake-up with others; a hover a tenth of a second late is unnoticeable.
         poll?.tolerance = 0.1
+        // Scrolling over the icon itself (not the card) turns the card's page.
+        scrollWatch = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
+            guard let self, let b = self.button, e.window === b.window else { return e }
+            self.scrolled(e)
+            return e
+        }
+    }
+
+    deinit { if let w = scrollWatch { NSEvent.removeMonitor(w) } }
+
+    private func scrolled(_ e: NSEvent) {
+        guard !panelOpen() else { return }
+        cycle.show(state.page)   // a dot clicked on the card moved the page
+        let momentum = !e.momentumPhase.isEmpty
+        guard cycle.scroll(delta: e.scrollingDeltaY, at: e.timestamp, momentum: momentum) else { return }
+        closeWork?.cancel()
+        if !popover.isShown { refresh(); present() }
+        state.page = cycle.page
     }
 
     private func check() {
@@ -105,12 +144,19 @@ final class HoverPeek: NSObject {
 
     private func entered() {
         closeWork?.cancel()
-        guard let b = button, !panelOpen(), !popover.isShown else { return }
-        let l = lines()
-        guard !l.isEmpty else { return }
-        let host = NSHostingController(rootView: HoverPreview(lines: l))
+        guard !panelOpen(), !popover.isShown else { return }
+        // each fresh hover starts on Now, as the card always has
+        state.page = .home
+        cycle.reset()
+        refresh()
+        // nothing to say on Now: stay quiet until the owner scrolls to another page
+        guard !state.homeLines.isEmpty || !state.chips.isEmpty else { return }
+        present()
+    }
+
+    private func present() {
+        guard let b = button, let host = popover.contentViewController else { return }
         host.view.layoutSubtreeIfNeeded()
-        popover.contentViewController = host
         popover.contentSize = host.view.fittingSize
         popover.show(relativeTo: b.bounds, of: b, preferredEdge: .minY)
     }
@@ -118,7 +164,7 @@ final class HoverPeek: NSObject {
     private func exited() {
         let work = DispatchWorkItem { [weak self] in self?.popover.performClose(nil) }
         closeWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.linger, execute: work)
     }
 
     /// Closes it at once, as when the panel opens.
@@ -128,8 +174,13 @@ final class HoverPeek: NSObject {
 /// Draws the preview offscreen in dark or light, for checking without a pointer.
 /// `dark` is ignored: the live card is always vibrant dark, so the snapshot is too.
 func snapshotHover(_ lines: [HoverLine], to path: String, dark: Bool) -> Bool {
+    snapshotCard(AnyView(HoverPreview(lines: lines)), to: path)
+}
+
+/// Draws any hover card offscreen, the way it looks under the menu bar.
+func snapshotCard(_ card: AnyView, to path: String) -> Bool {
     let appearance = NSAppearance(named: .vibrantDark)!
-    let host = NSHostingView(rootView: HoverPreview(lines: lines).background(Color(nsColor: .windowBackgroundColor)))
+    let host = NSHostingView(rootView: card.background(Color(nsColor: .windowBackgroundColor)))
     host.appearance = appearance
     host.frame = NSRect(origin: .zero, size: host.fittingSize)
     let win = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)

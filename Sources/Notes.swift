@@ -31,6 +31,12 @@ func probeNotes() -> String {
     check("the body survives the file", back?.body == "The body line\nsecond line", back?.body ?? "nil")
     let e = s.notes.first { $0.id == b?.id }
     check("tags survive the file", e?.tags == ["ops", "later"], e?.tags.joined(separator: ",") ?? "nil")
+    var p = s.notes.first { $0.id == a?.id }!
+    p.pinned = true
+    s.update(p)
+    s.load()
+    check("a pin survives the file", s.notes.first { $0.id == a?.id }?.pinned == true)
+    check("an unpinned note stays unpinned", s.notes.first { $0.id == b?.id }?.pinned == false)
     check("a past expiry moves the note to Expired", s.expired.map(\.id) == [b!.id] && s.live.map(\.id) == [a!.id])
     let c = s.add("Third")!
     // New notes go on top, so the order is c, b, a; drag a onto c's place.
@@ -110,6 +116,8 @@ struct Note: Identifiable, Equatable {
     var remindRepeat: Repeat = .never
     /// The Reminders item this note owns, so it can be changed or removed.
     var reminderID: String?
+    /// Pinned notes are the ones the menu-bar quick page lists.
+    var pinned = false
 
     var expired: Bool { expires.map { $0 <= Date() } ?? false }
     var path: String { NotesStore.dir + "/" + id + ".md" }
@@ -254,6 +262,7 @@ final class NotesStore: ObservableObject {
             if n.remindRepeat != .never { lines.append("remind_repeat: " + n.remindRepeat.rawValue) }
         }
         if let id = n.reminderID { lines.append("reminder_id: " + q(id)) }
+        if n.pinned { lines.append("pinned: true") }
         lines.append("---")
         return lines.joined(separator: "\n") + "\n" + n.body + (n.body.isEmpty ? "" : "\n")
     }
@@ -285,7 +294,8 @@ final class NotesStore: ObservableObject {
                     expires: fields["expires"].flatMap(iso.date),
                     remindAt: fields["remind_at"].flatMap(iso.date),
                     remindRepeat: fields["remind_repeat"].flatMap(Note.Repeat.init) ?? .never,
-                    reminderID: fields["reminder_id"])
+                    reminderID: fields["reminder_id"],
+                    pinned: fields["pinned"] == "true")
     }
 
     // ── Reminders ───────────────────────────────────────────────────────────

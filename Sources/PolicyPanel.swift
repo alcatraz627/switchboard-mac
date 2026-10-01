@@ -1263,6 +1263,42 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     /// The hover lines only the app can write (problems, timers, services),
     /// for the items chosen in Settings.
     var appHoverLines: (Set<HoverItem>) -> [HoverLine] = { _ in [] }
+    /// Services that are down, by name, for the Now page's chips.
+    var appServicesDown: () -> [String] = { [] }
+    /// What the hover card shows and which quick page it is on.
+    let quick = QuickState()
+
+    /// Fill the Now page: the chosen hover lines, and a chip for each thing
+    /// that needs the owner (what waits, what is wrong, what is down).
+    func refreshQuick() {
+        quick.homeLines = hoverLines()
+        quick.chips = statusChips()
+    }
+
+    func statusChips() -> [StatusChip] {
+        var out: [StatusChip] = []
+        let n = store.needsWaiting
+        if n > 0 {
+            out.append(StatusChip(id: "approvals", icon: "hand.raised.fill", text: "\(n) waiting",
+                                  tint: Color(nsColor: menuYellow), help: "\(n) push\(n == 1 ? "" : "es") or ask\(n == 1 ? "" : "s") wait on you",
+                                  opens: .approvals, tab: nil))
+        }
+        if let first = problemList.first {
+            let c = problemList.count
+            out.append(StatusChip(id: "problems", icon: "exclamationmark.triangle.fill", text: c == 1 ? "1 problem" : "\(c) problems",
+                                  tint: .red, help: problemList.map(\.text).joined(separator: "\n"), opens: nil, tab: first.tab))
+        }
+        let down = appServicesDown()
+        if !down.isEmpty {
+            out.append(StatusChip(id: "down", icon: "bolt.slash.fill", text: down.count == 1 ? "\(down[0]) down" : "\(down.count) down",
+                                  tint: .orange, help: "Down: " + down.joined(separator: ", "), opens: nil, tab: "runtime"))
+        }
+        if let t = TimerStore.shared.running.first, t.fireAt.timeIntervalSinceNow < 60 {
+            out.append(StatusChip(id: "timer", icon: Icons.tab["timers"] ?? "timer", text: t.label.isEmpty ? "timer" : t.label,
+                                  tint: .teal, help: "\(t.label) is about to go off", opens: nil, tab: "timers"))
+        }
+        return out
+    }
 
     init(liveDirs: @escaping () -> [String], requestSystemRefresh: @escaping () -> Void) {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -1276,7 +1312,10 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             b.action = #selector(toggle(_:))
             // The tooltip would cover the preview; the preview says more.
             b.toolTip = nil
-            peek = HoverPeek(button: b, lines: { [weak self] in self?.hoverLines() ?? [] },
+            let card = QuickCard(state: quick, policy: store, usage: usage, lights: lights, notes: NotesStore.shared,
+                                 openTab: { [weak self] tab in self?.peek?.hide(); self?.show(tab: tab) })
+            peek = HoverPeek(button: b, state: quick, card: AnyView(card),
+                             refresh: { [weak self] in self?.refreshQuick() },
                              panelOpen: { [weak self] in self?.popover.isShown ?? false })
             let d = IconDot(on: b)
             dot = d
@@ -1310,14 +1349,18 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         show()
     }
 
-    func show() {
+    func show(tab chosen: String? = nil) {
         // Open at once on what is already loaded, then refresh underneath. The
         // values rarely change between opens, and waiting for pol.sh first is
         // what made the click feel slow.
         guard let b = item.button, !popover.isShown else { return }
         peek?.hide()
-        // Open on whatever turned the dot red or yellow, once per new cause.
-        if let tab = attentionTab() {
+        // A tab asked for by name (a quick page's Open button) wins; otherwise
+        // open on whatever turned the dot red or yellow, once per new cause.
+        if let tab = chosen {
+            UserDefaults.standard.set(tab, forKey: PolicyPanel.tabKey)
+            Visibility.rememberTab(tab)
+        } else if let tab = attentionTab() {
             UserDefaults.standard.set(tab, forKey: PolicyPanel.tabKey)
             Visibility.rememberTab(tab)
         }

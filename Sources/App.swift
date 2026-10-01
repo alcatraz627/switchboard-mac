@@ -42,6 +42,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             liveDirs: { LiveSessions.dirs() },
             requestSystemRefresh: { [weak self] in self?.refreshSnapshot() })
         policyController?.appHoverLines = { [weak self] chosen in self?.hoverLines(chosen) ?? [] }
+        policyController?.appServicesDown = { [weak self] in self?.servicesDown() ?? [] }
         if let store = policyController?.store {
             // refreshPanel hands over the new rows a tick later, so answer after it.
             store.afterFreshSnapshot = { [weak self] done in
@@ -1658,7 +1659,6 @@ extension SwitchboardApp {
     /// Problems, timers and services from the last snapshot; nothing is read
     /// here, so hovering costs nothing. At most three problem lines.
     func hoverLines(_ chosen: Set<HoverItem>) -> [HoverLine] {
-        let s = sbSnapshot
         var out: [HoverLine] = []
         if chosen.contains(.problems) {
             let problems = problemTexts()
@@ -1678,13 +1678,20 @@ extension SwitchboardApp {
             }
         }
         if chosen.contains(.services) {
-            var down: [String] = []
-            if kanbanUp == false { down.append("kanban") }
-            if s.hubReachable == false { down.append("session hub") }
-            if s.brokerUp == false { down.append("ipc broker") }
+            let down = servicesDown()
             if !down.isEmpty { out.append(.note(icon: "bolt.slash", text: "Down: " + down.joined(separator: ", "), tint: .red)) }
         }
         return out
+    }
+
+    /// The services that are down right now, by name.
+    func servicesDown() -> [String] {
+        let s = sbSnapshot
+        var down: [String] = []
+        if kanbanUp == false { down.append("kanban") }
+        if s.hubReachable == false { down.append("session hub") }
+        if s.brokerUp == false { down.append("ipc broker") }
+        return down
     }
 
     /// Everything wrong right now, in a sentence each, from the last snapshot.
