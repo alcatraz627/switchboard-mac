@@ -358,15 +358,26 @@ final class PolicyStore: ObservableObject {
     /// sections until the new ones arrive, and one read runs at a time.
     func reloadCatalog(_ tab: String, _ read: @escaping () -> [SystemGroup]) {
         guard !catalogReading.contains(tab) else { return }
+        // A list read moments ago is shown as it is; re-reading it on every open is what
+        // made a tab visibly refill while the panel was opening.
+        if catalogs[tab] != nil, let t = catalogReadAt[tab], Date().timeIntervalSince(t) < Self.catalogFresh { return }
         catalogReading.insert(tab)
         DispatchQueue.global(qos: .userInitiated).async {
+            let t0 = Date()
             let groups = read()
+            dlog("catalog \(tab) read in \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
             DispatchQueue.main.async {
                 self.catalogs[tab] = groups
+                self.catalogReadAt[tab] = Date()
                 self.catalogReading.remove(tab)
             }
         }
     }
+    /// How long a list tab counts as fresh after it is read.
+    static let catalogFresh: TimeInterval = 20
+    private var catalogReadAt: [String: Date] = [:]
+    /// The refresh button asks for a real re-read, fresh or not.
+    func expireCatalog(_ tab: String) { catalogReadAt[tab] = nil }
     /// Flip a system switch now and back at a time; cancel keeps the current
     /// state, endNow flips it back at once. The bar owns the timers.
     var startSystemTimer: (_ key: String, _ until: Date) -> Void = { _, _ in }

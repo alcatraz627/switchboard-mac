@@ -68,6 +68,11 @@ extension View {
     func nameFit(_ full: String) -> some View {
         lineLimit(1).truncationMode(.middle).help(full)
     }
+
+    /// Lets the text be selected and copied with ⌘C, with no change to how it looks.
+    @ViewBuilder func selectable(_ on: Bool) -> some View {
+        if on { textSelection(.enabled) } else { self }
+    }
 }
 
 // ── A text view that knows Enter, Escape and focus ──────────────────────────

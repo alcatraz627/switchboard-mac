@@ -72,7 +72,8 @@ enum SwitchboardConcerns {
     /// Mac shows fewer tabs rather than an error.
     static func all(policy: PolicyStore, usage: UsageStore, lights: LightsStore, controls: ControlsStore) -> [SwitchboardConcern] {
         Catalog.reload = { id in
-            DispatchQueue.main.async { if let read = catalogReaders[id] { policy.reloadCatalog(id, read) } }
+            // a row just changed what the list holds, so it is re-read however fresh it was
+            DispatchQueue.main.async { if let read = catalogReaders[id] { policy.expireCatalog(id); policy.reloadCatalog(id, read) } }
         }
         let tabs = registry(policy: policy, usage: usage, lights: lights, controls: controls)
             .filter { $0.id != "agents" || Integrations.policyStore }
@@ -354,7 +355,7 @@ struct PolicyPanel: View {
             Text(current.footer).font(PT.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
-            Button { current.refresh() } label: {
+            Button { store.expireCatalog(current.id); current.refresh() } label: {
                 Image(systemName: "arrow.clockwise").font(.system(size: 11))
             }
             .buttonStyle(.borderless)
@@ -685,6 +686,11 @@ struct SystemRowView: View {
     static var startExpanded = false
 
     private var opens: Bool { !row.children.isEmpty }
+    /// A row that only shows text (an opened item's details): its words can be
+    /// selected and copied like a web page. Rows a click acts on stay clickable.
+    private var readOnly: Bool {
+        !opens && row.menu == nil && row.action == nil && row.buttons.isEmpty && !row.isSwitch && row.timerKey == nil
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -764,6 +770,7 @@ struct SystemRowView: View {
                 Text(row.label).font(PT.label).fixedSize(horizontal: false, vertical: true)
                     .strikethrough(row.struck)
                     .foregroundStyle(row.struck ? .secondary : row.enabled || !row.isSwitch ? .primary : .secondary)
+                    .selectable(readOnly)
                 if let t = row.timer, let key = row.timerKey {
                     HStack(spacing: 4) {
                         Text("→ \(t.restoreOn ? "On" : "Off") in \(countdown(to: t.until, now: store.now))")
@@ -778,6 +785,7 @@ struct SystemRowView: View {
                 } else if !row.note.isEmpty {
                     Text(row.note).font(PT.caption).foregroundStyle(.secondary)
                         .lineLimit(row.noteLines == 0 ? nil : row.noteLines).fixedSize(horizontal: false, vertical: true)
+                        .selectable(readOnly)
                 }
             }
             .opacity(row.struck ? 0.55 : 1)

@@ -111,6 +111,15 @@ if let out = argAfter("--snapshot-when") {
     print(ok ? "wrote \(out)" : "snapshot failed")
     exit(ok ? 0 : 1)
 }
+if args.contains("--time-tabs") {
+    // How long each list tab takes to read its source: the wait before an opened tab fills in.
+    for (tab, read) in catalogReaders.sorted(by: { $0.key < $1.key }) {
+        let t0 = Date()
+        let rows = read().reduce(0) { $0 + $1.rows.count }
+        print("\(tab): \(Int(Date().timeIntervalSince(t0) * 1000)) ms, \(rows) rows")
+    }
+    exit(0)
+}
 if args.contains("--probe-quick") {
     let r = probeQuickCycle()
     print(r)

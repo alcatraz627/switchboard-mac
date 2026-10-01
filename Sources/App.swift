@@ -362,9 +362,12 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.sbSnapshot = s
-                if self.snapshotsDone == 0, !Visibility.tabHidden("rules") {
-                    // Read Hooks once at launch too (0.2 s), so the problem count is complete.
-                    self.policyController?.store.reloadCatalog("rules", RulesCatalog.groups)
+                if self.snapshotsDone == 0 {
+                    // Read every list tab once at launch, in the background: Hooks so the problem
+                    // count is complete, the rest so even a first open shows a filled list.
+                    for (tab, read) in catalogReaders where !Visibility.tabHidden(tab) {
+                        self.policyController?.store.reloadCatalog(tab, read)
+                    }
                 }
                 self.snapshotsDone += 1
                 if !self.kanbanBusy { self.kanbanUp = kanban }
@@ -959,11 +962,30 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             // Ollama reports a pinned-forever model as expiring in the year 2318.
             let stay = until.map { $0.timeIntervalSinceNow > 86400 * 365 ? "stays loaded" : "unloads in \(countdownText(to: $0, now: Date()))" } ?? ""
             var c = SystemRow(label: name, state: .on(menuTeal),
-                              note: "\(r["gb"] as? Double ?? 0) GB" + (stay.isEmpty ? "" : " · \(stay)"),
-                              tip: "Resident in Ollama")
+                              note: "\(r["gb"] as? Double ?? 0) GB" + (stay.isEmpty ? "" : " · \(stay)") + " · click to change",
+                              tip: "Resident in Ollama. Click to choose how long it stays loaded.")
             c.key = "model-" + name
             c.buttons = [RowButton(label: "Unload", kind: .run(run(["unload", name])), help: "Free its memory now")]
+            // how long it stays: the same leases `warm on <model> <time>` gives
+            c.menu = {
+                let menu = NSMenu()
+                menu.addItem(withTitle: "Keep \(name) loaded for", action: nil, keyEquivalent: "").isEnabled = false
+                for (title, ttl) in [("15 minutes", "15m"), ("1 hour", "1h"), ("4 hours", "4h"), ("Until I unload it", "forever")] {
+                    menu.addItem(ClosureMenuItem(title) { DispatchQueue.global(qos: .userInitiated).async { _ = run(["keep", name, ttl])() } })
+                }
+                menu.addItem(.separator())
+                menu.addItem(ClosureMenuItem("Unload now") { DispatchQueue.global(qos: .userInitiated).async { _ = run(["unload", name])() } })
+                return menu
+            }
             return c
+        }
+        if resident.count > 1 {
+            var all = SystemRow(label: "Every loaded model", state: .off, note: "\(resident.count) loaded",
+                                tip: "Same as warm off all: back to nothing loaded.")
+            all.key = "models-all"
+            all.showsBadge = false
+            all.buttons = [RowButton(label: "Unload all", kind: .run(run(["unload-all"])), help: "warm off all")]
+            ollama.children.append(all)
         }
         if up, let warm = m["warm_model"] as? String {
             let on = m["warm"] as? Bool ?? false
@@ -975,7 +997,18 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             w.key = "models-warm"
             w.buttons = [RowButton(label: on ? "Unload" : "Load", kind: .run(run(["warm", on ? "off" : "on"])),
                                    help: on ? "warm off" : "warm on: load it and keep it loaded")]
+            if on { w.buttons.append(RowButton(label: "Reload", kind: .run(run(["warm", "restart"])), help: "warm restart: unload, then load again")) }
             ollama.children.append(w)
+        }
+        // The server's own defaults, fixed where it starts; shown so the owner knows what happens untouched.
+        if up, let pol = m["policy"] as? [String: String], !pol.isEmpty {
+            let idle = pol["keep_alive"].map { $0 == "0" ? "idle models unload at once" : "idle models stay \($0)" }
+            let most = pol["max_loaded"].map { "at most \($0) loaded at a time" }
+            var p = SystemRow(label: "Default eviction", state: .off, note: [idle, most].compactMap { $0 }.joined(separator: " · "),
+                              tip: "Set in ~/Code/local-models/bin/lm-serve (OLLAMA_KEEP_ALIVE, OLLAMA_MAX_LOADED_MODELS); a restart of the server applies a change.")
+            p.key = "models-policy"
+            p.showsBadge = false
+            ollama.children.append(p)
         }
         rows.append(ollama)
 
@@ -1896,6 +1929,24 @@ extension SwitchboardApp {
               PolicyStatusController.attention(problems: hooks, hidden: [], waiting: 1, waitingKeys: ["a"], last: "").tab == "approvals")
         let mixed = Problem.levels(hooks + jobFail + [Problem(text: "1 gate is off", tab: "rules", level: .warn)])
         check("a tab's mark takes its worst problem", mixed == ["rules": .warn, "runtime": .error])
+        // A list read moments ago is not read again on open; the refresh button and a row change re-read it.
+        let fresh = PolicyStore()
+        var reads = 0
+        let reader: () -> [SystemGroup] = { reads += 1; return [] }
+        func pump(until done: () -> Bool) {
+            let end = Date().addingTimeInterval(3)
+            while !done() && Date() < end { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+        }
+        fresh.reloadCatalog("probe", reader)
+        pump { fresh.catalogs["probe"] != nil }
+        fresh.reloadCatalog("probe", reader)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))   // time for a read that should not happen
+        check("a list read moments ago is not read again", reads == 1)
+        fresh.expireCatalog("probe")
+        fresh.reloadCatalog("probe", reader)
+        pump { reads == 2 }
+        check("a refresh re-reads it however fresh it was", reads == 2)
+
         let badge = StatusBadge(problem: hooks[1], index: 0)
         check("a badge opens the problem's tab searched to its rows",
               badge.kind == .warn && badge.tab == "rules" && badge.query == "not wired")

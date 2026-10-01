@@ -7,10 +7,15 @@ killing other apps) is on.
 The Switchboard's Machine tab calls this. Warm and mem-guard go through the
 suite's own tools so the panel and `lm` never disagree.
 
-  models.py list            JSON state
-  models.py unload <model>  drop one model from memory now; JSON {ok}
-  models.py warm on|off     load or drop the warm companion (bin/warm); JSON {ok}
-  models.py guard on|off    start mem-guard, or ask it to stop; JSON {ok}
+  models.py list              JSON state
+  models.py unload <model>    drop one model from memory now; JSON {ok}
+  models.py unload-all        drop every loaded model (warm off all); JSON {ok}
+  models.py keep <model> <t>  keep a model loaded for t (15m, 1h, 4h, forever) (warm on); JSON {ok}
+  models.py warm on|off|restart  load, drop or reload the warm companion (bin/warm); JSON {ok}
+  models.py guard on|off      start mem-guard, or ask it to stop; JSON {ok}
+
+The server's own eviction defaults (how long an idle model stays, how many
+can be loaded at once) are set in bin/lm-serve; `list` reports them read-only.
 """
 import json
 import os
@@ -86,7 +91,46 @@ def state():
         "pressure": PRESSURE.get(level, "unknown"),
         "guard": guard_running(),
         "mlx": mlx_jobs(),
+        "policy": server_policy(),
     }
+
+
+def server_policy():
+    """The eviction settings lm-serve starts Ollama with, read from the script itself."""
+    out = {}
+    try:
+        for line in open(os.path.join(SUITE, "bin", "lm-serve")):
+            line = line.strip()
+            for key, name in (("OLLAMA_KEEP_ALIVE", "keep_alive"), ("OLLAMA_MAX_LOADED_MODELS", "max_loaded")):
+                if line.startswith(f"export {key}="):
+                    out[name] = line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return out
+
+
+def run_warm(args, timeout=120, then=None):
+    """Runs the suite's warm tool, so the panel and `warm` never disagree.
+    `then` re-checks the outcome, since warm reports success when Ollama refused."""
+    try:
+        r = subprocess.run([os.path.join(SUITE, "bin", "warm")] + args, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        answer(False, f"the warm tool is missing: {os.path.join(SUITE, 'bin', 'warm')}")
+    except subprocess.TimeoutExpired:
+        answer(False, f"warm did not finish within {timeout // 60} minutes")
+    if r.returncode != 0:
+        answer(False, (r.stderr or r.stdout).strip())
+    if then is not None:
+        err = then()
+        answer(err is None, err)
+    answer(True)
+
+
+def resident_names():
+    try:
+        return [m.get("name") or "" for m in http("/api/ps").get("models", [])]
+    except OSError:
+        return []
 
 
 def answer(ok, err=None):
@@ -105,14 +149,15 @@ def main():
             answer(True)
         except OSError as e:
             answer(False, f"Ollama did not answer: {e}")
-    elif cmd == "warm" and len(a) == 2 and a[1] in ("on", "off"):
-        try:
-            r = subprocess.run([os.path.join(SUITE, "bin", "warm"), a[1]], capture_output=True, text=True, timeout=120)
-        except FileNotFoundError:
-            answer(False, f"the warm tool is missing: {os.path.join(SUITE, 'bin', 'warm')}")
-        except subprocess.TimeoutExpired:
-            answer(False, "warm did not finish within 2 minutes")
-        answer(r.returncode == 0, (r.stderr or r.stdout).strip())
+    elif cmd == "warm" and len(a) == 2 and a[1] in ("on", "off", "restart"):
+        run_warm([a[1]])
+    elif cmd == "unload-all" and len(a) == 1:
+        run_warm(["off", "all"])
+    elif cmd == "keep" and len(a) == 3 and a[2] in ("15m", "1h", "4h", "forever"):
+        want = a[1]
+        run_warm(["on", want, a[2]], then=lambda: None if any(n == want or n.split(":")[0] == want.split(":")[0]
+                                                               for n in resident_names())
+                 else f"{want} is not loaded; Ollama may not have it (ollama list)")
     elif cmd == "guard" and len(a) == 2 and a[1] in ("on", "off"):
         if a[1] == "off":
             if not guard_running():
