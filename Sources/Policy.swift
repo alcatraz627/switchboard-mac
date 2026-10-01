@@ -214,6 +214,9 @@ struct SystemRow: Identifiable {
     var action: (() -> Void)? = nil
     /// A list of items to act on one by one, shown as a native menu.
     var menu: (() -> NSMenu)? = nil
+    /// The label is a name (a repo, a service, a device), kept to one line with
+    /// its middle cut when it does not fit; other labels wrap.
+    var labelIsName = false
     /// A pick-one setting (the scan cadence): labels, current index, setter.
     var choices: [String]? = nil
     var selected: Int = -1
@@ -322,14 +325,22 @@ final class PolicyStore: ObservableObject {
         tabOrder = reordered(tabOrder, moving: dragged, to: target)
     }
     /// The hover card's pages in the owner's order (every page, shown or not), and the hidden ones.
-    static let quickPageIDs = ["home", "limits", "approvals", "bulbs", "notes"]   // QuickPage.allCases, checked by --probe-quick
+    static let quickPageIDs = ["home", "limits", "approvals", "bulbs", "notes", "timers", "controls", "models"]   // QuickPage.allCases, checked by --probe-quick
+    /// Pages that start hidden, for the owner to switch on in Settings.
+    static let quickPagesOffAtFirst: Set<String> = ["timers", "controls", "models"]
     static let quickOrderKey = "switchboard.quickPageOrder", quickHiddenKey = "switchboard.quickPagesHidden"
     @Published var quickPageOrder: [String] = PolicyStore.mergedOrder(saved: UserDefaults.standard.stringArray(forKey: PolicyStore.quickOrderKey) ?? [],
                                                                        all: PolicyStore.quickPageIDs) {
         didSet { UserDefaults.standard.set(quickPageOrder, forKey: Self.quickOrderKey) }
     }
-    @Published var hiddenQuickPages: Set<String> = Set(UserDefaults.standard.stringArray(forKey: PolicyStore.quickHiddenKey) ?? []) {
+    @Published var hiddenQuickPages: Set<String> = PolicyStore.startingHidden(
+        saved: UserDefaults.standard.stringArray(forKey: PolicyStore.quickHiddenKey) ?? [],
+        seen: UserDefaults.standard.stringArray(forKey: PolicyStore.quickOrderKey) ?? []) {
         didSet { UserDefaults.standard.set(Array(hiddenQuickPages).sorted(), forKey: Self.quickHiddenKey) }
+    }
+    /// The saved hidden pages, plus any start-hidden page the saved order has never listed (new to this owner).
+    static func startingHidden(saved: [String], seen: [String]) -> Set<String> {
+        Set(saved).union(quickPagesOffAtFirst.filter { !seen.contains($0) })
     }
     /// The pages the hover card shows, in order; never empty, so the card always has a page.
     var shownQuickPages: [String] {

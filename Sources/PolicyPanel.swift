@@ -18,7 +18,7 @@ enum PT {
     static let title   = Font.system(size: 14, weight: .semibold)
     static let label   = Font.system(size: 12.5)
     static let caption = Font.system(size: 11)
-    static let section = Font.system(size: 10, weight: .semibold)
+    static let section = Font.system(size: 11, weight: .semibold)   // sentence case, so a point larger than caps needed
     static let mono    = Font.system(size: 11.5, weight: .medium).monospacedDigit()
     static let rowV: CGFloat = 5.5
     static let rowH: CGFloat = 12
@@ -637,7 +637,7 @@ struct GroupHeader: View {
             if let icon = Icons.section[name] {
                 Image(systemName: icon).font(.system(size: 9.5, weight: .semibold))
             }
-            Text(name.uppercased()).font(PT.section).tracking(0.7)
+            Text(name).font(PT.section)
         }
         .foregroundStyle(.secondary)
         .padding(.leading, 4)
@@ -710,10 +710,12 @@ struct SystemRowView: View {
             if let b = asking, case .ask(let placeholder, _) = b.kind {
                 HStack(spacing: 6) {
                     TextField(placeholder, text: $askDraft)
-                        .textFieldStyle(.roundedBorder).controlSize(.small)
+                        .textFieldStyle(.plain).font(PT.label)
                         .focused($askFocused)
+                        .inputBox(focused: askFocused)
                         .onSubmit { submitAsk(b) }
-                        .onExitCommand { asking = nil }
+                        // Escape lets go of the keyboard and keeps what was typed; Cancel closes it
+                        .onExitCommand { askFocused = false }
                     Button("Cancel") { asking = nil }.controlSize(.small)
                 }
                 .padding(.leading, PT.rowH + indent).padding(.trailing, PT.rowH).padding(.bottom, PT.rowV + 2)
@@ -767,10 +769,14 @@ struct SystemRowView: View {
                 Image(systemName: icon).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(row.label).font(PT.label).fixedSize(horizontal: false, vertical: true)
-                    .strikethrough(row.struck)
-                    .foregroundStyle(row.struck ? .secondary : row.enabled || !row.isSwitch ? .primary : .secondary)
-                    .selectable(readOnly)
+                Group {
+                    if row.labelIsName { Text(row.label).nameFit(row.label) }
+                    else { Text(row.label).fixedSize(horizontal: false, vertical: true) }
+                }
+                .font(PT.label)
+                .strikethrough(row.struck)
+                .foregroundStyle(row.struck ? .secondary : row.enabled || !row.isSwitch ? .primary : .secondary)
+                .selectable(readOnly)
                 if let t = row.timer, let key = row.timerKey {
                     HStack(spacing: 4) {
                         Text("→ \(t.restoreOn ? "On" : "Off") in \(countdown(to: t.until, now: store.now))")
@@ -1294,9 +1300,8 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     private var dotWatch: AnyCancellable?
     private var panelScroll: Any?
     private var pageWatch: AnyCancellable?
-    /// The hover lines only the app can write (problems, timers, services),
-    /// for the items chosen in Settings.
-    var appHoverLines: (Set<HoverItem>) -> [HoverLine] = { _ in [] }
+    /// Switches set to flip back on a timer, in words, for the Now page's badges.
+    var appTimedFlips: () -> [String] = { [] }
     /// Services that are down, by name, for the Now page's chips.
     var appServicesDown: () -> [String] = { [] }
     /// What the hover card shows and which quick page it is on.
@@ -1331,6 +1336,13 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
                                        text: "\(t.label.isEmpty ? "Timer" : t.label) · \(clock(t.fireAt.timeIntervalSinceNow))",
                                        kind: .info, help: "Open Timers", tab: "timers"))
             }
+            for (i, f) in appTimedFlips().enumerated() {
+                out.append(StatusBadge(id: "flip-\(i)", icon: "timer", text: f, kind: .info, help: "Open Machine", tab: "system"))
+            }
+            if let n = NotesStore.shared.notes.filter({ ($0.remindAt ?? .distantPast) > Date() }).min(by: { $0.remindAt! < $1.remindAt! }) {
+                out.append(StatusBadge(id: "reminder", icon: "bell", text: "\(n.heading) · \(WhenText.describe(n.remindAt!))",
+                                       kind: .info, help: "The next note reminder; open Notes", tab: "notes"))
+            }
         }
         return out
     }
@@ -1347,7 +1359,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             b.action = #selector(toggle(_:))
             // The tooltip would cover the preview; the preview says more.
             b.toolTip = nil
-            let card = QuickCard(state: quick, policy: store, usage: usage, lights: lights, notes: NotesStore.shared,
+            let card = QuickCard(state: quick, policy: store, usage: usage, lights: lights, notes: NotesStore.shared, controls: controls,
                                  openTab: { [weak self] tab in self?.peek?.hide(); self?.show(tab: tab) },
                                  openSearch: { [weak self] tab, q in
                                      self?.store.queries[tab] = q
@@ -1435,39 +1447,6 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             self?.store.reload()
             self?.usage.loadClaude()
         }
-    }
-
-    /// The hover preview's lines, in a fixed order: limits, what waits, then
-    /// what the app knows. Only the items chosen in Settings.
-    func hoverLines() -> [HoverLine] {
-        let chosen = store.hoverItems
-        var out: [HoverLine] = []
-        if chosen.contains(.limits) {
-            usage.loadClaude()   // one small file read, so the bars are current
-            for w in usage.claude where w.id == "five_hour" || w.id == "seven_day" {
-                let color: Color = w.pct >= usage.dangerPct ? .red : w.pct >= usage.warnPct ? .orange : .green
-                // The reset time only earns its space when it is close.
-                let soon = w.resetsAt.map { $0.timeIntervalSinceNow < 1800 && $0 > Date() } ?? false
-                out.append(.bar(label: w.id == "five_hour" ? "5h" : "Week", pct: w.pct, color: color,
-                                resets: soon ? "resets in " + countdownText(to: w.resetsAt!, now: Date()) : ""))
-            }
-        }
-        if chosen.contains(.approvals), store.needsWaiting > 0 {
-            let first = store.needGroups.first?.rows.first?.label ?? ""
-            out.append(.note(icon: "hand.raised.fill",
-                             text: "\(store.needsWaiting) waiting on you" + (first.isEmpty ? "" : ": \(first)"),
-                             tint: Color(nsColor: menuYellow)))
-        }
-        if chosen.contains(.timers) {
-            // At most two countdowns, soonest first, then the next note reminder.
-            for t in TimerStore.shared.running.prefix(2) {
-                out.append(.note(icon: Icons.tab["timers"]!, text: "\(t.label) · \(clock(t.fireAt.timeIntervalSinceNow))", tint: timerColor(t.color)))
-            }
-            if let n = NotesStore.shared.notes.filter({ ($0.remindAt ?? .distantPast) > Date() }).min(by: { $0.remindAt! < $1.remindAt! }) {
-                out.append(.note(icon: "bell", text: "\(n.title) · \(WhenText.describe(n.remindAt!))", tint: .secondary))
-            }
-        }
-        return out + appHoverLines(chosen)
     }
 
     /// The icon dot: red while something is broken, yellow while something waits.

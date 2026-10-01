@@ -342,10 +342,12 @@ struct BulbRow: View {
                 VStack(alignment: .leading, spacing: 1) {
                     if renaming {
                         TextField("Name", text: $draftName)
-                            .textFieldStyle(.roundedBorder).controlSize(.small).font(SBStyle.label)
+                            .textFieldStyle(.plain).font(SBStyle.label)
                             .focused($nameFocused)
+                            .inputBox(focused: nameFocused)
                             .onSubmit { finishRename(save: true) }
-                            .onExitCommand { finishRename(save: false) }
+                            // Escape lets go of the keyboard; letting go keeps the name, as clicking away does
+                            .onExitCommand { nameFocused = false }
                             .onChange(of: nameFocused) { f in if !f && renaming { finishRename(save: true) } }
                     } else {
                         Text(bulb.title).font(SBStyle.label)

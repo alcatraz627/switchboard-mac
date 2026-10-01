@@ -35,7 +35,9 @@ enum AppPaths {
         return d
     }
 
-    static let logDir = home + "/Library/Logs/Switchboard"
+    /// Test runs point SWITCHBOARD_LOG_DIR at a scratch folder, so their lines stay out of the owner's log.
+    static let logDir = ProcessInfo.processInfo.environment["SWITCHBOARD_LOG_DIR"].flatMap { $0.isEmpty ? nil : $0 }
+        ?? home + "/Library/Logs/Switchboard"
     static let debugLog = logDir + "/switchboard.log"
     static let debugLogPrev = logDir + "/switchboard.log.1"
 }

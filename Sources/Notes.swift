@@ -103,9 +103,13 @@ func probeNotes() -> String {
     // Title and body, either one optional, never both empty; a colour tag survives the file.
     check("a note with only a body is saved", s.add(title: "", body: "just the text")?.heading == "just the text")
     check("a note with neither is refused", s.add(title: "  ", body: "\n") == nil)
-    let tinted = s.add(title: "Tinted", body: "", color: "green")!
+    let tinted = s.add(title: "Tinted", body: "", color: "indigo")!
     s.load()
-    check("a colour tag survives the file", s.notes.first { $0.id == tinted.id }?.color == "green")
+    check("a colour tag survives the file", s.notes.first { $0.id == tinted.id }?.color == "indigo")
+    check("there are eight tag colours, none of them a warning colour",
+          timerColors.count == 8 && !timerColors.contains { ["red", "orange", "yellow", "green"].contains($0.0) })
+    check("an old colour name lands on its new one", tagColorName("green") == "teal" && tagColorName("red") == "pink"
+          && tagColorName("blue") == "blue" && tagColorName("plaid") == nil)
     let nobody = InputRules.copyButtons(title: "Only title", body: "")
     let notitle = InputRules.copyButtons(title: "", body: "only body")
     check("a title-only note offers only the title copy", nobody.title && !nobody.body)
@@ -231,7 +235,7 @@ final class NotesStore: ObservableObject {
         var id = f.string(from: Date())
         while notes.contains(where: { $0.id == id }) { id += "x" }
         var n = Note(id: id, title: title, body: body, tags: [], created: Date())
-        n.color = color
+        n.color = color.flatMap(tagColorName)
         guard write(n) else { return nil }
         notes.insert(n, at: 0)
         saveOrder()
@@ -335,7 +339,7 @@ final class NotesStore: ObservableObject {
                     remindRepeat: fields["remind_repeat"].flatMap(Note.Repeat.init) ?? .never,
                     reminderID: fields["reminder_id"],
                     pinned: fields["pinned"] == "true",
-                    color: fields["color"].flatMap { c in timerColors.contains { $0.0 == c } ? c : nil })
+                    color: fields["color"].flatMap(tagColorName))
     }
 
     // ── Reminders ───────────────────────────────────────────────────────────

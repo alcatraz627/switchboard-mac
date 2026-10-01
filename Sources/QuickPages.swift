@@ -9,7 +9,7 @@ import AppKit
 import SwiftUI
 
 enum QuickPage: String, CaseIterable {
-    case home, limits, approvals, bulbs, notes
+    case home, limits, approvals, bulbs, notes, timers, controls, models
 
     var title: String {
         switch self {
@@ -18,6 +18,9 @@ enum QuickPage: String, CaseIterable {
         case .approvals: return "Approvals"
         case .bulbs: return "Bulbs"
         case .notes: return "Pinned notes"
+        case .timers: return "Timers"
+        case .controls: return "Controls"
+        case .models: return "Local models"
         }
     }
     var icon: String {
@@ -27,6 +30,9 @@ enum QuickPage: String, CaseIterable {
         case .approvals: return Icons.tab["approvals"] ?? "hand.raised"
         case .bulbs: return "lightbulb"
         case .notes: return "pin"
+        case .timers: return Icons.tab["timers"] ?? "timer"
+        case .controls: return Icons.tab["controls"] ?? "slider.horizontal.3"
+        case .models: return Icons.section["Local models"] ?? "cpu"
         }
     }
     /// The panel tab that shows this page in full.
@@ -37,6 +43,9 @@ enum QuickPage: String, CaseIterable {
         case .approvals: return "approvals"
         case .bulbs: return "home"
         case .notes: return "notes"
+        case .timers: return "timers"
+        case .controls: return "controls"
+        case .models: return "runtime"
         }
     }
 }
@@ -129,15 +138,15 @@ func probeQuickCycle() -> String {
     check("up goes back", w.scroll(delta: 1, precise: false, phase: .none, momentum: false, at: 1) && w.page == .limits, w.page.rawValue)
     var r = QuickCycle()
     check("back from the first page wraps to the last",
-          r.scroll(delta: 1, precise: false, phase: .none, momentum: false, at: 0) && r.page == .notes, r.page.rawValue)
+          r.scroll(delta: 1, precise: false, phase: .none, momentum: false, at: 0) && r.page == .models, r.page.rawValue)
     check("forward from the last wraps to the first",
           r.scroll(delta: -1, precise: false, phase: .none, momentum: false, at: 1) && r.page == .home, r.page.rawValue)
     var d = QuickCycle()
-    for (i, want) in [QuickPage.limits, .approvals, .bulbs, .notes, .home].enumerated() {
+    for (i, want) in [QuickPage.limits, .approvals, .bulbs, .notes, .timers, .controls, .models, .home].enumerated() {
         _ = d.scroll(delta: -1, precise: false, phase: .none, momentum: false, at: Double(i))
         if d.page != want { check("pages come in order", false, d.page.rawValue); return lines.joined(separator: "\n") }
     }
-    check("pages come in order: now, limits, approvals, bulbs, pinned notes", true)
+    check("pages come in order: now, limits, approvals, bulbs, pinned notes, timers, controls, local models", true)
 
     // The panel's tabs and sliders: a swipe steps every so many points, not once per swipe.
     var tabs = ScrollStepper.tabs()
@@ -194,6 +203,10 @@ func probeQuickCycle() -> String {
               UsageWindow(id: "gpt-reserve.secondary", label: "Week · gpt-reserve", pct: 2, resetsAt: nil)]
     let bars = QuickCard.limitBars(claude: cl, codex: cx).map { "\($0.icon) \($0.span) \($0.w.pct)" }
     check("Settings knows every hover page", PolicyStore.quickPageIDs == QuickPage.allCases.map(\.rawValue))
+    check("the new pages start hidden for someone who never saw them",
+          PolicyStore.startingHidden(saved: [], seen: ["home", "limits", "approvals", "bulbs", "notes"]) == ["timers", "controls", "models"])
+    check("a page the owner already switched on stays on",
+          PolicyStore.startingHidden(saved: ["bulbs"], seen: PolicyStore.quickPageIDs) == ["bulbs"])
     check("a saved page order survives, a gone page drops out, a new one joins at the end",
           PolicyStore.mergedOrder(saved: ["notes", "gone", "home"], all: ["home", "limits", "notes"]) == ["notes", "home", "limits"])
     check("limits are Claude 5h, Claude 7d, Codex 7d", bars == ["sparkle 5h 10", "sparkle 7d 20", "terminal 7d 30"], bars.joined(separator: ", "))
@@ -285,6 +298,8 @@ struct QuickCard: View {
     @ObservedObject var usage: UsageStore
     @ObservedObject var lights: LightsStore
     @ObservedObject var notes: NotesStore
+    @ObservedObject var timers: TimerStore = .shared
+    @ObservedObject var controls: ControlsStore
     let openTab: (String) -> Void
     /// Opens a tab with its search filled in, so the row a badge names is in view.
     var openSearch: (String, String) -> Void = { _, _ in }
@@ -302,6 +317,9 @@ struct QuickCard: View {
             case .approvals: approvals
             case .bulbs: bulbs
             case .notes: pinned
+            case .timers: timerPage
+            case .controls: controlsPage
+            case .models: modelsPage
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
@@ -314,20 +332,8 @@ struct QuickCard: View {
     /// current one also named, a click or its number key goes there.
     private var header: some View {
         HStack(spacing: 4) {
-            ForEach(Array(state.pages.enumerated()), id: \.element) { i, p in
-                let on = p == state.page
-                Button { state.page = p } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: p.icon).font(.system(size: 10, weight: .semibold))
-                        if on { Text(p.title).font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize() }
-                    }
-                    .padding(.horizontal, on ? 8 : 6).padding(.vertical, 3)
-                    .background(Capsule().fill(Color.primary.opacity(on ? 0.16 : 0.06)))
-                    .foregroundStyle(on ? .primary : .secondary)
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.plain).help("\(p.title) (\(i + 1))")
-            }
+            // the current page is named when the row has room; with many pages on, every pill is an icon
+            ViewThatFits(in: .horizontal) { pills(named: true); pills(named: false) }
             Spacer(minLength: 4)
             if let tab = state.page.tab {
                 Button { openTab(tab) } label: {
@@ -336,6 +342,26 @@ struct QuickCard: View {
                 .buttonStyle(.borderless).foregroundStyle(.secondary).help("Open \(state.page.title) in the panel")
             }
         }
+    }
+
+    private func pills(named: Bool) -> some View {
+        HStack(spacing: 4) {
+            ForEach(Array(state.pages.enumerated()), id: \.element) { i, p in
+                let on = p == state.page
+                Button { state.page = p } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: p.icon).font(.system(size: 10, weight: .semibold))
+                        if on && named { Text(p.title).font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize() }
+                    }
+                    .padding(.horizontal, on && named ? 8 : 6).padding(.vertical, 3)
+                    .background(Capsule().fill(Color.primary.opacity(on ? 0.16 : 0.06)))
+                    .foregroundStyle(on ? .primary : .secondary)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain).help("\(p.title) (\(i + 1))")
+            }
+        }
+        .fixedSize()
     }
 
     // ── Now ─────────────────────────────────────────────────────────────────
@@ -482,6 +508,98 @@ struct QuickCard: View {
                 }, overflow: { more in
                     ChipItem(id: "more", icon: "ellipsis", text: "\(more) more", enabled: true, help: "Open the Notes tab") { openTab("notes") }
                 })
+            }
+        }
+    }
+
+    // ── Timers ──────────────────────────────────────────────────────────────
+    private var timerPage: some View {
+        let running = timers.timers.filter(\.running)
+        return VStack(alignment: .leading, spacing: 7) {
+            if running.isEmpty { empty("No timers running") }
+            ForEach(running) { t in
+                HStack(spacing: 7) {
+                    Circle().fill(timerColor(t.color)).frame(width: 8, height: 8)
+                    Text(t.label).font(.system(size: 11.5)).nameFit(t.label)
+                    Spacer(minLength: 6)
+                    Text(clock(t.fireAt.timeIntervalSince(timers.now))).font(.system(size: 12, weight: .semibold).monospacedDigit())
+                    Button { timers.extend(t, by: 60) } label: { Image(systemName: "plus.circle").font(.system(size: 11)) }
+                        .buttonStyle(.borderless).foregroundStyle(.secondary).help("Add a minute")
+                    Button { timers.remove(t) } label: { Image(systemName: "xmark.circle").font(.system(size: 11)) }
+                        .buttonStyle(.borderless).foregroundStyle(.secondary).help("Stop it")
+                }
+            }
+        }
+    }
+
+    // ── Controls ────────────────────────────────────────────────────────────
+    /// Volume and brightness as sliders, Wi-Fi and Bluetooth as switches; the full set is the Controls tab.
+    private var controlsPage: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let v = controls.volume {
+                level(icon: controls.muted == true ? "speaker.slash.fill" : "speaker.wave.2.fill", value: v,
+                      text: controls.muted == true ? "muted" : "\(Int((v * 100).rounded()))%") { controls.setVolume($0) }
+            }
+            if let b = controls.brightness {
+                level(icon: "sun.max.fill", value: b, text: "\(Int((b * 100).rounded()))%") { controls.setBrightness($0) }
+            }
+            HStack(spacing: 8) {
+                if let on = controls.wifiOn {
+                    switchItem(on ? "wifi" : "wifi.slash", "Wi-Fi", on) { new in
+                        if !new && !confirmOff("Turn Wi-Fi off?", "Everything on this Mac that uses the network loses it, including remote sessions.") { return }
+                        controls.setWiFi(new)
+                    }
+                }
+                Spacer(minLength: 6)
+                if let on = controls.btOn {
+                    switchItem("dot.radiowaves.left.and.right", "Bluetooth", on) { new in
+                        if !new && !confirmOff("Turn Bluetooth off?", "A Bluetooth keyboard, mouse or headphones disconnect at once.") { return }
+                        controls.setBluetooth(new)
+                    }
+                }
+            }
+            if controls.volume == nil && controls.brightness == nil && controls.wifiOn == nil {
+                empty("Reading the controls…")
+            }
+        }
+        .onAppear { controls.load(devices: false) }
+    }
+
+    private func switchItem(_ icon: String, _ title: String, _ on: Bool, set: @escaping (Bool) -> Void) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(title).font(.system(size: 11.5))
+            Toggle("", isOn: Binding(get: { on }, set: set)).toggleStyle(.switch).controlSize(.mini).labelsHidden()
+        }
+        .fixedSize()
+    }
+
+    /// The same question the Controls tab asks before switching something off that cuts a connection.
+    private func confirmOff(_ title: String, _ detail: String) -> Bool {
+        let a = NSAlert()
+        a.messageText = title; a.informativeText = detail; a.alertStyle = .warning
+        a.addButton(withTitle: "Turn off"); a.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        return a.runModal() == .alertFirstButtonReturn
+    }
+
+    private func level(icon: String, value: Float, text: String, set: @escaping (Float) -> Void) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
+            Slider(value: Binding(get: { Double(value) }, set: { set(Float($0)) }), in: 0...1).controlSize(.mini)
+            Text(text).font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.secondary).frame(width: 38, alignment: .trailing)
+        }
+    }
+
+    // ── Local models ────────────────────────────────────────────────────────
+    /// The Runtime tab's Local models rows as they are, so the keep-loaded menu and buttons work here too.
+    private var modelsPage: some View {
+        let group = policy.systemGroups.first { $0.title == "Local models" }
+        return VStack(alignment: .leading, spacing: 0) {
+            if let g = group, !g.rows.isEmpty {
+                ForEach(g.rows) { r in SystemRowView(row: r, store: policy) }
+            } else {
+                empty("No local models suite on this Mac")
             }
         }
     }

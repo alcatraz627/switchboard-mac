@@ -122,7 +122,7 @@ Every surface can be checked without a screen:
 Switchboard --dump                        Machine tab rows as text
 Switchboard --dump-policy [--scope DIR]   Agents tab rows as text
 Switchboard --snapshot out.png --tab usage [--light] [--expand]
-Switchboard --snapshot-hover out.png      the hover preview with every item on
+Switchboard --snapshot-quick out.png --page home|limits|approvals|bulbs|notes|timers|controls|models   one hover page
 Switchboard --snapshot-when out.png       the time picker
 Switchboard --probe-timers                timed-flip engine (flips Keep Awake, restores it)
 Switchboard --probe-snapshot              one snapshot per burst; a wait gets a fresh one

@@ -12,6 +12,7 @@ struct NoteCompose: View {
     @ObservedObject var notes: NotesStore
     @State private var title = ""
     @State private var text = ""
+    @State private var color: String?
     @State private var expanded = false
     @State private var flash: String?
     @State private var focus: NoteSheet.Field?
@@ -28,7 +29,10 @@ struct NoteCompose: View {
             HStack(alignment: .top, spacing: 6) {
                 Group {
                     if expanded {
-                        NoteSheet(title: $title, text: $text, focus: $focus, titlePrompt: "Title", bodyPrompt: "Note", bodyMax: 160)
+                        VStack(alignment: .leading, spacing: 0) {
+                            NoteSheet(title: $title, text: $text, focus: $focus, titlePrompt: "Title", bodyPrompt: "Note", bodyMax: 160)
+                            ColorBalls(selection: $color, allowNone: true, size: 11).padding(.horizontal, 5).padding(.bottom, 4)
+                        }
                     } else {
                         ZStack(alignment: .leading) {
                             if title.isEmpty { Text("New note").font(PT.label).foregroundStyle(.tertiary).allowsHitTesting(false) }
@@ -77,11 +81,11 @@ struct NoteCompose: View {
 
     private func save(copyPath: Bool) {
         let before = notes.notes.count
-        guard let n = notes.add(title: title, body: text) else {
+        guard let n = notes.add(title: title, body: text, color: color) else {
             if !InputRules.canSave(title: title, body: text) { show("Type a title or a note first") }
             return
         }
-        title = ""; text = ""
+        title = ""; text = ""; color = nil
         if copyPath {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(n.path, forType: .string)
@@ -130,7 +134,7 @@ struct NotesTabView: View {
                         HStack(spacing: 5) {
                             Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
                                 .rotationEffect(.degrees(showExpired ? 90 : 0))
-                            Text("EXPIRED \(notes.expired.count)").font(PT.section).tracking(0.7)
+                            Text("Expired \(notes.expired.count)").font(PT.section)
                         }
                         .foregroundStyle(.secondary)
                     }

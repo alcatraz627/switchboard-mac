@@ -21,18 +21,7 @@ enum HoverLine: Identifiable {
     }
 }
 
-struct HoverPreview: View {
-    let lines: [HoverLine]
-
-    var body: some View {
-        HoverLinesView(lines: lines)
-            .padding(.horizontal, 12).padding(.vertical, 10)
-            .frame(width: 300, alignment: .leading)
-            .background(GlassBackground())
-    }
-}
-
-/// The preview's lines on their own, so the quick pages can show them too.
+/// Lines of bars and short notes, as the Limits quick page draws its bars.
 struct HoverLinesView: View {
     let lines: [HoverLine]
     var labelWidth: CGFloat = 34
@@ -196,12 +185,6 @@ final class HoverPeek: NSObject {
 
     /// Closes it at once, as when the panel opens.
     func hide() { closeWork?.cancel(); popover.performClose(nil) }
-}
-
-/// Draws the preview offscreen in dark or light, for checking without a pointer.
-/// `dark` is ignored: the live card is always vibrant dark, so the snapshot is too.
-func snapshotHover(_ lines: [HoverLine], to path: String, dark: Bool) -> Bool {
-    snapshotCard(AnyView(HoverPreview(lines: lines)), to: path)
 }
 
 /// Draws any hover card offscreen, the way it looks under the menu bar.

@@ -20,10 +20,23 @@ struct SBTimer: Codable, Identifiable, Equatable {
     var total: TimeInterval { max(1, fireAt.timeIntervalSince(start)) }
 }
 
-/// The colours a timer can wear, by name so they survive in the saved list.
-let timerColors: [(String, Color)] = [("blue", .blue), ("teal", .teal), ("green", .green), ("yellow", .yellow),
-                                      ("orange", .orange), ("red", .red), ("pink", .pink), ("purple", .purple)]
-func timerColor(_ name: String) -> Color { timerColors.first { $0.0 == name }?.1 ?? .blue }
+/// The eight tag colours timers and notes wear, by name so they survive on disk.
+/// macOS system colours, so each adapts to dark and light; none is red, orange,
+/// yellow or green, which the panel keeps for meaning broken, warning or fine.
+let timerColors: [(String, Color)] = [
+    ("blue", Color(nsColor: .systemBlue)), ("indigo", Color(nsColor: .systemIndigo)),
+    ("purple", Color(nsColor: .systemPurple)), ("pink", Color(nsColor: .systemPink)),
+    ("teal", Color(nsColor: .systemTeal)), ("cyan", Color(nsColor: .systemCyan)),
+    ("mint", Color(nsColor: .systemMint)), ("brown", Color(nsColor: .systemBrown)),
+]
+/// Names saved before the set changed, and where each one lands now.
+let legacyTagColors = ["red": "pink", "orange": "brown", "yellow": "mint", "green": "teal"]
+/// A saved colour name as one of the eight, or nil when it is none of them.
+func tagColorName(_ name: String) -> String? {
+    let n = legacyTagColors[name] ?? name
+    return timerColors.contains { $0.0 == n } ? n : nil
+}
+func timerColor(_ name: String) -> Color { timerColors.first { $0.0 == tagColorName(name) }?.1 ?? Color(nsColor: .systemBlue) }
 
 final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     static let shared = TimerStore()

@@ -121,7 +121,7 @@ The hover preview (`Hover.swift`) is a borderless glass card under the menu
 bar icon. It opens after the pointer rests on the icon and stays open while
 the pointer is over the icon or the card. A status item button never reports
 the pointer entering, so the pointer position is polled instead.
-`--snapshot-hover` renders it, but a snapshot cannot show the real glass or
+`--snapshot-quick out.png --page <page>` renders one page, but a snapshot cannot show the real glass or
 the hover itself; check those by hand.
 
 ## Adopting it in a new app

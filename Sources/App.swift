@@ -41,7 +41,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         policyController = PolicyStatusController(
             liveDirs: { LiveSessions.dirs() },
             requestSystemRefresh: { [weak self] in self?.refreshSnapshot() })
-        policyController?.appHoverLines = { [weak self] chosen in self?.hoverLines(chosen) ?? [] }
+        policyController?.appTimedFlips = { [weak self] in self?.timedFlips() ?? [] }
         policyController?.appServicesDown = { [weak self] in self?.servicesDown() ?? [] }
         if let store = policyController?.store {
             // refreshPanel hands over the new rows a tick later, so answer after it.
@@ -794,7 +794,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                                       .joined(separator: " · ")
                                    : (s["loaded"] as? Bool ?? false) ? "loaded, not running" : "stopped",
                               tip: "Runs from \(abbreviateHome(s["plist"] as? String ?? "")) under launchd")
-            r.key = "db-" + label
+            r.key = "db-" + label; r.labelIsName = true
             if on {
                 r.buttons = [
                     RowButton(label: "Stop", kind: .run(act("stop")), help: "Stop \(name) and keep it off until Start or the next login",
@@ -850,7 +850,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             var r = SystemRow(label: name, state: on ? .on(menuGreen) : .off, note: ":\(port) · \(how)",
                               tip: (s["note"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Claimed in the port ledger",
                               link: on ? "http://localhost:\(port)" : nil)
-            r.key = "dev-\(port)"
+            r.key = "dev-\(port)"; r.labelIsName = true
             let owner = s["launchd"] as? String
             if pm2 == "online" {
                 r.buttons = [RowButton(label: "Stop", kind: .run(act("stop", name)), help: "pm2 stop \(name)")]
@@ -964,7 +964,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             var c = SystemRow(label: name, state: .on(menuTeal),
                               note: "\(r["gb"] as? Double ?? 0) GB" + (stay.isEmpty ? "" : " · \(stay)") + " · click to change",
                               tip: "Resident in Ollama. Click to choose how long it stays loaded.")
-            c.key = "model-" + name
+            c.key = "model-" + name; c.labelIsName = true
             c.buttons = [RowButton(label: "Unload", kind: .run(run(["unload", name])), help: "Free its memory now")]
             // how long it stays: the same leases `warm on <model> <time>` gives
             c.menu = {
@@ -1058,7 +1058,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                                      ? String(format: "%.1f of %.1f GB free", free, total)
                                      : String(format: "%.1f GB · read-only", total)),
                               tip: "\(mount) · \(disk)")
-            r.key = "drive-" + mount
+            r.key = "drive-" + mount; r.labelIsName = true
             r.showsBadge = false
             r.buttons = [RowButton(label: "Finder", kind: .run({
                 DispatchQueue.main.async { NSWorkspace.shared.open(URL(fileURLWithPath: mount)) }
@@ -1106,7 +1106,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             ]
             var row = SystemRow(label: r["name"] as? String ?? path, state: .off,
                                 note: bits.compactMap { $0 }.joined(separator: " · "), tip: path)
-            row.key = "repo-" + path
+            row.key = "repo-" + path; row.labelIsName = true
             row.showsBadge = false
             row.buttons = [
                 RowButton(label: "Finder", kind: .run({
@@ -1270,7 +1270,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             }
             var r = SystemRow(label: name, state: status == "online" ? .on(menuGreen) : .off, note: note,
                               tip: [h["user"] as? String, (h["route"] as? String).map { "route \($0)" }].compactMap { $0 }.joined(separator: " · "))
-            r.key = "host-" + name
+            r.key = "host-" + name; r.labelIsName = true
             if status == "online" {
                 r.buttons = [
                     RowButton(label: "Screenshot", kind: .run(act(["shot", name])),
@@ -1374,7 +1374,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                           note: (always ? status : "\(schedule) · \(status)") + (isSelf ? " · this app" : ""),
                           tip: label + ((j["program"] as? String).map { " · runs \($0)" } ?? ""))
         // Two plists can carry one Label (pm2's user and root agents are both com.PM2).
-        r.key = j["plist"] as? String ?? label
+        r.key = j["plist"] as? String ?? label; r.labelIsName = true
         let act: (String) -> () -> String? = { [weak self] verb in {
             let err = Self.helperError(Services.run("/usr/bin/env", ["python3", script, verb, label], timeout: 15))
             self?.refreshSnapshot()
@@ -1474,7 +1474,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             let name = t["name"] as? String ?? "?", mac = t["mac"] as? String ?? ""
             let bcast = t["broadcast"] as? String ?? "255.255.255.255"
             var r = SystemRow(label: name, state: .off, note: mac, tip: "Broadcast to \(bcast)")
-            r.key = "wol-" + mac
+            r.key = "wol-" + mac; r.labelIsName = true
             r.showsBadge = false
             r.buttons = [
                 RowButton(label: "Wake", kind: .run({
@@ -1740,35 +1740,14 @@ struct Problem: Equatable {
     }
 }
 
-// ── The hover preview's app-side lines ──────────────────────────────────────
+// ── What the hover's Now page needs from the app ────────────────────────────
 
 extension SwitchboardApp {
-    /// Problems, timers and services from the last snapshot; nothing is read
-    /// here, so hovering costs nothing. At most three problem lines.
-    func hoverLines(_ chosen: Set<HoverItem>) -> [HoverLine] {
-        var out: [HoverLine] = []
-        if chosen.contains(.problems) {
-            let problems = self.problems()
-            // "All clear" only once there has been something to judge.
-            if snapshotsDone == 0 {
-                out.append(.note(icon: "hourglass", text: "Checking…", tint: .secondary))
-            } else if problems.isEmpty {
-                out.append(.note(icon: "checkmark.circle", text: "All clear", tint: .green))
-            }
-            out += problems.prefix(3).map { .note(icon: $0.level.icon, text: $0.text, tint: $0.level.tint) }
-            if problems.count > 3 { out.append(.note(icon: "ellipsis", text: "\(problems.count - 3) more in the panel", tint: .secondary)) }
+    /// Switches set to flip back on a timer (Keep Awake off in 20m), soonest first, in words.
+    func timedFlips() -> [String] {
+        systemTimers.sorted(by: { $0.value.until < $1.value.until }).map { key, t in
+            "\(key) \(t.restoreOn ? "on" : "off") in \(countdownText(to: t.until, now: Date()))"
         }
-        if chosen.contains(.timers) {
-            for (key, t) in systemTimers.sorted(by: { $0.value.until < $1.value.until }) {
-                out.append(.note(icon: "timer", text: "\(key): \(t.restoreOn ? "on" : "off") in \(countdownText(to: t.until, now: Date()))",
-                                 tint: .teal))
-            }
-        }
-        if chosen.contains(.services) {
-            let down = servicesDown()
-            if !down.isEmpty { out.append(.note(icon: "bolt.slash", text: "Down: " + down.joined(separator: ", "), tint: .red)) }
-        }
-        return out
     }
 
     /// The services that are down right now, by name.
@@ -1780,9 +1759,6 @@ extension SwitchboardApp {
         if s.brokerUp == false { down.append("ipc broker") }
         return down
     }
-
-    /// Everything wrong right now, in a sentence each, from the last snapshot.
-    func problemTexts() -> [String] { problems().map(\.text) }
 
     /// Everything wrong right now, each with the tab that shows it, so opening
     /// the panel from a red icon can go straight there. Errors come first.

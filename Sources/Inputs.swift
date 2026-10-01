@@ -246,29 +246,21 @@ struct NoteSheet: View {
 
 // ── Colour balls ────────────────────────────────────────────────────────────
 
-/// A row of colour balls to pick from; the chosen one carries a ring. Colours
-/// are only ever shown, never named.
+/// The eight colour balls; the chosen one carries a ring. Colours are only
+/// ever shown, never named.
 struct ColorBalls: View {
     @Binding var selection: String?
-    /// Whether "no colour" is a choice (a note can have none; a timer always has one).
+    /// A note may have no colour: tapping the chosen ball again clears it. A timer always has one.
     var allowNone = false
     var size: CGFloat = 14
 
     var body: some View {
         HStack(spacing: 7) {
-            if allowNone {
-                Circle().strokeBorder(Color.primary.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
-                    .frame(width: size, height: size)
-                    .overlay(Circle().strokeBorder(Color.primary.opacity(selection == nil ? 0.8 : 0), lineWidth: 2).padding(-3))
-                    .contentShape(Circle())
-                    .onTapGesture { selection = nil }
-                    .accessibilityLabel("No colour")
-            }
             ForEach(timerColors, id: \.0) { name, c in
                 Circle().fill(c).frame(width: size, height: size)
                     .overlay(Circle().strokeBorder(Color.primary.opacity(selection == name ? 0.8 : 0), lineWidth: 2).padding(-3))
                     .contentShape(Circle())
-                    .onTapGesture { selection = name }
+                    .onTapGesture { selection = (allowNone && selection == name) ? nil : name }
                     .accessibilityLabel(name)
             }
         }

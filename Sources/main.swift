@@ -149,24 +149,12 @@ if let out = argAfter("--snapshot-quick") {
         + problems.enumerated().map { StatusBadge(problem: $1, index: $0) }
         + [StatusBadge(id: "down", icon: "bolt.slash.fill", text: "Down: kanban, session hub", kind: .error, help: "", tab: "runtime"),
            StatusBadge(id: "timer", icon: Icons.tab["timers"] ?? "timer", text: "Tea · 4:05", kind: .info, help: "", tab: "timers")]
-    let card = QuickCard(state: state, policy: policy, usage: usage, lights: lights, notes: NotesStore.shared, openTab: { _ in })
+    // Pages that read on appear are filled first, so the card is measured at its real size.
+    let controls = ControlsStore()
+    if page == .controls { controls.load(devices: false) }
+    if page == .models { policy.systemGroups = delegate.panelSystemGroupsFresh() }
+    let card = QuickCard(state: state, policy: policy, usage: usage, lights: lights, notes: NotesStore.shared, controls: controls, openTab: { _ in })
     let ok = snapshotCard(AnyView(card), to: out)
-    print(ok ? "wrote \(out)" : "snapshot failed")
-    exit(ok ? 0 : 1)
-}
-if let out = argAfter("--snapshot-hover") {
-    // Every item on, from a real snapshot and the real limits file, plus one waiting push.
-    _ = delegate.panelSystemGroupsFresh()
-    let usage = UsageStore()
-    usage.loadClaude()
-    var lines: [HoverLine] = usage.claude.filter { $0.id == "five_hour" || $0.id == "seven_day" }.map { w in
-        .bar(label: w.id == "five_hour" ? "5h" : "Week", pct: w.pct,
-             color: w.pct >= usage.dangerPct ? .red : w.pct >= usage.warnPct ? .orange : .green,
-             resets: w.resetsAt.map { "in " + countdownText(to: $0, now: Date()) } ?? "")
-    }
-    lines.append(.note(icon: "hand.raised.fill", text: "1 waiting on you: Push switchboard-mac", tint: Color(nsColor: menuYellow)))
-    lines += delegate.hoverLines(Set(HoverItem.allCases))
-    let ok = snapshotHover(lines, to: out, dark: !args.contains("--light"))
     print(ok ? "wrote \(out)" : "snapshot failed")
     exit(ok ? 0 : 1)
 }
