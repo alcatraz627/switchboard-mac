@@ -44,22 +44,40 @@ enum QuickPage: String, CaseIterable {
 /// Turns scroll-wheel movement into page turns: one page per push of the
 /// wheel or swipe, never a run of pages from a single trackpad flick.
 struct QuickCycle {
+    /// Where a trackpad or Magic Mouse gesture is; a mouse wheel has none.
+    enum Phase { case none, began, changed, ended }
+
     private(set) var page: QuickPage = .home
     private var acc: CGFloat = 0
     private var lastTurn: TimeInterval = -.infinity
-    /// Points of travel that turn a page, and the pause before the next turn.
+    private var lastEvent: TimeInterval = -.infinity
+    private var turnedThisGesture = false
+    /// Points of travel a swipe needs before it turns a page.
     static let threshold: CGFloat = 6
-    static let cooldown: TimeInterval = 0.35
+    /// The shortest gap between two wheel turns, so a fast spin steps rather than races.
+    static let wheelPause: TimeInterval = 0.2
+    /// Travel older than this belongs to an earlier gesture and is forgotten.
+    static let staleAfter: TimeInterval = 0.5
 
-    /// One scroll event. `down` is the owner's direction after natural
-    /// scrolling is undone: down (or a swipe up on a trackpad) goes forward.
-    /// Returns true when the page changed.
-    mutating func scroll(delta: CGFloat, at t: TimeInterval, momentum: Bool) -> Bool {
+    /// One scroll event; true when the page changed. Content-style direction:
+    /// scrolling the way that moves a list down goes forward. A swipe turns
+    /// at most one page however long it runs; each wheel notch turns one.
+    mutating func scroll(delta: CGFloat, precise: Bool, phase: Phase, momentum: Bool, at t: TimeInterval) -> Bool {
         if momentum { return false }                 // inertia after the finger lifts turns nothing
-        if t - lastTurn < Self.cooldown { acc = 0; return false }
+        guard delta != 0 || phase != .none else { return false }
+        if !precise {
+            guard delta != 0, t - lastTurn >= Self.wheelPause else { return false }
+            turn(delta < 0 ? 1 : -1, at: t)
+            return true
+        }
+        if phase == .began || t - lastEvent > Self.staleAfter { acc = 0; turnedThisGesture = false }
+        lastEvent = t
+        if phase == .ended { acc = 0; turnedThisGesture = false; return false }
+        guard !turnedThisGesture else { return false }
         acc += delta
         guard abs(acc) >= Self.threshold else { return false }
         turn(acc < 0 ? 1 : -1, at: t)
+        turnedThisGesture = true
         return true
     }
 
@@ -71,8 +89,8 @@ struct QuickCycle {
         acc = 0
     }
 
-    mutating func reset() { page = .home; acc = 0; lastTurn = -.infinity }
-    mutating func show(_ p: QuickPage) { page = p; acc = 0 }
+    mutating func reset() { page = .home; acc = 0; lastTurn = -.infinity; lastEvent = -.infinity; turnedThisGesture = false }
+    mutating func show(_ p: QuickPage) { page = p }
 }
 
 /// Checks the page-turning rules without a mouse.
@@ -81,22 +99,49 @@ func probeQuickCycle() -> String {
     func check(_ name: String, _ ok: Bool, _ got: String = "") {
         lines.append("\(ok ? "ok  " : "FAIL") \(name)\(ok || got.isEmpty ? "" : " (got: \(got))")")
     }
+    // A swipe: began, many changed events, ended; then a second swipe.
+    func swipe(_ c: inout QuickCycle, step: CGFloat, events: Int, from t0: TimeInterval) {
+        _ = c.scroll(delta: step, precise: true, phase: .began, momentum: false, at: t0)
+        for i in 1...events { _ = c.scroll(delta: step, precise: true, phase: .changed, momentum: false, at: t0 + Double(i) * 0.02) }
+        _ = c.scroll(delta: 0, precise: true, phase: .ended, momentum: false, at: t0 + Double(events + 1) * 0.02)
+    }
     var c = QuickCycle()
     check("starts on the usual card", c.page == .home)
-    check("a nudge smaller than a step turns nothing", !c.scroll(delta: -2, at: 0, momentum: false) && c.page == .home)
-    check("enough travel down turns forward", c.scroll(delta: -5, at: 0.01, momentum: false) && c.page == .limits, c.page.rawValue)
-    for i in 0..<10 { _ = c.scroll(delta: -3, at: 0.02 + Double(i) * 0.02, momentum: false) }
-    check("one flick turns one page, not several", c.page == .limits, c.page.rawValue)
-    check("inertia after the finger lifts turns nothing", !c.scroll(delta: -40, at: 1.0, momentum: true) && c.page == .limits)
-    check("up goes back", c.scroll(delta: 8, at: 1.0, momentum: false) && c.page == .home, c.page.rawValue)
-    check("back from the first page wraps to the last", c.scroll(delta: 8, at: 2.0, momentum: false) && c.page == .notes, c.page.rawValue)
-    check("forward from the last wraps to the first", c.scroll(delta: -8, at: 3.0, momentum: false) && c.page == .home, c.page.rawValue)
+    check("a nudge smaller than a step turns nothing",
+          !c.scroll(delta: -2, precise: true, phase: .began, momentum: false, at: 0) && c.page == .home)
+    c.reset()
+    swipe(&c, step: -3, events: 60, from: 0)   // 1.2 s of continuous swiping
+    check("a long swipe turns one page, not several", c.page == .limits, c.page.rawValue)
+    swipe(&c, step: -3, events: 10, from: 5)
+    check("the next swipe turns the next page", c.page == .approvals, c.page.rawValue)
+    check("inertia after the finger lifts turns nothing",
+          !c.scroll(delta: -40, precise: true, phase: .none, momentum: true, at: 6) && c.page == .approvals)
+    var s = QuickCycle()
+    _ = s.scroll(delta: -4, precise: true, phase: .changed, momentum: false, at: 0)
+    check("half a swipe left behind is forgotten, not added to the next",
+          !s.scroll(delta: -4, precise: true, phase: .changed, momentum: false, at: 600) && s.page == .home)
+    var w = QuickCycle()
+    check("one wheel notch turns a page", w.scroll(delta: -1, precise: false, phase: .none, momentum: false, at: 0) && w.page == .limits, w.page.rawValue)
+    check("a fast spin steps, it does not race",
+          !w.scroll(delta: -1, precise: false, phase: .none, momentum: false, at: 0.05) && w.page == .limits)
+    check("the next notch after a pause turns again",
+          w.scroll(delta: -1, precise: false, phase: .none, momentum: false, at: 0.5) && w.page == .approvals, w.page.rawValue)
+    check("up goes back", w.scroll(delta: 1, precise: false, phase: .none, momentum: false, at: 1) && w.page == .limits, w.page.rawValue)
+    var r = QuickCycle()
+    check("back from the first page wraps to the last",
+          r.scroll(delta: 1, precise: false, phase: .none, momentum: false, at: 0) && r.page == .notes, r.page.rawValue)
+    check("forward from the last wraps to the first",
+          r.scroll(delta: -1, precise: false, phase: .none, momentum: false, at: 1) && r.page == .home, r.page.rawValue)
     var d = QuickCycle()
     for (i, want) in [QuickPage.limits, .approvals, .bulbs, .notes, .home].enumerated() {
-        _ = d.scroll(delta: -10, at: Double(i), momentum: false)
+        _ = d.scroll(delta: -1, precise: false, phase: .none, momentum: false, at: Double(i))
         if d.page != want { check("pages come in order", false, d.page.rawValue); return lines.joined(separator: "\n") }
     }
     check("pages come in order: now, limits, approvals, bulbs, pinned notes", true)
+    let many = Array(repeating: "Release work", count: 30)
+    let fit = ChipFlow.fitting(many, rows: 2)
+    check("thirty chips are cut to what two rows hold", fit > 2 && fit < 12, "\(fit)")
+    check("a few short chips all fit", ChipFlow.fitting(["a", "b", "c"], rows: 2) == 3)
     return lines.joined(separator: "\n")
 }
 
@@ -173,24 +218,9 @@ struct QuickCard: View {
     private var home: some View {
         VStack(alignment: .leading, spacing: 8) {
             if !state.chips.isEmpty {
-                // chips keep their natural width; the count is capped so the row always fits
-                HStack(spacing: 5) {
-                    ForEach(state.chips.prefix(QuickCard.maxChips)) { c in
-                        Button {
-                            if let p = c.opens { state.page = p } else if let t = c.tab { openTab(t) }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: c.icon).font(.system(size: 9.5, weight: .semibold))
-                                Text(c.text).font(.system(size: 10.5, weight: .medium)).lineLimit(1)
-                            }
-                            .padding(.horizontal, 7).padding(.vertical, 3)
-                            .background(Capsule().fill(c.tint.opacity(0.2)))
-                            .foregroundStyle(c.tint)
-                            .fixedSize()
-                        }
-                        .buttonStyle(.plain).help(c.help)
-                    }
-                    Spacer(minLength: 0)
+                // chips keep their natural width; if four ever would not fit, fewer show, never a cut one
+                ViewThatFits(in: .horizontal) {
+                    chipRow(3); chipRow(2); chipRow(1)
                 }
             }
             HoverLinesView(lines: state.homeLines)
@@ -199,7 +229,30 @@ struct QuickCard: View {
             }
         }
     }
-    static let maxChips = 4
+    /// Three is the count that always fits the 320-point card at its widest
+    /// wording (measured: a fourth spills); chips come most urgent first.
+    static let maxChips = 3
+
+    private func chipRow(_ n: Int) -> some View {
+        HStack(spacing: 5) {
+            ForEach(state.chips.prefix(min(n, QuickCard.maxChips))) { c in
+                Button {
+                    if let p = c.opens { state.page = p } else if let t = c.tab { openTab(t) }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: c.icon).font(.system(size: 9.5, weight: .semibold))
+                        Text(c.text).font(.system(size: 10.5, weight: .medium)).lineLimit(1)
+                    }
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Capsule().fill(c.tint.opacity(0.2)))
+                    .foregroundStyle(c.tint)
+                    .fixedSize()
+                }
+                .buttonStyle(.plain).help(c.help)
+            }
+        }
+        .fixedSize()
+    }
 
     // ── Limits ──────────────────────────────────────────────────────────────
     private var limits: some View {
@@ -211,6 +264,7 @@ struct QuickCard: View {
         return Group {
             if bars.isEmpty { empty("No limits read yet") } else { HoverLinesView(lines: bars, labelWidth: 64) }
         }
+        .onAppear { usage.loadClaude() }   // fresh numbers even when the Limits hover item is off
     }
     private func shortLabel(_ who: String, _ w: UsageWindow) -> String {
         let span = w.id == "five_hour" ? "5h" : w.id == "seven_day" ? "week" : w.label
@@ -218,12 +272,24 @@ struct QuickCard: View {
     }
 
     // ── Approvals ───────────────────────────────────────────────────────────
+    /// The Approvals tab's groups in its order; only pushes and asks a live
+    /// session waits on carry the yellow hand.
     private var approvals: some View {
-        let rows = policy.needGroups.flatMap(\.rows).filter { !$0.buttons.isEmpty }
+        let groups = policy.needGroups.map { ($0.title, $0.rows.filter { !$0.buttons.isEmpty }) }.filter { !$0.1.isEmpty }
+        let total = groups.reduce(0) { $0 + $1.1.count }
+        // at most five rows in all, taken group by group in the tab's order
+        var left = 5
+        let shown: [(String, [SystemRow])] = groups.compactMap { title, rows in
+            let take = Array(rows.prefix(left)); left -= take.count
+            return take.isEmpty ? nil : (title, take)
+        }
         return VStack(alignment: .leading, spacing: 7) {
-            if rows.isEmpty { empty("Nothing waits on you") }
-            ForEach(rows.prefix(5)) { r in QuickNeedRow(row: r) }
-            if rows.count > 5 { more(rows.count - 5, tab: "approvals") }
+            if groups.isEmpty { empty("Nothing waits on you") }
+            ForEach(shown, id: \.0) { title, rows in
+                Text(title).font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
+                ForEach(rows) { r in QuickNeedRow(row: r, waiting: title == "Pushes" || title == "Policy asks") }
+            }
+            if total > 5 { more(total - 5, tab: "approvals") }
         }
     }
 
@@ -282,13 +348,28 @@ struct QuickCard: View {
                 }
             }
             if !rest.isEmpty {
-                ChipFlow(items: rest.prefix(8).map { n in
-                    ChipItem(id: n.id, icon: "pin", text: n.title, enabled: true, help: "Pin \u{201C}\(n.title)\u{201D}") {
+                ChipFlow(items: rest.map { n in
+                    ChipItem(id: n.id, icon: "pin", text: chipLabel(n.title), enabled: true, help: "Pin \u{201C}\(n.title)\u{201D}") {
                         var m = n; m.pinned = true; notes.update(m)
                     }
+                }, overflow: { more in
+                    ChipItem(id: "more", icon: "ellipsis", text: "\(more) more", enabled: true, help: "Open the Notes tab") { openTab("notes") }
                 })
             }
         }
+    }
+
+    /// A chip names a note by its first few words, ending at a word; the full
+    /// title is in the chip's tooltip.
+    private func chipLabel(_ title: String) -> String {
+        let t = title.trimmingCharacters(in: .whitespaces)
+        if t.isEmpty { return "Untitled" }
+        var out = ""
+        for w in t.split(separator: " ") {
+            if !out.isEmpty && out.count + w.count + 1 > 18 { break }
+            out += (out.isEmpty ? "" : " ") + w
+        }
+        return out
     }
 
     private func empty(_ s: String) -> some View {
@@ -302,18 +383,28 @@ struct QuickCard: View {
 /// One waiting push or ask, with the same Approve and Cancel the Approvals tab has.
 struct QuickNeedRow: View {
     let row: SystemRow
+    /// A live session waits on it (not approved already, not left by an ended one).
+    var waiting = true
     @State private var busy: String?
     @State private var failed: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: "hand.raised.fill").font(.system(size: 10)).foregroundStyle(Color(nsColor: menuYellow))
+                Image(systemName: waiting ? "hand.raised.fill" : "clock").font(.system(size: 10))
+                    .foregroundStyle(waiting ? Color(nsColor: menuYellow) : .secondary)
                 Text(row.label).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
                 ForEach(Array(row.buttons.enumerated()), id: \.offset) { _, b in
                     if case .run(let act) = b.kind {
                         Button(b.label) {
+                            // the same question the tab asks before an action that is easy to regret
+                            if let q = b.confirm {
+                                let a = NSAlert(); a.messageText = q
+                                a.addButton(withTitle: b.label); a.addButton(withTitle: "Cancel")
+                                NSApp.activate(ignoringOtherApps: true)
+                                guard a.runModal() == .alertFirstButtonReturn else { return }
+                            }
                             busy = b.label; failed = nil
                             DispatchQueue.global(qos: .userInitiated).async {
                                 let err = act()
@@ -347,10 +438,34 @@ struct ChipItem: Identifiable {
 /// Chips laid out in rows that wrap, each at its natural width.
 struct ChipFlow: View {
     let items: [ChipItem]
+    /// The spec's "one or two rows": past that, the last chip says how many more.
+    var maxRows = 2
+    var overflow: ((Int) -> ChipItem)? = nil
+
+    /// How many chips fit in `maxRows` rows of the card's 296 points, from each
+    /// chip's text length (icon, padding and gap included).
+    static func fitting(_ texts: [String], rows: Int, width: CGFloat = 296, reserve: CGFloat = 0) -> Int {
+        var row = 1, x: CGFloat = 0
+        for (i, t) in texts.enumerated() {
+            let w = 34 + CGFloat(t.count) * 6.1
+            let limit = row == rows ? width - reserve : width
+            if x > 0 && x + w > limit { row += 1; x = 0 }
+            if row > rows || (row == rows && x + w > limit) { return i }
+            x += w + 5
+        }
+        return texts.count
+    }
+
+    private var shown: [ChipItem] {
+        let texts = items.map(\.text)
+        guard let overflow, Self.fitting(texts, rows: maxRows) < items.count else { return items }
+        let n = Self.fitting(texts, rows: maxRows, reserve: 74)   // room for the "N more" chip
+        return Array(items.prefix(n)) + [overflow(items.count - n)]
+    }
 
     var body: some View {
         FlowLayout(spacing: 5) {
-            ForEach(items) { c in
+            ForEach(shown) { c in
                 Button(action: c.act) {
                     HStack(spacing: 4) {
                         Image(systemName: c.icon).font(.system(size: 9.5))

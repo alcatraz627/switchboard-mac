@@ -1275,27 +1275,30 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         quick.chips = statusChips()
     }
 
+    /// One chip per thing that needs the owner, only for the hover items chosen
+    /// in Settings, worded short so four always fit in one row.
     func statusChips() -> [StatusChip] {
         var out: [StatusChip] = []
+        let chosen = store.hoverItems
         let n = store.needsWaiting
-        if n > 0 {
+        if chosen.contains(.approvals), n > 0 {
             out.append(StatusChip(id: "approvals", icon: "hand.raised.fill", text: "\(n) waiting",
                                   tint: Color(nsColor: menuYellow), help: "\(n) push\(n == 1 ? "" : "es") or ask\(n == 1 ? "" : "s") wait on you",
                                   opens: .approvals, tab: nil))
         }
-        if let first = problemList.first {
+        if chosen.contains(.problems), let first = problemList.first {
             let c = problemList.count
-            out.append(StatusChip(id: "problems", icon: "exclamationmark.triangle.fill", text: c == 1 ? "1 problem" : "\(c) problems",
+            out.append(StatusChip(id: "problems", icon: "exclamationmark.triangle.fill", text: "\(c) wrong",
                                   tint: .red, help: problemList.map(\.text).joined(separator: "\n"), opens: nil, tab: first.tab))
         }
-        let down = appServicesDown()
+        let down = chosen.contains(.services) ? appServicesDown() : []
         if !down.isEmpty {
-            out.append(StatusChip(id: "down", icon: "bolt.slash.fill", text: down.count == 1 ? "\(down[0]) down" : "\(down.count) down",
+            out.append(StatusChip(id: "down", icon: "bolt.slash.fill", text: "\(down.count) down",
                                   tint: .orange, help: "Down: " + down.joined(separator: ", "), opens: nil, tab: "runtime"))
         }
-        if let t = TimerStore.shared.running.first, t.fireAt.timeIntervalSinceNow < 60 {
-            out.append(StatusChip(id: "timer", icon: Icons.tab["timers"] ?? "timer", text: t.label.isEmpty ? "timer" : t.label,
-                                  tint: .teal, help: "\(t.label) is about to go off", opens: nil, tab: "timers"))
+        if chosen.contains(.timers), let t = TimerStore.shared.running.first, t.fireAt.timeIntervalSinceNow < 60 {
+            out.append(StatusChip(id: "timer", icon: Icons.tab["timers"] ?? "timer", text: "ringing soon",
+                                  tint: .teal, help: "\(t.label.isEmpty ? "A timer" : t.label) is about to go off", opens: nil, tab: "timers"))
         }
         return out
     }

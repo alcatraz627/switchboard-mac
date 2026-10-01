@@ -124,8 +124,11 @@ final class HoverPeek: NSObject {
     private func scrolled(_ e: NSEvent) {
         guard !panelOpen() else { return }
         cycle.show(state.page)   // a dot clicked on the card moved the page
-        let momentum = !e.momentumPhase.isEmpty
-        guard cycle.scroll(delta: e.scrollingDeltaY, at: e.timestamp, momentum: momentum) else { return }
+        let phase: QuickCycle.Phase = e.phase.contains(.began) ? .began
+            : e.phase.contains(.ended) || e.phase.contains(.cancelled) ? .ended
+            : e.phase.isEmpty ? .none : .changed
+        guard cycle.scroll(delta: e.scrollingDeltaY, precise: e.hasPreciseScrollingDeltas, phase: phase,
+                           momentum: !e.momentumPhase.isEmpty, at: e.timestamp) else { return }
         closeWork?.cancel()
         if !popover.isShown { refresh(); present() }
         state.page = cycle.page

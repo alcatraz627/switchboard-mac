@@ -133,12 +133,13 @@ if let out = argAfter("--snapshot-quick") {
     let state = QuickState()
     state.page = page
     state.homeLines = delegate.hoverLines(Set(HoverItem.allCases))
-    if policy.needsWaiting > 0 {
-        state.chips.append(StatusChip(id: "approvals", icon: "hand.raised.fill", text: "\(policy.needsWaiting) waiting",
-                                      tint: Color(nsColor: menuYellow), help: "", opens: .approvals, tab: nil))
-    }
-    state.chips.append(StatusChip(id: "sample", icon: "exclamationmark.triangle.fill", text: "1 problem", tint: .red,
-                                  help: "", opens: nil, tab: "system"))
+    // the widest row the chips can make: all four kinds, two-digit counts
+    state.chips = [
+        StatusChip(id: "approvals", icon: "hand.raised.fill", text: "12 waiting", tint: Color(nsColor: menuYellow), help: "", opens: .approvals, tab: nil),
+        StatusChip(id: "problems", icon: "exclamationmark.triangle.fill", text: "13 wrong", tint: .red, help: "", opens: nil, tab: "system"),
+        StatusChip(id: "down", icon: "bolt.slash.fill", text: "3 down", tint: .orange, help: "", opens: nil, tab: "runtime"),
+        StatusChip(id: "timer", icon: Icons.tab["timers"] ?? "timer", text: "ringing soon", tint: .teal, help: "", opens: nil, tab: "timers"),
+    ]
     let card = QuickCard(state: state, policy: policy, usage: usage, lights: lights, notes: NotesStore.shared, openTab: { _ in })
     let ok = snapshotCard(AnyView(card), to: out)
     print(ok ? "wrote \(out)" : "snapshot failed")
