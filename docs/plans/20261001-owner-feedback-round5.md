@@ -285,4 +285,24 @@ app and collect candidates for the owner) has not run yet.
   Escape (cancel), which also drops focus.
 - Not yet seen live: keyboard focus landing on tab open (depends on the
   panel re-running onAppear when it reopens), Escape not closing the panel.
-- Next: step 4 (tab and slider scroll, Controls layout, middle truncation).
+- Step 4 done in f744aaa: Sources/ScrollSteps.swift (ScrollStepper shared by
+  the hover card and the panel, ScrollTargets registry, one panel scroll
+  monitor), space bar and tab row step independently (one tab per 28 pt of
+  swipe or per wheel notch, 0.12 s apart, stop at the ends), sound and
+  brightness sliders 5% a notch (up raises), Controls two rows, `nameFit`
+  middle-truncates names only (prose still wraps). `--probe-quick`.
+- Not yet seen live: scroll direction feel on a real wheel and trackpad.
+
+## Why "refresh session index" fails (investigated 2026-10-01)
+
+`com.alcatraz.refresh-session-index` runs
+`~/.claude/scripts/refresh-session-index.sh`, which imports `crawl` from
+`~/.claude/skills/scan-sessions`. Commit a096555 (2026-08-27) moved that skill
+to `~/.claude/skills-parked/scan-sessions/`. Every run since dies with
+`ModuleNotFoundError: No module named 'crawl'`, written to
+`~/.claude/assets/scan-sessions/refresh.log` (the launchd err log stays empty
+because the script redirects Python's output). Last good run: 2026-08-26,
+total_sessions=6708. The index keeps sessions whose transcripts Claude Code
+later deletes, so every missed day risks losing the oldest unindexed ones.
+Fix is a gcc change, the owner's to approve: point the import at
+`skills-parked/scan-sessions`, or unpark the skill, or retire the job.
