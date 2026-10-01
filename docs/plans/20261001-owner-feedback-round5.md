@@ -152,3 +152,115 @@ The order, then:
 - Test surface: `bash tests/run-tests.sh` (98 passed at b966434),
   `--snapshot --tab <tab>`, `--snapshot-quick <png> --page <p>`, `--probe-quick`.
   A real pointer or scroll test needs the owner or approved desktop automation.
+
+## Step 1: what the old model assumed (2026-10-01, session ce9de2fb)
+
+Six assumptions produced these issues. Each is grounded in the code as it
+stood at 41a6292.
+
+1. **Every screen is its own small app.** Inputs, focus, Escape, scroll and
+   key handling are decided screen by screen. Seven files create their own
+   text fields (`rg -c "TextField\(|TextEditor\("`: NotesView 5, Timers 2,
+   PolicyPanel 2, App 2, Lights, WhenPicker, DesignKit). Escape means four
+   different things in four places: clear the search (PolicyPanel.swift:1622),
+   cancel a rename (Lights.swift:348), end an edit (Timers.swift:263), close an
+   ask (PolicyPanel.swift:686). Nothing owns "what Escape does", so each new
+   screen invents it, and the owner meets the differences.
+2. **The hover card is a stack of content pages.** It was built from the
+   roadmap's wording: dots for position, a reset to Now on every hover
+   (Hover.swift:152), scroll only over the icon (Hover.swift:116). The owner
+   thinks of it as a small version of the panel: the same navigation grammar
+   (icon tabs you click, scroll or number-key through, remembered between
+   visits) wrapped around a status strip.
+3. **Severity belongs to whoever reports the problem.** `problems()`
+   (App.swift:1725) returns text and a tab, no level. Every consumer paints
+   it red: ProblemMark (PolicyPanel.swift:597), the "N wrong" chip
+   (PolicyPanel.swift:1291). So a configuration nit ("8 hooks have no event")
+   looks exactly like a broken job, forever.
+4. **Labels name the data source, not what the owner tells apart.** Limits
+   read "5h", "week", "Codex Week", "Codex Week · gpt-reserve": Claude was
+   the unnamed default and Codex the named exception, and a reserve window
+   the owner never acts on got a row.
+5. **Content takes its natural shape, then overflows however it can.** The
+   Sound and Display cards lay out in three rows because the slider got its
+   own row; truncation is decided per view, often by tail-cutting.
+6. **Where you were is throwaway.** The hover page resets, opening Notes or
+   Reminders does not put the cursor anywhere, an edit in progress is not
+   protected from a tab switch's focus change.
+
+## Step 2: the updated model, as a coherence expectation
+
+The app is **one surface with one grammar**, seen through three windows (the
+menu-bar icon, the hover card, the panel). The owner should be able to learn a
+behaviour once and find it everywhere.
+
+- **Navigation.** Any strip of tabs (space bar, sub-tab row, hover pills) is
+  icon plus short label, clickable, moves on scroll when the pointer is over
+  the strip itself and never over content, answers number keys whenever no
+  text field holds focus, and remembers its position, falling back to the
+  first entry when that entry is gone. The owner decides the order.
+- **Input.** One text-input component and one title-plus-body editor. Same
+  background everywhere; Enter does the field's main action; Escape drops
+  focus (and never closes or deletes anything); opening a tab focuses its
+  "new" input unless something else is mid-edit. Search fields carry the
+  search icon and a one- or two-word placeholder.
+- **Severity.** Every problem carries a level. Error means broken and needing
+  action; warn means degraded or a configuration nit. Both use one badge
+  shape and differ only in colour, and a click opens the panel at the item.
+- **Labels.** A label names the distinction the owner makes; an icon carries
+  "whose" (Claude, Codex) so the words can stay short and symmetric. Colour
+  is shown as colour, never as its name.
+- **Space.** Fit the slot first. Overflow is a middle truncation, applied
+  only when the full text does not fit.
+- **Scroll on a thing adjusts that thing.** A tab strip steps through tabs,
+  a slider steps by 5%, content scrolls content. No surface steals another's
+  scroll.
+- **Text is a document.** Read-only text surfaces are selectable and copy
+  with Cmd+C, with no visual change.
+- **Speed is measured, not felt.** A latency claim comes with the dlog
+  timing before and after.
+
+## Step 3: does the model explain the must-list?
+
+| Must item | Explained by |
+|---|---|
+| Hover: no border under the title, better open icon, pills with icons that click or take a number | Navigation |
+| Hover: remember the last page, fall back to the first | Navigation (position is remembered) |
+| Hover: scroll over title bar and icon only; number keys not while typing | Navigation + Input |
+| Settings: reorder the hover list | Navigation (owner decides the order) |
+| Suggest more hover candidates | Step 4 (whole-app pass) |
+| Limits: Claude 5h / 7d, Codex 7d, icon labels, no reserve | Labels |
+| Now page: 2x3 launcher grid plus one standard warn/error badge row | Navigation + Severity |
+| Main panel: scroll on tabs and sub-tabs independently | Navigation, Scroll |
+| Hooks "forever error" | Severity |
+| Snappier panel open and tab switch | Speed is measured |
+| Notes: copy buttons follow which fields exist; refuse empty; colour tags as balls | Input (one editor), Labels (colour as colour) |
+| New-note composer: placeholder, no stray scrollbar, Enter in title moves the rest to the body, icons stack | Input (one editor) |
+| Reminders: standard input background, Enter starts | Input |
+| Focus on tab open, keep an edit's focus, Escape drops focus everywhere | Input |
+| Select and copy text in Ledger and similar | Text is a document |
+| Ollama: every eviction setting the tool supports | **Not explained.** See revision below. |
+| Sound and Display in two rows; slider scroll by 5%; middle-truncate long names | Space, Scroll |
+| Why "refresh session index" fails | Severity (a failing job is a real error, so find its cause) |
+
+**Revision.** The Ollama item is not covered by any of the above: the owner is
+saying a control that wraps a tool should expose what the tool can do, not one
+chosen button. Added to the model:
+
+- **A control mirrors its tool.** Where the panel wraps a tool's setting, it
+  offers every value the tool supports, read from the tool where possible.
+
+With that, every must item maps to the model. Step 4 (apply it to the whole
+app and collect candidates for the owner) has not run yet.
+
+## Build order
+
+1. Hover group (this session's goal): remembered page with fallback, scroll
+   over title bar and icon only, number keys gated on text focus, icon pills
+   that click, a border under the title, a clearer open icon, Limits labels.
+2. Severity (a level on every problem, one badge, Hooks becomes warn), then the
+   Now page grid, which needs both Navigation and Severity in place.
+3. Shared input and editor components, then Notes, Reminders, focus and Escape.
+4. Panel tab scroll, slider scroll, Controls layout, middle truncation.
+5. Ollama eviction settings, text selection, latency measurement, the session
+   index job.

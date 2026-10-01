@@ -47,6 +47,8 @@ struct QuickCycle {
     /// Where a trackpad or Magic Mouse gesture is; a mouse wheel has none.
     enum Phase { case none, began, changed, ended }
 
+    /// The pages in the owner's order; scrolling and number keys walk this list.
+    var pages: [QuickPage] = QuickPage.allCases
     private(set) var page: QuickPage = .home
     private var acc: CGFloat = 0
     private var lastTurn: TimeInterval = -.infinity
@@ -82,15 +84,36 @@ struct QuickCycle {
     }
 
     mutating func turn(_ by: Int, at t: TimeInterval) {
-        let all = QuickPage.allCases
+        let all = pages.isEmpty ? QuickPage.allCases : pages
         let i = all.firstIndex(of: page) ?? 0
         page = all[(i + by % all.count + all.count) % all.count]
         lastTurn = t
         acc = 0
     }
 
-    mutating func reset() { page = .home; acc = 0; lastTurn = -.infinity; lastEvent = -.infinity; turnedThisGesture = false }
-    mutating func show(_ p: QuickPage) { page = p }
+    /// Forgets any half-made gesture; the page stays where it was.
+    mutating func forgetGesture() { acc = 0; lastTurn = -.infinity; lastEvent = -.infinity; turnedThisGesture = false }
+    /// Goes to a page. One that is no longer in the list falls back to the first.
+    mutating func show(_ p: QuickPage) { page = pages.contains(p) ? p : (pages.first ?? .home) }
+
+    /// The page a number key picks, 1 being the first in the owner's order.
+    /// Nothing while a text field has the keyboard, so typing a digit stays typing.
+    static func page(forKey chars: String, in pages: [QuickPage], typing: Bool) -> QuickPage? {
+        guard !typing, chars.count == 1, let n = Int(chars), n >= 1, n <= pages.count else { return nil }
+        return pages[n - 1]
+    }
+
+    /// Where a scroll happened, as far as page turning cares.
+    enum Spot { case icon, card(fromTop: CGFloat), elsewhere }
+    /// Scrolling turns pages over the menu-bar icon and the card's title bar;
+    /// over the card's content it is left to the content.
+    static func turnsPage(at spot: Spot, headerBottom: CGFloat) -> Bool {
+        switch spot {
+        case .icon: return true
+        case .card(let y): return y >= 0 && y <= headerBottom
+        case .elsewhere: return false
+        }
+    }
 }
 
 /// Checks the page-turning rules without a mouse.
@@ -109,7 +132,7 @@ func probeQuickCycle() -> String {
     check("starts on the usual card", c.page == .home)
     check("a nudge smaller than a step turns nothing",
           !c.scroll(delta: -2, precise: true, phase: .began, momentum: false, at: 0) && c.page == .home)
-    c.reset()
+    c.forgetGesture()
     swipe(&c, step: -3, events: 60, from: 0)   // 1.2 s of continuous swiping
     check("a long swipe turns one page, not several", c.page == .limits, c.page.rawValue)
     swipe(&c, step: -3, events: 10, from: 5)
@@ -138,6 +161,40 @@ func probeQuickCycle() -> String {
         if d.page != want { check("pages come in order", false, d.page.rawValue); return lines.joined(separator: "\n") }
     }
     check("pages come in order: now, limits, approvals, bulbs, pinned notes", true)
+
+    // Where the card reopens: the page it last showed, or the first when that page is gone.
+    var m = QuickCycle()
+    m.show(.bulbs); m.forgetGesture()
+    check("a new hover keeps the page the last one showed", m.page == .bulbs, m.page.rawValue)
+    m.pages = [.limits, .notes, .home]
+    m.show(.bulbs)
+    check("a page no longer in the list falls back to the first", m.page == .limits, m.page.rawValue)
+    _ = m.scroll(delta: -1, precise: false, phase: .none, momentum: false, at: 0)
+    check("scrolling follows the owner's order", m.page == .notes, m.page.rawValue)
+
+    // Number keys.
+    let order: [QuickPage] = [.home, .limits, .approvals, .bulbs, .notes]
+    check("2 opens the second page", QuickCycle.page(forKey: "2", in: order, typing: false) == .limits)
+    check("a digit typed into a field turns nothing", QuickCycle.page(forKey: "2", in: order, typing: true) == nil)
+    check("0 and keys past the last page turn nothing",
+          QuickCycle.page(forKey: "0", in: order, typing: false) == nil && QuickCycle.page(forKey: "6", in: order, typing: false) == nil)
+    check("letters turn nothing", QuickCycle.page(forKey: "a", in: order, typing: false) == nil)
+
+    // Where scrolling turns pages.
+    check("scrolling over the icon turns pages", QuickCycle.turnsPage(at: .icon, headerBottom: 34))
+    check("scrolling over the title bar turns pages", QuickCycle.turnsPage(at: .card(fromTop: 12), headerBottom: 34))
+    check("scrolling over the content does not", !QuickCycle.turnsPage(at: .card(fromTop: 90), headerBottom: 34))
+    check("scrolling anywhere else does not", !QuickCycle.turnsPage(at: .elsewhere, headerBottom: 34))
+
+    // Limits: Claude 5h and 7d, Codex 7d; no per-model or reserve rows.
+    let cl = [UsageWindow(id: "five_hour", label: "5 hours", pct: 10, resetsAt: nil),
+              UsageWindow(id: "seven_day", label: "Week", pct: 20, resetsAt: nil),
+              UsageWindow(id: "seven_day_opus", label: "Week · opus", pct: 5, resetsAt: nil)]
+    let cx = [UsageWindow(id: "codex.primary", label: "5 hours", pct: 1, resetsAt: nil),
+              UsageWindow(id: "codex.secondary", label: "Week", pct: 30, resetsAt: nil),
+              UsageWindow(id: "gpt-reserve.secondary", label: "Week · gpt-reserve", pct: 2, resetsAt: nil)]
+    let bars = QuickCard.limitBars(claude: cl, codex: cx).map { "\($0.icon) \($0.span) \($0.w.pct)" }
+    check("limits are Claude 5h, Claude 7d, Codex 7d", bars == ["sparkle 5h 10", "sparkle 7d 20", "terminal 7d 30"], bars.joined(separator: ", "))
     let many = Array(repeating: "Release work", count: 30)
     let fit = ChipFlow.fitting(many, rows: 2)
     check("thirty chips are cut to what two rows hold", fit > 2 && fit < 12, "\(fit)")
@@ -148,6 +205,11 @@ func probeQuickCycle() -> String {
 /// What the card shows and which page it is on; the view follows it.
 final class QuickState: ObservableObject {
     @Published var page: QuickPage = .home
+    /// The pages in the owner's order.
+    @Published var pages: [QuickPage] = QuickPage.allCases
+    /// How far down the card the title bar ends, measured when it draws;
+    /// scrolling above this line turns pages.
+    var headerBottom: CGFloat = 34
     @Published var homeLines: [HoverLine] = []
     @Published var chips: [StatusChip] = []
 }
@@ -177,6 +239,10 @@ struct QuickCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
+                .background(GeometryReader { g in
+                    Color.clear.onAppear { state.headerBottom = g.frame(in: .named("quickCard")).maxY + 5 }
+                })
+            Divider().padding(.horizontal, -12)
             switch state.page {
             case .home: home
             case .limits: limits
@@ -188,28 +254,33 @@ struct QuickCard: View {
         .padding(.horizontal, 12).padding(.vertical, 10)
         .frame(width: 320, alignment: .leading)
         .background(GlassBackground())
+        .coordinateSpace(name: "quickCard")
     }
 
+    /// One pill per page, the panel's tab grammar in small: an icon each, the
+    /// current one also named, a click or its number key goes there.
     private var header: some View {
-        HStack(spacing: 6) {
-            Image(systemName: state.page.icon).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.secondary)
-            Text(state.page.title).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-            Spacer(minLength: 6)
-            // one dot per page; the lit one is where you are, and a click goes there
-            HStack(spacing: 4) {
-                ForEach(QuickPage.allCases, id: \.self) { p in
-                    Circle().fill(p == state.page ? Color.primary.opacity(0.85) : Color.primary.opacity(0.25))
-                        .frame(width: 5, height: 5)
-                        .onTapGesture { state.page = p }
-                        .help(p.title)
+        HStack(spacing: 4) {
+            ForEach(Array(state.pages.enumerated()), id: \.element) { i, p in
+                let on = p == state.page
+                Button { state.page = p } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: p.icon).font(.system(size: 10, weight: .semibold))
+                        if on { Text(p.title).font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize() }
+                    }
+                    .padding(.horizontal, on ? 8 : 6).padding(.vertical, 3)
+                    .background(Capsule().fill(Color.primary.opacity(on ? 0.16 : 0.06)))
+                    .foregroundStyle(on ? .primary : .secondary)
+                    .contentShape(Capsule())
                 }
+                .buttonStyle(.plain).help("\(p.title) (\(i + 1))")
             }
-            .help("Scroll over the menu-bar icon to move between pages")
+            Spacer(minLength: 4)
             if let tab = state.page.tab {
                 Button { openTab(tab) } label: {
-                    Image(systemName: "arrow.up.forward.square").font(.system(size: 11))
+                    Image(systemName: "arrow.up.forward.app").font(.system(size: 12, weight: .medium))
                 }
-                .buttonStyle(.borderless).foregroundStyle(.secondary).help("Open the full \(state.page.title) tab")
+                .buttonStyle(.borderless).foregroundStyle(.secondary).help("Open \(state.page.title) in the panel")
             }
         }
     }
@@ -256,19 +327,27 @@ struct QuickCard: View {
 
     // ── Limits ──────────────────────────────────────────────────────────────
     private var limits: some View {
-        let bars: [HoverLine] = (usage.claude.map { ("Claude", $0) } + usage.codex.map { ("Codex", $0) }).map { who, w in
-            .bar(label: shortLabel(who, w), pct: w.pct,
-                 color: w.pct >= usage.dangerPct ? .red : w.pct >= usage.warnPct ? .orange : .green,
-                 resets: w.resetsAt.map { $0 > Date() ? "in " + countdownText(to: $0, now: Date()) : "" } ?? "")
+        let bars = QuickCard.limitBars(claude: usage.claude, codex: usage.codex).map { icon, span, w in
+            HoverLine.bar(label: span, pct: w.pct,
+                          color: w.pct >= usage.dangerPct ? .red : w.pct >= usage.warnPct ? .orange : .green,
+                          resets: w.resetsAt.map { $0 > Date() ? "in " + countdownText(to: $0, now: Date()) : "" } ?? "",
+                          icon: icon)
         }
         return Group {
-            if bars.isEmpty { empty("No limits read yet") } else { HoverLinesView(lines: bars, labelWidth: 64) }
+            if bars.isEmpty { empty("No limits read yet") } else { HoverLinesView(lines: bars, labelWidth: 40) }
         }
         .onAppear { usage.loadClaude() }   // fresh numbers even when the Limits hover item is off
     }
-    private func shortLabel(_ who: String, _ w: UsageWindow) -> String {
-        let span = w.id == "five_hour" ? "5h" : w.id == "seven_day" ? "week" : w.label
-        return who == "Claude" ? span : "Codex " + span
+
+    /// The three limits the owner acts on: Claude 5h and 7d, Codex 7d. The
+    /// icon says whose; per-model and reserve windows stay in the Usage tab.
+    static func limitBars(claude: [UsageWindow], codex: [UsageWindow]) -> [(icon: String, span: String, w: UsageWindow)] {
+        let claudeIcon = Icons.section["Claude"] ?? "sparkle", codexIcon = Icons.section["Codex"] ?? "terminal"
+        let c = claude.compactMap { w -> (String, String, UsageWindow)? in
+            w.id == "five_hour" ? (claudeIcon, "5h", w) : w.id == "seven_day" ? (claudeIcon, "7d", w) : nil
+        }
+        let x = codex.first { $0.id.hasPrefix("codex.") && $0.label == "Week" }
+        return c + (x.map { [(codexIcon, "7d", $0)] } ?? [])
     }
 
     // ── Approvals ───────────────────────────────────────────────────────────

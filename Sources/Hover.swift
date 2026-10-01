@@ -9,12 +9,13 @@ import SwiftUI
 
 /// One line of the preview: a usage bar, or a short sentence with a symbol.
 enum HoverLine: Identifiable {
-    case bar(label: String, pct: Int, color: Color, resets: String)
+    /// `icon` says whose bar it is (Claude, Codex) so the label can stay a bare span.
+    case bar(label: String, pct: Int, color: Color, resets: String, icon: String? = nil)
     case note(icon: String, text: String, tint: Color)
 
     var id: String {
         switch self {
-        case .bar(let l, _, _, _): return "bar-" + l
+        case .bar(let l, _, _, _, let icon): return "bar-" + (icon ?? "") + l
         case .note(let i, let t, _): return i + t
         }
     }
@@ -40,9 +41,13 @@ struct HoverLinesView: View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(lines) { line in
                 switch line {
-                case .bar(let label, let pct, let color, let resets):
+                case .bar(let label, let pct, let color, let resets, let icon):
                     HStack(spacing: 8) {
-                        Text(label).font(.system(size: 11, weight: .medium)).frame(width: labelWidth, alignment: .leading)
+                        HStack(spacing: 4) {
+                            if let icon { Image(systemName: icon).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary) }
+                            Text(label).font(.system(size: 11, weight: .medium))
+                        }
+                        .frame(width: labelWidth, alignment: .leading)
                         GeometryReader { g in
                             ZStack(alignment: .leading) {
                                 Capsule().fill(Color.primary.opacity(0.1))
@@ -88,6 +93,7 @@ final class HoverPeek: NSObject {
     private var closeWork: DispatchWorkItem?
     private var poll: Timer?
     private var scrollWatch: Any?
+    private var keyWatch: Any?
     private var cycle = QuickCycle()
     private var inside = false
     /// How long the card stays after the pointer leaves, so a chip can still be reached.
@@ -111,19 +117,40 @@ final class HoverPeek: NSObject {
         poll = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.check() }
         // Lets macOS batch this wake-up with others; a hover a tenth of a second late is unnoticeable.
         poll?.tolerance = 0.1
-        // Scrolling over the icon itself (not the card) turns the card's page.
+        // Scrolling over the icon or the card's title bar turns the page; over the content it does not.
         scrollWatch = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
-            guard let self, let b = self.button, e.window === b.window else { return e }
+            guard let self, QuickCycle.turnsPage(at: self.spot(of: e), headerBottom: self.state.headerBottom) else { return e }
             self.scrolled(e)
             return e
         }
+        // Number keys pick a page while the card has the keyboard and no field is being typed in.
+        keyWatch = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            guard let self, self.popover.isShown, let w = self.cardWindow, e.window === w,
+                  e.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+                  let p = QuickCycle.page(forKey: e.charactersIgnoringModifiers ?? "", in: self.state.pages,
+                                          typing: w.firstResponder is NSTextView) else { return e }
+            self.cycle.show(p)
+            self.state.page = self.cycle.page
+            return nil
+        }
     }
 
-    deinit { if let w = scrollWatch { NSEvent.removeMonitor(w) } }
+    deinit { [scrollWatch, keyWatch].compactMap { $0 }.forEach(NSEvent.removeMonitor) }
+
+    private var cardWindow: NSWindow? { popover.contentViewController?.view.window }
+
+    /// Where a scroll landed: on the icon, on the card (measured from its top), or elsewhere.
+    private func spot(of e: NSEvent) -> QuickCycle.Spot {
+        if let b = button, e.window === b.window { return .icon }
+        guard popover.isShown, let v = popover.contentViewController?.view, e.window === v.window else { return .elsewhere }
+        let p = v.convert(e.locationInWindow, from: nil)
+        return .card(fromTop: v.isFlipped ? p.y : v.bounds.height - p.y)
+    }
 
     private func scrolled(_ e: NSEvent) {
         guard !panelOpen() else { return }
-        cycle.show(state.page)   // a dot clicked on the card moved the page
+        cycle.pages = state.pages
+        cycle.show(state.page)   // a pill clicked on the card moved the page
         let phase: QuickCycle.Phase = e.phase.contains(.began) ? .began
             : e.phase.contains(.ended) || e.phase.contains(.cancelled) ? .ended
             : e.phase.isEmpty ? .none : .changed
@@ -148,12 +175,14 @@ final class HoverPeek: NSObject {
     private func entered() {
         closeWork?.cancel()
         guard !panelOpen(), !popover.isShown else { return }
-        // each fresh hover starts on Now, as the card always has
-        state.page = .home
-        cycle.reset()
+        // a fresh hover reopens on the page the last one showed, or the first if that page is gone
+        cycle.pages = state.pages
+        cycle.show(state.page)
+        cycle.forgetGesture()
+        state.page = cycle.page
         refresh()
         // nothing to say on Now: stay quiet until the owner scrolls to another page
-        guard !state.homeLines.isEmpty || !state.chips.isEmpty else { return }
+        guard state.page != .home || !state.homeLines.isEmpty || !state.chips.isEmpty else { return }
         present()
     }
 
