@@ -321,6 +321,25 @@ final class PolicyStore: ObservableObject {
     func moveTab(_ dragged: String, to target: String) {
         tabOrder = reordered(tabOrder, moving: dragged, to: target)
     }
+    /// The hover card's pages in the owner's order (every page, shown or not), and the hidden ones.
+    static let quickPageIDs = ["home", "limits", "approvals", "bulbs", "notes"]   // QuickPage.allCases, checked by --probe-quick
+    static let quickOrderKey = "switchboard.quickPageOrder", quickHiddenKey = "switchboard.quickPagesHidden"
+    @Published var quickPageOrder: [String] = PolicyStore.mergedOrder(saved: UserDefaults.standard.stringArray(forKey: PolicyStore.quickOrderKey) ?? [],
+                                                                       all: PolicyStore.quickPageIDs) {
+        didSet { UserDefaults.standard.set(quickPageOrder, forKey: Self.quickOrderKey) }
+    }
+    @Published var hiddenQuickPages: Set<String> = Set(UserDefaults.standard.stringArray(forKey: PolicyStore.quickHiddenKey) ?? []) {
+        didSet { UserDefaults.standard.set(Array(hiddenQuickPages).sorted(), forKey: Self.quickHiddenKey) }
+    }
+    /// The pages the hover card shows, in order; never empty, so the card always has a page.
+    var shownQuickPages: [String] {
+        let s = quickPageOrder.filter { !hiddenQuickPages.contains($0) }
+        return s.isEmpty ? [quickPageOrder.first ?? "home"] : s
+    }
+    /// A saved order kept as it is, minus pages that no longer exist, plus new ones at the end.
+    static func mergedOrder(saved: [String], all: [String]) -> [String] {
+        saved.filter(all.contains) + all.filter { !saved.contains($0) }
+    }
     @Published var hiddenTabs: Set<String> = Visibility.hiddenTabs {
         didSet { UserDefaults.standard.set(Array(hiddenTabs).sorted(), forKey: Visibility.tabsKey) }
     }

@@ -193,6 +193,9 @@ func probeQuickCycle() -> String {
               UsageWindow(id: "codex.secondary", label: "Week", pct: 30, resetsAt: nil),
               UsageWindow(id: "gpt-reserve.secondary", label: "Week · gpt-reserve", pct: 2, resetsAt: nil)]
     let bars = QuickCard.limitBars(claude: cl, codex: cx).map { "\($0.icon) \($0.span) \($0.w.pct)" }
+    check("Settings knows every hover page", PolicyStore.quickPageIDs == QuickPage.allCases.map(\.rawValue))
+    check("a saved page order survives, a gone page drops out, a new one joins at the end",
+          PolicyStore.mergedOrder(saved: ["notes", "gone", "home"], all: ["home", "limits", "notes"]) == ["notes", "home", "limits"])
     check("limits are Claude 5h, Claude 7d, Codex 7d", bars == ["sparkle 5h 10", "sparkle 7d 20", "terminal 7d 30"], bars.joined(separator: ", "))
     let many = Array(repeating: "Release work", count: 30)
     let fit = ChipFlow.fitting(many, rows: 2)

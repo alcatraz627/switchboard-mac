@@ -1293,6 +1293,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     private var dot: IconDot?
     private var dotWatch: AnyCancellable?
     private var panelScroll: Any?
+    private var pageWatch: AnyCancellable?
     /// The hover lines only the app can write (problems, timers, services),
     /// for the items chosen in Settings.
     var appHoverLines: (Set<HoverItem>) -> [HoverLine] = { _ in [] }
@@ -1361,6 +1362,12 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             // so a change in what waits never erases a red "something is wrong".
             dotWatch = store.$needsWaiting.combineLatest(store.$hoverItems)
                 .sink { [weak self] n, items in self?.renderDot(waiting: n, items: items) }
+            // The card's pages follow Settings; the values come as arguments, the store has not changed yet.
+            pageWatch = store.$quickPageOrder.combineLatest(store.$hiddenQuickPages)
+                .sink { [weak self] order, hidden in
+                    let shown = order.filter { !hidden.contains($0) }
+                    self?.quick.pages = (shown.isEmpty ? Array(order.prefix(1)) : shown).compactMap(QuickPage.init(rawValue:))
+                }
         }
         concerns = SwitchboardConcerns.all(policy: store, usage: usage, lights: lights, controls: controls)
         let host = NSHostingController(rootView: PolicyPanel(concerns: concerns, store: store))

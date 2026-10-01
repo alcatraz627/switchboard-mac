@@ -25,7 +25,9 @@ struct SettingsTabView: View {
     }
 
     var body: some View {
-        let hover = HoverItem.allCases.filter { matches($0.title) || matches($0.detail) }
+        // Claude limits have their own hover page now, so they are a page below, not a Now item
+        let hover = HoverItem.allCases.filter { $0 != .limits && (matches($0.title) || matches($0.detail)) }
+        let pages = quickPages.filter { matches($0.title) || matches("hover") }
         let folder = matches("notes folder") || matches(NotesStore.dir)
         VStack(alignment: .leading, spacing: PT.gap) {
             if !orderedTabs.isEmpty {
@@ -67,14 +69,34 @@ struct SettingsTabView: View {
                     }
                 }
             }
+            if !pages.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    GroupHeader(name: "Hover pages")
+                    note(query.isEmpty ? "The pages the hover card moves through, in this order. Drag the grip to reorder; the switch hides a page."
+                                       : "Matching hover pages.")
+                    Card {
+                        ReorderStack(items: pages, move: { d, t in
+                            store.quickPageOrder = reordered(store.quickPageOrder, moving: d, to: t)
+                        }) { i, p, grip in
+                            VStack(spacing: 0) {
+                                if i > 0 { Divider().padding(.leading, PT.rowH) }
+                                HStack(spacing: 0) {
+                                    if query.isEmpty { grip.padding(.leading, 6) }
+                                    SystemRowView(row: pageRow(p), store: store)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if !hover.isEmpty {
-                group("Hover preview", note: "What shows when the pointer rests on the menu bar icon. Keep it short.",
+                group("Now page", note: "What the Now hover page shows as badges under its shortcuts, and the dot on the menu bar icon.",
                       rows: hover.map(hoverRow))
             }
             if folder {
                 group("Notes folder", note: "Where each note is saved as a markdown file.", rows: [notesFolderRow])
             }
-            if orderedTabs.isEmpty && hover.isEmpty && !folder {
+            if orderedTabs.isEmpty && hover.isEmpty && pages.isEmpty && !folder {
                 Text("Nothing in Settings matches \"\(query)\".").font(PT.caption).foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
             }
@@ -132,6 +154,23 @@ struct SettingsTabView: View {
             c.icon = Icons.section[s]
             return c
         }
+        return r
+    }
+
+    /// Every hover page in the owner's order, shown or not.
+    private var quickPages: [SettingsTab] {
+        store.quickPageOrder.compactMap(QuickPage.init(rawValue:)).map { SettingsTab(id: $0.rawValue, title: $0.title, icon: $0.icon) }
+    }
+
+    /// A page's switch; the last page shown cannot be hidden, so the card always has one.
+    private func pageRow(_ p: SettingsTab) -> SystemRow {
+        let on = !store.hiddenQuickPages.contains(p.id)
+        let last = on && store.shownQuickPages == [p.id]
+        var r = SystemRow(label: p.title, state: on ? .on(menuGreen) : .off,
+                          note: last ? "the only page shown" : "", enabled: !last, tip: "",
+                          action: { if !last { toggle(&store.hiddenQuickPages, p.id) } })
+        r.icon = p.icon
+        r.key = "settings-page-" + p.id
         return r
     }
 
