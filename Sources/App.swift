@@ -55,6 +55,11 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         systemTimerTick = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             self?.fireDueSystemTimers()
         }
+        // A held push or ask lands whenever a session hits a gate, not when the
+        // panel happens to refresh; read the holds every few seconds so the dot,
+        // the hover card and the Approvals tab show it within moments.
+        needsTick = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.watchNeeds() }
+        needsTick?.tolerance = 1
         // Probe once shortly after launch so the Machine tab has rows before
         // the first open instead of loading while the owner watches.
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.refreshSnapshot() }
@@ -65,6 +70,24 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ note: Notification) { dlog("terminating") }
+
+    private var needsTick: Timer?
+    private var needsSignature = ""
+
+    /// Re-read what waits on the owner off the main thread; hand it over only
+    /// when the set changed (a new hold, an approval, a session ending).
+    private func watchNeeds() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let items = NeedsYou.items()
+            let sig = NeedsYou.signature(items)
+            DispatchQueue.main.async {
+                guard let self, sig != self.needsSignature else { return }
+                self.needsSignature = sig
+                self.sbSnapshot.needs = items
+                self.policyController?.store.setNeeds(items) { [weak self] in self?.refreshSnapshot() }
+            }
+        }
+    }
 
     /// Only one Switchboard at a time: a second icon would fight the first
     /// over the same timers and power assertion. A headless run (--dump,

@@ -37,6 +37,11 @@ struct NeedItem: Identifiable {
 }
 
 enum NeedsYou {
+    /// What the list amounts to, so a watcher can tell a real change from a re-read.
+    static func signature(_ items: [NeedItem]) -> String {
+        items.map { "\($0.id)|\($0.approved)|\($0.sessionDir ?? "-")" }.sorted().joined(separator: ";")
+    }
+
     /// Where the gate files live; a probe points it at a scratch folder.
     static var rootOverride: String?
     private static var root: String { rootOverride ?? SwitchboardPaths.gccRoot }
