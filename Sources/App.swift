@@ -1676,6 +1676,37 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
     }
 }
 
+// ── Problems and how bad they are ───────────────────────────────────────────
+
+/// One thing wrong, in a sentence, with the tab that shows it and the search
+/// that finds its row there.
+struct Problem: Equatable {
+    let text: String
+    let tab: String
+    let level: ProblemLevel
+    var query: String? = nil
+
+    /// Hook loose ends are warnings, never errors: a script no event runs, or
+    /// a hook naming a file that is gone. Claude keeps working either way.
+    static func hooks(unwired: Int, missing: Int) -> [Problem] {
+        var out: [Problem] = []
+        if missing > 0 {
+            out.append(Problem(text: missing == 1 ? "1 hook names a missing file" : "\(missing) hooks name missing files",
+                               tab: "rules", level: .warn, query: "missing file"))
+        }
+        if unwired > 0 {
+            out.append(Problem(text: unwired == 1 ? "1 hook script has no event" : "\(unwired) hook scripts have no event",
+                               tab: "rules", level: .warn, query: "not wired"))
+        }
+        return out
+    }
+
+    /// The worst level per tab, for the marks beside tab and space names.
+    static func levels(_ ps: [Problem]) -> [String: ProblemLevel] {
+        ps.reduce(into: [:]) { m, p in m[p.tab] = max(m[p.tab] ?? .warn, p.level) }
+    }
+}
+
 // ── The hover preview's app-side lines ──────────────────────────────────────
 
 extension SwitchboardApp {
@@ -1684,14 +1715,14 @@ extension SwitchboardApp {
     func hoverLines(_ chosen: Set<HoverItem>) -> [HoverLine] {
         var out: [HoverLine] = []
         if chosen.contains(.problems) {
-            let problems = problemTexts()
+            let problems = self.problems()
             // "All clear" only once there has been something to judge.
             if snapshotsDone == 0 {
                 out.append(.note(icon: "hourglass", text: "Checking…", tint: .secondary))
             } else if problems.isEmpty {
                 out.append(.note(icon: "checkmark.circle", text: "All clear", tint: .green))
             }
-            out += problems.prefix(3).map { .note(icon: "exclamationmark.triangle.fill", text: $0, tint: .orange) }
+            out += problems.prefix(3).map { .note(icon: $0.level.icon, text: $0.text, tint: $0.level.tint) }
             if problems.count > 3 { out.append(.note(icon: "ellipsis", text: "\(problems.count - 3) more in the panel", tint: .secondary)) }
         }
         if chosen.contains(.timers) {
@@ -1721,32 +1752,34 @@ extension SwitchboardApp {
     func problemTexts() -> [String] { problems().map(\.text) }
 
     /// Everything wrong right now, each with the tab that shows it, so opening
-    /// the panel from a red icon can go straight there.
-    func problems() -> [(text: String, tab: String)] {
+    /// the panel from a red icon can go straight there. Errors come first.
+    func problems() -> [Problem] {
         let s = sbSnapshot
-        var out: [(text: String, tab: String)] = []
+        var out: [Problem] = []
         if !s.probeFailures.isEmpty {
             let names = s.probeFailures.keys.sorted()
             let first = names[0] == "remote.py" ? "remote" : Self.helperSection[names[0]].flatMap { Visibility.groupTab[$0] } ?? "system"
-            out.append(("\(names.count == 1 ? "1 source" : "\(names.count) sources") could not be read: "
-                        + names.joined(separator: ", "), first))
+            out.append(Problem(text: "\(names.count == 1 ? "1 source" : "\(names.count) sources") could not be read: "
+                               + names.joined(separator: ", "), tab: first, level: .error))
         }
         for j in s.jobs where j["failing"] as? Bool == true {
-            out.append(("\((j["name"] as? String) ?? "a job") failed (exit \((j["last_exit"] as? Int).map(String.init) ?? "?"))", "runtime"))
+            let name = (j["name"] as? String) ?? "a job"
+            out.append(Problem(text: "\(name) failed (exit \((j["last_exit"] as? Int).map(String.init) ?? "?"))",
+                               tab: "runtime", level: .error, query: name))
         }
-        let off = s.gates.filter { if case .on = $0.kind { return false }; return true }.count
-        if off > 0 { out.append((off == 1 ? "1 gate is off" : "\(off) gates are off", "rules")) }
         if !timerFailures.isEmpty {
             // A timed switch can sit in any Machine group; find the one holding its row.
             let groups = allSystemGroups()
             for (label, why) in timerFailures.sorted(by: { $0.key < $1.key }) {
                 let title = groups.first { $0.rows.contains { $0.label == label } }?.title
-                out.append(("\(label): \(why)", title.flatMap { Visibility.groupTab[$0] } ?? "system"))
+                out.append(Problem(text: "\(label): \(why)", tab: title.flatMap { Visibility.groupTab[$0] } ?? "system", level: .error))
             }
         }
-        let unwired = (policyController?.store.catalogs["rules"] ?? []).flatMap(\.rows)
-            .filter { $0.note.hasPrefix("not wired") || $0.note.hasPrefix("missing file") }.count
-        if unwired > 0 { out.append((unwired == 1 ? "1 hook has no event" : "\(unwired) hooks have no event", "rules")) }
+        let off = s.gates.filter { if case .on = $0.kind { return false }; return true }.count
+        if off > 0 { out.append(Problem(text: off == 1 ? "1 gate is off" : "\(off) gates are off", tab: "rules", level: .warn, query: "gates")) }
+        let rules = (policyController?.store.catalogs["rules"] ?? []).flatMap(\.rows)
+        out += Problem.hooks(unwired: rules.filter { $0.note.hasPrefix("not wired") }.count,
+                             missing: rules.filter { $0.note.hasPrefix("missing file") }.count)
         return out
     }
 }
@@ -1845,14 +1878,27 @@ extension SwitchboardApp {
         check("a space reopens on the tab last used in it", Visibility.lastTab(in: "records") == "queue")
 
         // Opening from a red or yellow icon lands on what raised it, once per new cause.
-        let jobFail = [(text: "nightly failed (exit 1)", tab: "runtime")]
+        let jobFail = [Problem(text: "nightly failed (exit 1)", tab: "runtime", level: .error)]
         let first = PolicyStatusController.attention(problems: jobFail, hidden: [], waiting: 1, waitingKeys: ["a"], last: "")
         check("a red icon opens the problem's tab, ahead of a waiting approval", first.tab == "runtime")
         let again = PolicyStatusController.attention(problems: jobFail, hidden: [], waiting: 1, waitingKeys: ["a"], last: first.signature)
         check("the same problem does not pull the panel there on every open", again.tab == nil)
-        let more = jobFail + [(text: "1 gate is off", tab: "rules")]
+        let more = jobFail + [Problem(text: "sync failed (exit 2)", tab: "runtime", level: .error)]
         check("a new problem jumps again",
               PolicyStatusController.attention(problems: more, hidden: [], waiting: 0, waitingKeys: [], last: first.signature).tab == "runtime")
+
+        // Severity: hook loose ends and gates are warnings; warnings never pull the panel or turn the icon red.
+        let hooks = Problem.hooks(unwired: 8, missing: 1)
+        check("hook scripts with no event, or a missing file, are warnings", hooks.count == 2 && hooks.allSatisfy { $0.level == .warn })
+        check("a warning alone does not pull the panel to its tab",
+              PolicyStatusController.attention(problems: hooks, hidden: [], waiting: 0, waitingKeys: [], last: "").tab == nil)
+        check("a warning does not stand in front of a waiting approval",
+              PolicyStatusController.attention(problems: hooks, hidden: [], waiting: 1, waitingKeys: ["a"], last: "").tab == "approvals")
+        let mixed = Problem.levels(hooks + jobFail + [Problem(text: "1 gate is off", tab: "rules", level: .warn)])
+        check("a tab's mark takes its worst problem", mixed == ["rules": .warn, "runtime": .error])
+        let badge = StatusBadge(problem: hooks[1], index: 0)
+        check("a badge opens the problem's tab searched to its rows",
+              badge.kind == .warn && badge.tab == "rules" && badge.query == "not wired")
         check("a problem on a hidden tab falls through to the next cause",
               PolicyStatusController.attention(problems: jobFail, hidden: ["runtime"], waiting: 2, waitingKeys: ["a", "b"], last: "").tab == "approvals")
         let yellow = PolicyStatusController.attention(problems: [], hidden: [], waiting: 1, waitingKeys: ["a"], last: "")

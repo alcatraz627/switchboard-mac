@@ -289,7 +289,7 @@ struct PolicyPanel: View {
                         Image(systemName: s.icon).font(.system(size: 10.5))
                         Text(s.title).font(.system(size: 11.5, weight: on ? .semibold : .regular)).lineLimit(1)
                         if badge > 0 { TabBadge(count: badge, onAccent: on) }
-                        else if s.tabs.contains(where: { store.problemTabs.contains($0.id) }) { ProblemMark(onAccent: on) }
+                        else if let l = s.tabs.compactMap({ store.problemLevels[$0.id] }).max() { ProblemMark(level: l, onAccent: on) }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 4)
@@ -316,7 +316,7 @@ struct PolicyPanel: View {
                             Image(systemName: c.icon).font(.system(size: 10.5))
                             Text(c.title).font(.system(size: 11.5, weight: on ? .semibold : .regular)).lineLimit(1)
                             if let n = c.badge() { TabBadge(count: n, onAccent: false) }
-                            else if store.problemTabs.contains(c.id) { ProblemMark() }
+                            else if let l = store.problemLevels[c.id] { ProblemMark(level: l) }
                         }
                         .foregroundStyle(on ? Color.primary : Color.secondary)
                         Capsule().fill(on ? Color.accentColor : .clear).frame(height: 2)
@@ -592,17 +592,25 @@ struct TabBadge: View {
     }
 }
 
-/// The red dot beside a space or tab showing something wrong: the same cause
-/// that turns the menu bar dot red.
+/// The dot beside a space or tab showing something wrong: red for an error,
+/// orange for a warning, the colours the badges use.
 struct ProblemMark: View {
+    var level: ProblemLevel = .error
     var onAccent = false
 
     var body: some View {
-        Circle().fill(Color(nsColor: menuRed))
+        Circle().fill(level.tint)
             .frame(width: 7, height: 7)
             .overlay(Circle().strokeBorder(onAccent ? Color.white.opacity(0.8) : .clear, lineWidth: 1))
-            .help("Something here needs a look")
+            .help(level == .error ? "Something here is broken" : "Something here could use a look")
     }
+}
+
+extension ProblemLevel {
+    var color: NSColor { self == .error ? menuRed : .systemOrange }
+    var tint: Color { Color(nsColor: color) }
+    /// A different shape per level as well as a colour, so the two read apart without colour.
+    var icon: String { self == .error ? "xmark.octagon.fill" : "exclamationmark.triangle.fill" }
 }
 
 struct GroupHeader: View {
@@ -1268,37 +1276,35 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     /// What the hover card shows and which quick page it is on.
     let quick = QuickState()
 
-    /// Fill the Now page: the chosen hover lines, and a chip for each thing
-    /// that needs the owner (what waits, what is wrong, what is down).
+    /// Fill the Now page's badges.
     func refreshQuick() {
-        quick.homeLines = hoverLines()
-        quick.chips = statusChips()
+        quick.badges = statusBadges()
     }
 
-    /// One chip per thing that needs the owner, only for the hover items chosen
-    /// in Settings, worded short so four always fit in one row.
-    func statusChips() -> [StatusChip] {
-        var out: [StatusChip] = []
+    /// One badge per thing that needs the owner, for the hover items chosen in
+    /// Settings: what waits, each problem, what is down, running timers.
+    func statusBadges() -> [StatusBadge] {
+        var out: [StatusBadge] = []
         let chosen = store.hoverItems
         let n = store.needsWaiting
         if chosen.contains(.approvals), n > 0 {
-            out.append(StatusChip(id: "approvals", icon: "hand.raised.fill", text: "\(n) waiting",
-                                  tint: Color(nsColor: menuYellow), help: "\(n) push\(n == 1 ? "" : "es") or ask\(n == 1 ? "" : "s") wait on you",
-                                  opens: .approvals, tab: nil))
+            out.append(StatusBadge(id: "approvals", icon: "hand.raised.fill", text: "\(n) waiting", kind: .waiting,
+                                   help: "\(n) push\(n == 1 ? "" : "es") or ask\(n == 1 ? "" : "s") wait on you", opens: .approvals))
         }
-        if chosen.contains(.problems), let first = problemList.first {
-            let c = problemList.count
-            out.append(StatusChip(id: "problems", icon: "exclamationmark.triangle.fill", text: "\(c) wrong",
-                                  tint: .red, help: problemList.map(\.text).joined(separator: "\n"), opens: nil, tab: first.tab))
+        if chosen.contains(.problems) {
+            out += problemList.enumerated().map { StatusBadge(problem: $1, index: $0) }
         }
         let down = chosen.contains(.services) ? appServicesDown() : []
         if !down.isEmpty {
-            out.append(StatusChip(id: "down", icon: "bolt.slash.fill", text: "\(down.count) down",
-                                  tint: .orange, help: "Down: " + down.joined(separator: ", "), opens: nil, tab: "runtime"))
+            out.append(StatusBadge(id: "down", icon: "bolt.slash.fill", text: "Down: " + down.joined(separator: ", "),
+                                   kind: .error, help: "Open Runtime", tab: "runtime"))
         }
-        if chosen.contains(.timers), let t = TimerStore.shared.running.first, t.fireAt.timeIntervalSinceNow < 60 {
-            out.append(StatusChip(id: "timer", icon: Icons.tab["timers"] ?? "timer", text: "ringing soon",
-                                  tint: .teal, help: "\(t.label.isEmpty ? "A timer" : t.label) is about to go off", opens: nil, tab: "timers"))
+        if chosen.contains(.timers) {
+            for t in TimerStore.shared.running.prefix(2) {
+                out.append(StatusBadge(id: "timer-\(t.id)", icon: Icons.tab["timers"] ?? "timer",
+                                       text: "\(t.label.isEmpty ? "Timer" : t.label) · \(clock(t.fireAt.timeIntervalSinceNow))",
+                                       kind: .info, help: "Open Timers", tab: "timers"))
+            }
         }
         return out
     }
@@ -1316,7 +1322,11 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             // The tooltip would cover the preview; the preview says more.
             b.toolTip = nil
             let card = QuickCard(state: quick, policy: store, usage: usage, lights: lights, notes: NotesStore.shared,
-                                 openTab: { [weak self] tab in self?.peek?.hide(); self?.show(tab: tab) })
+                                 openTab: { [weak self] tab in self?.peek?.hide(); self?.show(tab: tab) },
+                                 openSearch: { [weak self] tab, q in
+                                     self?.store.queries[tab] = q
+                                     self?.peek?.hide(); self?.show(tab: tab)
+                                 })
             peek = HoverPeek(button: b, state: quick, card: AnyView(card),
                              refresh: { [weak self] in self?.refreshQuick() },
                              panelOpen: { [weak self] in self?.popover.isShown ?? false })
@@ -1421,16 +1431,17 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         return out + appHoverLines(chosen)
     }
 
-    /// The icon dot: red while something is wrong, yellow while something waits.
-    func updateDot(problems: [(text: String, tab: String)]) {
-        lastProblems = !problems.isEmpty
+    /// The icon dot: red while something is broken, yellow while something waits.
+    func updateDot(problems: [Problem]) {
+        lastProblems = problems.contains { $0.level == .error }
         problemList = problems
-        let tabs = Set(problems.map(\.tab))
-        if store.problemTabs != tabs { store.problemTabs = tabs }
+        let levels = Problem.levels(problems)
+        if store.problemLevels != levels { store.problemLevels = levels }
         renderDot(waiting: store.needsWaiting, items: store.hoverItems)
     }
+    /// Whether any error stands; warnings never turn the icon red.
     private var lastProblems = false
-    private var problemList: [(text: String, tab: String)] = []
+    private var problemList: [Problem] = []
     /// What the panel last jumped to, so an unchanged problem does not pull
     /// the owner away from the tab they chose on every open.
     private var lastAttention = ""
@@ -1446,9 +1457,10 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     }
 
     /// The decision behind `attentionTab`, without the panel, so a probe can drive it.
-    static func attention(problems: [(text: String, tab: String)], hidden: Set<String>, waiting: Int,
+    /// Only errors pull the panel to a tab; a warning waits for the owner to look.
+    static func attention(problems: [Problem], hidden: Set<String>, waiting: Int,
                           waitingKeys: [String], last: String) -> (tab: String?, signature: String) {
-        let visible = problems.filter { !hidden.contains($0.tab) }
+        let visible = problems.filter { $0.level == .error && !hidden.contains($0.tab) }
         if let p = visible.first {
             let sig = "p:" + visible.map(\.text).joined(separator: "|")
             return (sig == last ? nil : p.tab, sig)
@@ -1516,7 +1528,11 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
         store.queries[tab + "::scope"] = f
     }
     if let m = CommandLine.arguments.firstIndex(of: "--problem-tabs").flatMap({ $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }) {
-        store.problemTabs = Set(m.split(separator: ",").map(String.init))
+        // tab or tab:warn, comma separated
+        store.problemLevels = Dictionary(m.split(separator: ",").map { part -> (String, ProblemLevel) in
+            let bits = part.split(separator: ":")
+            return (String(bits[0]), bits.count > 1 && bits[1] == "warn" ? .warn : .error)
+        }, uniquingKeysWith: max)
     }
     if let q = CommandLine.arguments.firstIndex(of: "--query").flatMap({ $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }) { store.queries[tab] = q }
     var needs = NeedsYou.items()

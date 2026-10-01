@@ -181,8 +181,6 @@ final class HoverPeek: NSObject {
         cycle.forgetGesture()
         state.page = cycle.page
         refresh()
-        // nothing to say on Now: stay quiet until the owner scrolls to another page
-        guard state.page != .home || !state.homeLines.isEmpty || !state.chips.isEmpty else { return }
         present()
     }
 

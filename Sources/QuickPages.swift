@@ -210,21 +210,70 @@ final class QuickState: ObservableObject {
     /// How far down the card the title bar ends, measured when it draws;
     /// scrolling above this line turns pages.
     var headerBottom: CGFloat = 34
-    @Published var homeLines: [HoverLine] = []
-    @Published var chips: [StatusChip] = []
+    @Published var badges: [StatusBadge] = []
 }
 
-/// A small chip on the Now page for something that needs the owner: its own
-/// colour and icon, a tooltip, and a click that opens the page that shows it.
-struct StatusChip: Identifiable {
+/// One standard badge for something that needs the owner, coloured by how
+/// much: broken, could use a look, waiting on you, or just running.
+struct StatusBadge: Identifiable {
+    enum Kind { case error, warn, waiting, info }
     let id: String
     let icon: String
     let text: String
-    let tint: Color
+    let kind: Kind
     let help: String
-    let opens: QuickPage?
-    let tab: String?
+    var opens: QuickPage? = nil
+    var tab: String? = nil
+    /// The search that finds the badge's row in its tab.
+    var query: String? = nil
+
+    var tint: Color {
+        switch kind {
+        case .error: return ProblemLevel.error.tint
+        case .warn: return ProblemLevel.warn.tint
+        case .waiting: return Color(nsColor: menuYellow)
+        case .info: return .teal
+        }
+    }
+
+    init(id: String, icon: String, text: String, kind: Kind, help: String,
+         opens: QuickPage? = nil, tab: String? = nil, query: String? = nil) {
+        self.id = id; self.icon = icon; self.text = text; self.kind = kind; self.help = help
+        self.opens = opens; self.tab = tab; self.query = query
+    }
+
+    init(problem p: Problem, index: Int) {
+        self.init(id: "problem-\(index)", icon: p.level.icon, text: p.text, kind: p.level == .error ? .error : .warn,
+                  help: "Open it in the panel", tab: p.tab, query: p.query)
+    }
 }
+
+/// The badge itself, the one shape every status takes on the card.
+struct StatusBadgeView: View {
+    let badge: StatusBadge
+    let act: () -> Void
+
+    var body: some View {
+        Button(action: act) {
+            // the colour rides on the icon and the fill; the words stay full contrast to read
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Image(systemName: badge.icon).font(.system(size: 9.5, weight: .semibold)).foregroundStyle(badge.tint)
+                Text(badge.text).font(.system(size: 10.5, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 8).fill(badge.tint.opacity(0.22)))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(badge.tint.opacity(0.45), lineWidth: 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain).help(badge.help)
+    }
+}
+
+/// The tabs the Now page offers as shortcuts, in grid order.
+let quickLaunchTabs: [(id: String, title: String)] = [
+    ("agents", "Agents"), ("rules", "Hooks"), ("notes", "Notes"),
+    ("timers", "Timers"), ("controls", "Controls"), ("system", "Machine"),
+]
 
 /// The hover card: a header with the page's name and dots for every page,
 /// then the page itself.
@@ -235,6 +284,8 @@ struct QuickCard: View {
     @ObservedObject var lights: LightsStore
     @ObservedObject var notes: NotesStore
     let openTab: (String) -> Void
+    /// Opens a tab with its search filled in, so the row a badge names is in view.
+    var openSearch: (String, String) -> Void = { _, _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -286,43 +337,38 @@ struct QuickCard: View {
     }
 
     // ── Now ─────────────────────────────────────────────────────────────────
+    /// Two tiers: shortcuts to the tabs used most, then one badge per thing
+    /// that needs the owner. Limits live on their own page.
     private var home: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !state.chips.isEmpty {
-                // chips keep their natural width; if four ever would not fit, fewer show, never a cut one
-                ViewThatFits(in: .horizontal) {
-                    chipRow(3); chipRow(2); chipRow(1)
-                }
-            }
-            HoverLinesView(lines: state.homeLines)
-            if state.homeLines.isEmpty && state.chips.isEmpty {
-                Text("Nothing needs you").font(.system(size: 11.5)).foregroundStyle(.secondary)
-            }
-        }
-    }
-    /// Three is the count that always fits the 320-point card at its widest
-    /// wording (measured: a fourth spills); chips come most urgent first.
-    static let maxChips = 3
-
-    private func chipRow(_ n: Int) -> some View {
-        HStack(spacing: 5) {
-            ForEach(state.chips.prefix(min(n, QuickCard.maxChips))) { c in
-                Button {
-                    if let p = c.opens { state.page = p } else if let t = c.tab { openTab(t) }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: c.icon).font(.system(size: 9.5, weight: .semibold))
-                        Text(c.text).font(.system(size: 10.5, weight: .medium)).lineLimit(1)
+        let tabs = quickLaunchTabs.filter { !policy.hiddenTabs.contains($0.id) }.prefix(6)
+        return VStack(alignment: .leading, spacing: 9) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 3), spacing: 6) {
+                ForEach(Array(tabs), id: \.id) { t in
+                    Button { openTab(t.id) } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: Icons.tab[t.id] ?? "square").font(.system(size: 10.5))
+                            Text(t.title).font(.system(size: 11.5)).lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity).padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.07)))
+                        .contentShape(RoundedRectangle(cornerRadius: 6))
                     }
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Capsule().fill(c.tint.opacity(0.2)))
-                    .foregroundStyle(c.tint)
-                    .fixedSize()
+                    .buttonStyle(.plain).help("Open \(t.title) in the panel")
                 }
-                .buttonStyle(.plain).help(c.help)
+            }
+            if state.badges.isEmpty {
+                Text("Nothing needs you").font(.system(size: 11.5)).foregroundStyle(.secondary)
+            } else {
+                FlowLayout(spacing: 5) {
+                    ForEach(state.badges) { b in
+                        StatusBadgeView(badge: b) {
+                            if let p = b.opens { state.page = p }
+                            else if let t = b.tab { if let q = b.query { openSearch(t, q) } else { openTab(t) } }
+                        }
+                    }
+                }
             }
         }
-        .fixedSize()
     }
 
     // ── Limits ──────────────────────────────────────────────────────────────
@@ -568,7 +614,7 @@ struct FlowLayout: Layout {
         let width = proposal.width ?? 300
         var x: CGFloat = 0, y: CGFloat = 0, rowH: CGFloat = 0
         for v in subviews {
-            let s = v.sizeThatFits(.unspecified)
+            let s = v.sizeThatFits(ProposedViewSize(width: width, height: nil))
             if x > 0 && x + s.width > width { x = 0; y += rowH + spacing; rowH = 0 }
             x += s.width + spacing
             rowH = max(rowH, s.height)
@@ -579,7 +625,8 @@ struct FlowLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         var x = bounds.minX, y = bounds.minY, rowH: CGFloat = 0
         for v in subviews {
-            let s = v.sizeThatFits(.unspecified)
+            // offered the full row, so a child too long for it wraps rather than spills
+            let s = v.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
             if x > bounds.minX && x + s.width > bounds.maxX { x = bounds.minX; y += rowH + spacing; rowH = 0 }
             v.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(s))
             x += s.width + spacing

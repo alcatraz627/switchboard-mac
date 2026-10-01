@@ -132,14 +132,14 @@ if let out = argAfter("--snapshot-quick") {
     NotesStore.shared.load()
     let state = QuickState()
     state.page = page
-    state.homeLines = delegate.hoverLines(Set(HoverItem.allCases))
-    // the widest row the chips can make: all four kinds, two-digit counts
-    state.chips = [
-        StatusChip(id: "approvals", icon: "hand.raised.fill", text: "12 waiting", tint: Color(nsColor: menuYellow), help: "", opens: .approvals, tab: nil),
-        StatusChip(id: "problems", icon: "exclamationmark.triangle.fill", text: "13 wrong", tint: .red, help: "", opens: nil, tab: "system"),
-        StatusChip(id: "down", icon: "bolt.slash.fill", text: "3 down", tint: .orange, help: "", opens: nil, tab: "runtime"),
-        StatusChip(id: "timer", icon: Icons.tab["timers"] ?? "timer", text: "ringing soon", tint: .teal, help: "", opens: nil, tab: "timers"),
-    ]
+    // every badge kind, with the longest wording seen live, so wrapping shows
+    let problems = [Problem(text: "refresh session index failed (exit 1)", tab: "runtime", level: .error, query: "refresh session index")]
+        + [Problem(text: "1 gate is off", tab: "rules", level: .warn, query: "gates")]
+        + Problem.hooks(unwired: 8, missing: 0)
+    state.badges = [StatusBadge(id: "approvals", icon: "hand.raised.fill", text: "12 waiting", kind: .waiting, help: "", opens: .approvals)]
+        + problems.enumerated().map { StatusBadge(problem: $1, index: $0) }
+        + [StatusBadge(id: "down", icon: "bolt.slash.fill", text: "Down: kanban, session hub", kind: .error, help: "", tab: "runtime"),
+           StatusBadge(id: "timer", icon: Icons.tab["timers"] ?? "timer", text: "Tea · 4:05", kind: .info, help: "", tab: "timers")]
     let card = QuickCard(state: state, policy: policy, usage: usage, lights: lights, notes: NotesStore.shared, openTab: { _ in })
     let ok = snapshotCard(AnyView(card), to: out)
     print(ok ? "wrote \(out)" : "snapshot failed")

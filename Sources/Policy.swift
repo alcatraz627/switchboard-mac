@@ -335,9 +335,8 @@ final class PolicyStore: ObservableObject {
     @Published var needGroups: [SystemGroup] = []
     /// Items a live session is waiting on, for the tab's badge.
     @Published var needsWaiting = 0
-    /// Tabs showing something wrong, which turns the menu bar dot red, so
-    /// their space and sub-tab can carry a mark.
-    @Published var problemTabs: Set<String> = []
+    /// The worst problem level per tab, so its space and sub-tab can carry a mark.
+    @Published var problemLevels: [String: ProblemLevel] = [:]
 
     /// Repositories the owner is working in right now, from the live sessions.
     var liveDirs: () -> [String] = { [] }
@@ -539,4 +538,11 @@ func policyDump(_ store: PolicyStore) -> String {
         }
     }
     return lines.joined(separator: "\n")
+}
+
+/// How bad a problem is. An error is something broken that needs action; a
+/// warning is something degraded or a loose end in the configuration.
+enum ProblemLevel: Int, Comparable {
+    case warn, error
+    static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
 }
