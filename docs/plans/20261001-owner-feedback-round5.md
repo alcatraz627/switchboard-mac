@@ -264,3 +264,17 @@ app and collect candidates for the owner) has not run yet.
 4. Panel tab scroll, slider scroll, Controls layout, middle truncation.
 5. Ollama eviction settings, text selection, latency measurement, the session
    index job.
+
+## Status
+
+- Step 1 done in a449e38: hover pills, remembered page, title-bar scroll,
+  number keys, Limits labels (`--probe-quick`).
+- Step 2 done in 85e3a70: problem levels, one badge, Now launcher grid
+  (`--probe-visibility`). Defaults taken without asking: the grid's six tabs
+  are Agents, Hooks, Notes, Timers, Controls, Machine; warnings never light
+  the icon dot; the card now opens on every hover because Now always has the
+  launcher.
+- Not yet seen with a real pointer: title-bar scroll, number keys (they need
+  a click into the card first, so a hover never steals the keyboard), badge
+  click landing on the searched rows in a live panel.
+- Next: step 3 (shared input and editor components).
