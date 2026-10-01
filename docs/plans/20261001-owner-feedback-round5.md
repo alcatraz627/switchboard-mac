@@ -331,6 +331,22 @@ Candidates found while applying the model, for the owner to rule on:
    model names elsewhere (Machine repos, Runtime services) could use it too.
 8. Uppercase section labels (still awaiting the sentence-case ruling).
 
+### Owner ruling on step 6 (2026-10-01) and what was done
+
+"remove Repos and do the rest; old hover preview path can be removed just
+make sure its truly obsolete; on color picker just show 8 pre-picked colors".
+
+- Done in 1d13b33: Timers, Controls and Local models hover pages (hidden
+  until switched on); shared input on the Lights rename, policy ask and When
+  picker fields; eight system tag colours, none red, orange, yellow or green,
+  offered at note creation; `labelIsName` middle-cut on repo, service, model,
+  drive, host, job and device rows; sentence-case section headers; test runs
+  log to their scratch folder; old hover preview path removed after
+  confirming no live caller (its timed-flip and next-reminder lines became
+  Now badges).
+- `warm` fixed at source: ~/Code/local-models c83d26a.
+- Session index fixed: ~/.claude 60ee471 (not pushed).
+
 ## Why "refresh session index" fails (investigated 2026-10-01)
 
 `com.alcatraz.refresh-session-index` runs
