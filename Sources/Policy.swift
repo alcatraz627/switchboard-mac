@@ -338,6 +338,15 @@ final class PolicyStore: ObservableObject {
         seen: UserDefaults.standard.stringArray(forKey: PolicyStore.quickOrderKey) ?? []) {
         didSet { UserDefaults.standard.set(Array(hiddenQuickPages).sorted(), forKey: Self.quickHiddenKey) }
     }
+    /// How long the hover card stays after the pointer leaves, in whole seconds from 1 to 15.
+    static let hoverLingerKey = "switchboard.hoverLinger"
+    static let hoverLingerRange: ClosedRange<Double> = 1...15
+    static func clampedLinger(_ v: Double) -> Double {
+        v == 0 ? 3 : min(hoverLingerRange.upperBound, max(hoverLingerRange.lowerBound, v.rounded()))   // 0 = never set
+    }
+    @Published var hoverLinger: Double = PolicyStore.clampedLinger(UserDefaults.standard.double(forKey: PolicyStore.hoverLingerKey)) {
+        didSet { UserDefaults.standard.set(hoverLinger, forKey: Self.hoverLingerKey) }
+    }
     /// The saved hidden pages, plus any start-hidden page the saved order has never listed (new to this owner).
     static func startingHidden(saved: [String], seen: [String]) -> Set<String> {
         Set(saved).union(quickPagesOffAtFirst.filter { !seen.contains($0) })

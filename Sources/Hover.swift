@@ -86,7 +86,10 @@ final class HoverPeek: NSObject {
     private var cycle = QuickCycle()
     private var inside = false
     /// How long the card stays after the pointer leaves, so a chip can still be reached.
-    static let linger: TimeInterval = 3
+    /// Set in Settings (Hover pages); read on every leave, so a change applies at once.
+    static var linger: TimeInterval {
+        PolicyStore.clampedLinger(UserDefaults.standard.double(forKey: PolicyStore.hoverLingerKey))
+    }
 
     init(button: NSStatusBarButton, state: QuickState, card: AnyView,
          refresh: @escaping () -> Void, panelOpen: @escaping () -> Bool) {

@@ -384,7 +384,7 @@ enum HoverItem: String, CaseIterable {
         case .problems: return "sources that failed to read, failing jobs, hooks with no event"
         case .timers: return "up to two running timers, timed flips such as Keep Awake, and the next note reminder"
         case .services: return "kanban, the session hub or the ipc broker when down"
-        case .iconDot: return "a dot on the menu bar icon: yellow while something waits on you, red while something is wrong"
+        case .iconDot: return "a dot on the menu bar icon: yellow while something waits on you, red while something is broken"
         }
     }
 

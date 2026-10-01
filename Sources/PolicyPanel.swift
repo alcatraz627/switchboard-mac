@@ -1658,6 +1658,8 @@ struct SearchField: View {
                 // Escape lets go of the keyboard and keeps the search; the x clears it
                 .onExitCommand { focused = false }
                 .onAppear { draft = text }
+                // a search set from outside (a badge or the hover's settings button) shows in the box too
+                .onChange(of: text) { t in if t != draft { draft = t } }
                 .task(id: draft) {
                     // Cancelled and restarted by every keystroke, so only a pause lands.
                     if draft.isEmpty { text = ""; return }
