@@ -1,0 +1,21 @@
+# Build artifacts
+native/claude-instances-bar
+native/.build-info
+
+# Claude agent scratch files
+_*.claude.md
+
+# Playwright MCP browser artifacts (screenshots, snapshots, console logs)
+**/.playwright-mcp/
+
+# macOS
+.DS_Store
+
+# Debug logs
+*.log
+
+# Chrome DevTools test screenshots + scratch
+.tmp-test/
+
+# Agent session state + scratch research
+.claude/

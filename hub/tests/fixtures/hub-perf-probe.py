@@ -1,0 +1,384 @@
+"""Does repeated navigation stay cheap? The hub's latency contract under
+real HTTP traffic.
+
+Behavioral, not a grep: spins up the real HubHandler in-process against a
+scratch projects tree and asserts the four properties that keep repeat
+visits fast — the parse cache holds a whole fleet without thrashing,
+concurrent peeks of one session share a single parse, an unchanged
+transcript answers 304 to a conditional GET, and a stale /api/sessions
+serves instantly while one background scan refreshes it. The one allowed
+slow path is the true-cold first scan.
+"""
+import importlib.util, os, sys, json, shutil, time, threading, urllib.request, urllib.error, http.server
+
+REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+LIB = os.path.join(REPO, "lib")
+ROOT = "/tmp/hub-perf-probe"
+shutil.rmtree(ROOT, ignore_errors=True)
+os.makedirs(ROOT, exist_ok=True)
+
+spec = importlib.util.spec_from_file_location('hub_server', os.path.join(LIB, 'hub-server.py'))
+hub = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(hub)
+
+PROJ = os.path.join(ROOT, "projects", "-tmp-x")
+os.makedirs(PROJ, exist_ok=True)
+hub.PROJECTS_DIR = os.path.join(ROOT, "projects")
+
+_uuid_counter = {"n": 0}
+def _next_uuid():
+    _uuid_counter["n"] += 1
+    return f"uu-{_uuid_counter['n']:04d}"
+
+def write_session(sid, ntools, prefix="A"):
+    p = os.path.join(PROJ, f"{sid}.jsonl")
+    lines = [json.dumps({"type": "user", "uuid": _next_uuid(), "timestamp": "2026-07-17T00:00:00Z",
+                         "message": {"role": "user", "content": f"{prefix}-start"}})]
+    for i in range(ntools):
+        lines.append(json.dumps({"type": "assistant", "uuid": _next_uuid(), "timestamp": "2026-07-17T00:00:01Z",
+                                 "message": {"role": "assistant", "model": "claude-opus-4-8",
+                                             "usage": {"input_tokens": 1, "output_tokens": 1},
+                                             "content": [{"type": "tool_use", "id": f"{prefix}t{i}",
+                                                          "name": "Bash", "input": {"n": i}}]}}))
+    with open(p, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    return p
+
+# Count real parses through a shim so cache hits are observable facts.
+_parse_calls = {"n": 0}
+_real_parse = hub.transcript.parse_transcript
+def _counting_parse(target, *a, **kw):
+    _parse_calls["n"] += 1
+    return _real_parse(target, *a, **kw)
+hub.transcript.parse_transcript = _counting_parse
+
+srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), hub.HubHandler)
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+time.sleep(0.2)
+port = srv.server_address[1]
+
+def http_get(path, headers=None):
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return r.status, dict(r.headers), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, dict(e.headers), e.read()
+
+fails = []
+def expect(name, cond, detail=""):
+    if cond:
+        print(f"  OK   {name}")
+    else:
+        print(f"  FAIL {name}  {detail}")
+        fails.append(name)
+
+# ---- Test 1: a fleet-sized set of transcripts must not thrash the cache ----
+FLEET = 20
+sids = [f"fl{i:04d}00-0000-4000-8000-000000000000" for i in range(FLEET)]
+for i, sid in enumerate(sids):
+    write_session(sid, 2, f"fl{i}")
+    http_get(f"/s/{sid}/data")
+_parse_calls["n"] = 0
+for sid in sids:
+    http_get(f"/s/{sid}/data")
+expect("second sweep over 20 unchanged transcripts parses NOTHING",
+       _parse_calls["n"] == 0, f"re-parsed {_parse_calls['n']}/20")
+
+# ---- Test 1b: the entry cap is also a byte cap (48 parsed transcripts of
+# pathological size must not become resident memory the old 8-cap prevented) --
+hub._PARSE_CACHE_BYTES_MAX = 1  # any real file exceeds this
+write_session("bb000000-0000-4000-8000-000000000001", 2, "bb1")
+write_session("bb000000-0000-4000-8000-000000000002", 2, "bb2")
+http_get("/s/bb000000-0000-4000-8000-000000000001/data")
+http_get("/s/bb000000-0000-4000-8000-000000000002/data")
+expect("byte bound evicts down to the newest entry under pathological sizes",
+       len(hub._PARSE_CACHE) == 1, f"len={len(hub._PARSE_CACHE)}")
+hub._PARSE_CACHE_BYTES_MAX = 256 * 1024 * 1024
+for sid in sids[:5]:
+    http_get(f"/s/{sid}/data")
+
+# ---- Test 1c: eviction is LRU, not FIFO — a re-touched entry survives an
+# eviction a FIFO would have handed it (the gate proved the fleet test alone
+# cannot see ordering; this is the discriminating case) ----
+hub._PARSE_CACHE_MAX = 3
+hub._PARSE_CACHE.clear()
+lr = [f"1c{i:04d}00-0000-4000-8000-000000000000" for i in range(4)]
+for i, sid in enumerate(lr[:3]):
+    write_session(sid, 1, f"lr{i}")
+    http_get(f"/s/{sid}/data")
+http_get(f"/s/{lr[0]}/data")            # re-touch the oldest
+write_session(lr[3], 1, "lr3")
+http_get(f"/s/{lr[3]}/data")            # forces one eviction
+_parse_calls["n"] = 0
+http_get(f"/s/{lr[0]}/data")
+survived = _parse_calls["n"] == 0
+http_get(f"/s/{lr[1]}/data")
+evicted = _parse_calls["n"] == 1
+expect("LRU keeps the re-touched entry and evicts the cold one",
+       survived and evicted, f"touched-reparsed={not survived} cold-cached={not evicted}")
+hub._PARSE_CACHE_MAX = 48
+
+# ---- Test 1d: transcript paths resolve once, not once per request — the
+# recursive projects-tree glob must not run again for a known session ----
+_glob_calls = {"n": 0}
+_real_glob = hub.glob.glob
+def _counting_glob(*a, **kw):
+    _glob_calls["n"] += 1
+    return _real_glob(*a, **kw)
+hub.glob.glob = _counting_glob
+sidG = "1d000000-0000-4000-8000-000000000000"
+write_session(sidG, 1, "g")
+http_get(f"/s/{sidG}/data")
+_glob_calls["n"] = 0
+http_get(f"/s/{sidG}/data")
+expect("a known session's repeat request runs zero tree globs",
+       _glob_calls["n"] == 0, f"globs={_glob_calls['n']}")
+
+# ---- Test 2: concurrent peeks of one uncached session share one parse ----
+sidX = "cafe0000-0000-4000-8000-0000000000ee"
+write_session(sidX, 30, "X")
+_parse_calls["n"] = 0
+barrier = threading.Barrier(6)
+def _peek():
+    barrier.wait()
+    http_get(f"/s/{sidX}/data")
+threads = [threading.Thread(target=_peek) for _ in range(6)]
+for t in threads: t.start()
+for t in threads: t.join()
+expect("6 concurrent peeks of one cold session = exactly 1 parse",
+       _parse_calls["n"] == 1, f"parsed {_parse_calls['n']} times")
+
+# ---- Test 3: conditional GET on an unchanged transcript answers 304 ----
+st1, h1, b1 = http_get(f"/s/{sidX}/data")
+etag = h1.get("ETag")
+expect("/data carries an ETag", bool(etag), f"headers={sorted(h1)}")
+if etag:
+    st2, h2, b2 = http_get(f"/s/{sidX}/data", {"If-None-Match": etag})
+    expect("matching If-None-Match answers 304 with empty body",
+           st2 == 304 and not b2, f"status={st2} body={len(b2)}B")
+    with open(os.path.join(PROJ, f"{sidX}.jsonl"), "a") as f:
+        f.write(json.dumps({"type": "user", "uuid": _next_uuid(),
+                            "timestamp": "2026-07-17T00:00:03Z",
+                            "message": {"role": "user", "content": "grown"}}) + "\n")
+    st3, h3, b3 = http_get(f"/s/{sidX}/data", {"If-None-Match": etag})
+    expect("a grown file ignores the stale ETag and answers 200 fresh",
+           st3 == 200 and h3.get("ETag") not in (None, etag), f"status={st3}")
+    # The ETag names the RESPONSE, not the file: carrying the base URL's tag
+    # to a sliced query must never buy a 304 (a false one returns an empty
+    # body where filtered records belong — the gate proved it over HTTP).
+    st4, h4, _ = http_get(f"/s/{sidX}/data?since=999999")
+    st5, _, _ = http_get(f"/s/{sidX}/data?since=999999",
+                         {"If-None-Match": h3.get("ETag") or ""})
+    expect("a base-URL ETag against a sliced query answers 200, never 304",
+           st4 == 200 and st5 == 200 and h4.get("ETag") != h3.get("ETag"),
+           f"plain={st4} crossed={st5}")
+
+# ---- Test 3a: an append is parsed incrementally; a rewrite is parsed afresh ----
+sidI = "1a000000-0000-4000-8000-000000000001"
+pI = write_session(sidI, 50, "I")
+http_get(f"/s/{sidI}/data")
+_parse_calls["n"] = 0
+with open(pI, "a") as f:
+    f.write(json.dumps({"type": "user", "uuid": "appended-1", "timestamp": "2026-07-17T00:00:05Z",
+                        "message": {"role": "user", "content": "appended"}}) + "\n")
+st, _, body = http_get(f"/s/{sidI}/data")
+recs = json.loads(body)["records"]
+expect("an appended line reaches /data without a full re-parse",
+       _parse_calls["n"] == 0 and recs[-1].get("id") == "appended-1",
+       f"parses={_parse_calls['n']} last={recs[-1].get('id')}")
+with open(pI, "a") as f:
+    f.write('{"type": "user", "uuid": "half')          # a line still being written
+st, _, body = http_get(f"/s/{sidI}/data")
+expect("a half-written line is not parsed yet", st == 200
+       and json.loads(body)["records"][-1].get("id") == "appended-1", f"status={st}")
+with open(pI, "a") as f:
+    f.write('-done", "timestamp": "2026-07-17T00:00:06Z", "message": {"role": "user", "content": "done"}}\n')
+st, _, body = http_get(f"/s/{sidI}/data")
+expect("the line is parsed once it is complete",
+       json.loads(body)["records"][-1].get("id") == "half-done", f"last={json.loads(body)['records'][-1].get('id')}")
+lines = open(pI).read().splitlines()
+lines.insert(1, json.dumps({"type": "user", "uuid": "inserted", "timestamp": "2026-07-17T00:00:00Z",
+                            "message": {"role": "user", "content": "inserted mid-file"}}))
+with open(pI, "w") as f:
+    f.write("\n".join(lines) + "\n")
+_parse_calls["n"] = 0
+st, _, body = http_get(f"/s/{sidI}/data")
+recs = json.loads(body)["records"]
+expect("a mid-file rewrite is parsed from scratch",
+       _parse_calls["n"] == 1 and recs[1].get("id") == "inserted", f"parses={_parse_calls['n']}")
+
+# ---- Test 3c: /data carries Claude Code's own status, and a status change
+# is not hidden behind a 304 ----
+import subprocess
+SESS = os.path.join(ROOT, "sessions")
+os.makedirs(SESS, exist_ok=True)
+hub.SESSIONS_DIR = SESS
+sidS = "5a000000-0000-4000-8000-000000000001"
+write_session(sidS, 1, "S")
+me = os.getpid()
+start = subprocess.run(["ps", "-o", "lstart=", "-p", str(me)], capture_output=True, text=True).stdout.strip()
+def sess_file(status, when):
+    with open(os.path.join(SESS, f"{me}.json"), "w") as f:
+        json.dump({"pid": me, "sessionId": sidS, "procStart": start, "kind": "interactive",
+                   "status": status, "statusUpdatedAt": when}, f)
+st, _, body = http_get(f"/s/{sidS}/data")
+expect("a session with no session file reads as not live",
+       json.loads(body)["meta"].get("live") is False, f"meta live={json.loads(body)['meta'].get('live')}")
+hub._sid_files.clear()
+sess_file("busy", 1790000000000)
+st, h1s, body = http_get(f"/s/{sidS}/data")
+m = json.loads(body)["meta"]
+expect("/data meta carries live, status and status_updated_at from the session file",
+       m.get("live") is True and m.get("status") == "busy" and m.get("status_updated_at") == "2026-09-21T14:13:20Z",
+       f"meta={ {k: m.get(k) for k in ('live', 'status', 'status_updated_at')} }")
+sess_file("idle", 1790000060000)
+st, _, body = http_get(f"/s/{sidS}/data", {"If-None-Match": h1s.get("ETag") or ""})
+expect("a status change answers 200 with the new status, not 304",
+       st == 200 and json.loads(body)["meta"].get("status") == "idle", f"status={st}")
+with open(os.path.join(SESS, f"{me}.json"), "w") as f:
+    json.dump({"pid": me, "sessionId": sidS, "procStart": "Mon Jan  1 00:00:00 2024",
+               "status": "busy", "statusUpdatedAt": 1}, f)
+st, _, body = http_get(f"/s/{sidS}/data")
+expect("a session file whose procStart names another process is not live",
+       json.loads(body)["meta"].get("live") is False, f"live={json.loads(body)['meta'].get('live')}")
+
+# ---- Test 3b: a tool's full output is served by id, and only by id ----
+sidR = "5e500000-0000-4000-8000-000000000001"
+pR = write_session(sidR, 1, "R")
+long_out = "line\n" * 400
+with open(pR, "a") as f:
+    f.write(json.dumps({"type": "user", "uuid": _next_uuid(), "timestamp": "2026-07-17T00:00:02Z",
+                        "message": {"role": "user", "content": [
+                            {"type": "tool_result", "tool_use_id": "Rt0", "content": long_out}]}}) + "\n")
+st, _, body = http_get(f"/s/{sidR}/data")
+call = json.loads(body)["records"][-1]["tools"][0]
+expect("/data carries a short result preview, not the full output",
+       call.get("result", {}).get("chars") == len(long_out)
+       and len(call["result"]["preview"]) <= 300 and long_out not in body.decode(),
+       f"result={str(call.get('result'))[:120]}")
+st, _, body = http_get(f"/s/{sidR}/data?result=Rt0")
+expect("?result=<id> returns the full output",
+       st == 200 and json.loads(body).get("result") == long_out, f"status={st}")
+sidW = "5e500000-0000-4000-8000-000000000002"
+pW = os.path.join(PROJ, f"{sidW}.jsonl")
+big = "x = 1\n" * 2000
+with open(pW, "w") as f:
+    f.write(json.dumps({"type": "assistant", "uuid": _next_uuid(), "timestamp": "2026-07-17T00:00:01Z",
+                        "message": {"role": "assistant", "model": "claude-opus-4-8", "usage": {},
+                                    "content": [{"type": "tool_use", "id": "Wt0", "name": "Write",
+                                                 "input": {"file_path": "/tmp/a.py", "content": big}},
+                                                {"type": "tool_use", "id": "Wt1", "name": "Read",
+                                                 "input": {"file_path": "/tmp/a.py"}}]}}) + "\n")
+st, _, body = http_get(f"/s/{sidW}/data")
+tw = json.loads(body)["records"][-1]["tools"]
+expect("a large tool input stays out of /data; a small one rides along",
+       "input" not in tw[0] and tw[0].get("input_chars", 0) > 10000
+       and tw[1].get("input") == {"file_path": "/tmp/a.py"} and big not in body.decode(),
+       f"write keys={sorted(tw[0])}")
+st, _, body = http_get(f"/s/{sidW}/data?result=Wt0")
+expect("?result=<id> returns the full input",
+       st == 200 and (json.loads(body).get("input") or {}).get("content") == big, f"status={st}")
+cached_call = hub._PARSE_CACHE[pW][1]["records"][-1]["tools"][0]
+expect("slimming never mutates the cached parse", cached_call.get("input", {}).get("content") == big,
+       f"cached keys={sorted(cached_call)}")
+with open(pR, "a") as f:
+    f.write(json.dumps({"type": "user", "uuid": _next_uuid(), "timestamp": "2026-07-17T00:00:04Z",
+                        "message": {"role": "user", "content": [
+                            {"type": "tool_result", "tool_use_id": "Rt0",
+                             "content": long_out + "deep ZEBRAFISH_MARKER line"}]}}) + "\n")
+st, _, body = http_get(f"/s/{sidR}/search?q=zebrafish_marker")
+d = json.loads(body)
+expect("search finds text that exists only past the output preview",
+       st == 200 and d.get("total") == 1 and d["hits"][0]["field"] == "result"
+       and d["hits"][0]["tool_id"] == "Rt0" and "ZEBRAFISH_MARKER" in d["hits"][0]["snippet"],
+       f"status={st} body={body[:200]!r}")
+st, _, body = http_get(f"/search?sid={sidR}&q=%22n%22%3A%200")
+expect("search covers tool inputs (and the /search?sid= form)",
+       st == 200 and any(h["field"] == "input" for h in json.loads(body)["hits"]), f"status={st} body={body[:200]!r}")
+st, _, _ = http_get(f"/s/{sidR}/search?q=z")
+expect("a one-character query is refused", st == 400, f"status={st}")
+st, _, _ = http_get(f"/s/{sidR}/data?result=nope")
+expect("?result= for an unknown id is a 404", st == 404, f"status={st}")
+
+# ---- Test 3d: vendored libraries are served, and nothing else under lib ----
+st, h, body = http_get("/vendor/highlight.min.js")
+expect("the hub serves the vendored highlight.js",
+       st == 200 and "javascript" in h.get("Content-Type", "") and b"hljs" in body, f"status={st}")
+st, _, _ = http_get("/vendor/hub-server.py")
+expect("a file outside the vendor list is a 404", st == 404, f"status={st}")
+
+# ---- Test 4: stale /api/sessions serves instantly, one background refresh ----
+SLOW = os.path.join(ROOT, "slow-scan.sh")
+with open(SLOW, "w") as f:
+    f.write('#!/bin/bash\nsleep 1.2\necho \'{"live": [], "live_count": 0, "history": [], "aggregates": {}, "marker": "fresh-from-slow-scan"}\'\n')
+os.chmod(SLOW, 0o755)
+hub.SCAN_SCRIPT = SLOW
+hub._scan_cache["data"] = {"live": [], "marker": "stale-snapshot"}
+hub._scan_cache["at"] = time.time() - 60
+t0 = time.time()
+st, h, body = http_get("/api/sessions")
+dt = time.time() - t0
+# sessions_payload() whitelists fields, so content markers are observed on
+# the module cache; HTTP timing is the serve-stale discriminator.
+expect("stale cache answers instantly (served stale, not blocked on the scan)",
+       dt < 0.4 and st == 200, f"took {dt:.2f}s status={st}")
+deadline = time.time() + 5
+while time.time() < deadline and hub._scan_cache["data"].get("marker") != "fresh-from-slow-scan":
+    time.sleep(0.1)
+expect("a background refresh lands the fresh scan shortly after",
+       hub._scan_cache["data"].get("marker") == "fresh-from-slow-scan",
+       f"marker={hub._scan_cache['data'].get('marker')}")
+
+# ---- Test 5: only ONE background scan for a burst of stale hits ----
+CNT = os.path.join(ROOT, "scan-count")
+with open(SLOW, "w") as f:
+    f.write(f'#!/bin/bash\necho x >> "{CNT}"\nsleep 0.8\necho \'{{"live": [], "live_count": 0, "history": [], "aggregates": {{}}, "marker": "burst"}}\'\n')
+hub._scan_cache["data"] = {"live": [], "marker": "stale-snapshot"}
+hub._scan_cache["at"] = time.time() - 60
+threads = [threading.Thread(target=lambda: http_get("/api/sessions")) for _ in range(8)]
+for t in threads: t.start()
+for t in threads: t.join()
+time.sleep(1.5)
+n_scans = len(open(CNT).read().split()) if os.path.exists(CNT) else 0
+expect("8 concurrent stale hits trigger exactly 1 scan", n_scans == 1, f"scans={n_scans}")
+
+# ---- Test 6: the true-cold first request still blocks and returns fresh ----
+hub._scan_cache["data"] = None
+hub._scan_cache["at"] = 0.0
+t0 = time.time()
+st, h, body = http_get("/api/sessions")
+dt = time.time() - t0
+expect("cold start blocks once and returns the real scan, never a fabricated empty",
+       dt >= 0.7 and hub._scan_cache["data"].get("marker") == "burst",
+       f"took {dt:.2f}s cache-marker={(hub._scan_cache['data'] or {}).get('marker')}")
+
+# ---- Test 7: a scan emitting invalid UTF-8 must not wedge the refresher —
+# text=True raises UnicodeDecodeError (outside the original caught tuple),
+# and a stuck single-flight flag would serve stale forever with no recovery.
+with open(SLOW, "wb") as f:
+    f.write(b'#!/bin/bash\necho x >> "' + CNT.encode() + b'"\nprintf "\\xff\\xfe garbage"\n')
+os.chmod(SLOW, 0o755)
+hub._scan_cache["data"] = {"live": [], "marker": "stale-snapshot"}
+hub._scan_cache["at"] = time.time() - 60
+n_before = len(open(CNT).read().split()) if os.path.exists(CNT) else 0
+http_get("/api/sessions")
+deadline = time.time() + 4
+while time.time() < deadline and hub._scan_refreshing["on"]:
+    time.sleep(0.1)
+flag_cleared = not hub._scan_refreshing["on"]
+hub._scan_cache["at"] = time.time() - 60
+http_get("/api/sessions")
+time.sleep(1.0)
+n_after = len(open(CNT).read().split()) if os.path.exists(CNT) else 0
+expect("a garbage-emitting scan clears the flag and later refreshes retry",
+       flag_cleared and n_after >= n_before + 2
+       and hub._scan_cache["data"].get("marker") == "stale-snapshot",
+       f"flag_cleared={flag_cleared} scans={n_after - n_before} "
+       f"marker={hub._scan_cache['data'].get('marker')}")
+
+print()
+print("SUMMARY:", "ALL PASS" if not fails else f"{len(fails)} FAILED: {fails}")
+srv.shutdown()
+shutil.rmtree(ROOT, ignore_errors=True)
+sys.exit(1 if fails else 0)

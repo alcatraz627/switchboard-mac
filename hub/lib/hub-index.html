@@ -1,0 +1,1477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Claude sessions</title>
+<!-- The menu-bar widget's Claude starburst (terracotta), tiled on the hub's
+     slate and wearing a teal live-dot — the hub's own mark. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23191a21'/%3E%3Cg stroke='%23d97757' stroke-width='5.5' stroke-linecap='round'%3E%3Cpath d='M32 32 32 9'/%3E%3Cpath d='M32 32 46 14'/%3E%3Cpath d='M32 32 55 27'/%3E%3Cpath d='M32 32 50 44'/%3E%3Cpath d='M32 32 37 55'/%3E%3Cpath d='M32 32 21 52'/%3E%3Cpath d='M32 32 10 42'/%3E%3Cpath d='M32 32 9 25'/%3E%3Cpath d='M32 32 18 11'/%3E%3C/g%3E%3Ccircle cx='51' cy='51' r='6' fill='%234fb6a6' stroke='%23191a21' stroke-width='2.5'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/vendor/hub-shared.css?v=2">
+<style>
+/* V6 "FLEET" index — the merged board. V3's state-grouped spine (Needs you →
+   Working → Ended), V5's query grammar + live peek panes, V1's table density,
+   keyboard cursor + hover preview, and explicit sort. Two densities:
+   peeks (panes with live tails) and table (k9s rows, preview on hover/cursor). */
+:root {
+    --t-xs: 11px; --t-sm: 12.5px; --t-md: 14px; --t-lg: 16px; --t-xl: 20px;   /* the one type scale (owner D6a) */
+    color-scheme: dark;
+    --bg: #171922; --panel: #1d2029; --well: #1a1d25; --sel: #2a2e3a;
+    --edge: rgba(195,203,228,.13); --edge2: rgba(195,203,228,.25);
+    --text: #eceef5; --dim: #a0a6b9; --faint: #656c81;
+    --you: oklch(0.76 0.15 268); --claude: oklch(0.76 0.14 180);
+    --tool: #e2b05b; --err: #ea8578; --add: oklch(0.75 0.14 142);
+    --meta: oklch(0.74 0.11 305);
+    --you-soft: color-mix(in srgb, var(--you) 10%, transparent);
+    --err-soft: color-mix(in srgb, var(--err) 10%, transparent);
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --r: 10px; --tb-h: 52px;
+    --ease: cubic-bezier(.2,0,0,1); --t-fast: 130ms; --t-slow: 260ms;
+    --shadow: 0 10px 32px -12px rgba(0,0,0,.6);
+}
+:root.light {
+    color-scheme: light;
+    --bg: #f2f3f7; --panel: #fafbfd; --well: #ffffff; --sel: #e5e8f0;
+    --edge: rgba(25,30,48,.13); --edge2: rgba(25,30,48,.26);
+    --text: #1a1c23; --dim: #545a6b; --faint: #8b91a2;
+    --you: oklch(0.46 0.16 268); --claude: oklch(0.46 0.15 180);
+    --tool: #7e5d0e; --err: #b23f33; --add: oklch(0.46 0.14 142);
+    --meta: oklch(0.46 0.13 305);
+    --shadow: 0 10px 32px -12px rgba(30,40,70,.24);
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: var(--t-md)/1.55 var(--sans); }
+button, select { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 2px solid var(--you); outline-offset: 2px; }
+:focus:not(:focus-visible) { outline: none; }
+.icon { width: 15px; height: 15px; stroke: currentColor; stroke-width: 1.75;
+    stroke-linecap: round; stroke-linejoin: round; fill: none; flex: none; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+.topbar { position: fixed; top: 0; left: 0; right: 0; height: var(--tb-h); z-index: 60;
+    display: flex; align-items: center; gap: 10px; padding: 0 14px;
+    background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--edge); }
+.tb-brand { display: inline-flex; align-items: center; gap: 9px; height: 36px; padding: 0 10px 0 6px; margin-left: -6px;
+    border-radius: 10px; color: var(--text); text-decoration: none; }
+.tb-brand:hover { background: var(--sel); }
+.tb-brand .brand { width: 20px; height: 20px; flex: none; }
+.tb-name { font: 650 var(--t-md)/1 var(--sans); letter-spacing: -.005em; }
+.tb-host { font: var(--t-xs)/1 var(--mono); color: var(--faint); padding-left: 9px; border-left: 1px solid var(--edge2); }
+.tb-host:empty { display: none; }
+/* what the live sessions have cost so far, summed */
+.tb-spend { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border-radius: 10px;
+    border: 1px solid var(--edge); background: var(--panel); color: var(--dim); font: 600 var(--t-sm) var(--mono);
+    font-variant-numeric: tabular-nums; }
+.tb-spend .icon { width: 15px; height: 15px; color: var(--tool); }
+.tb-spend[hidden] { display: none; }
+@media (max-width: 900px) { .tb-spend, .tb-host { display: none; } }
+.tb-sp { flex: 1; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px;
+    border-radius: 999px; font: 700 var(--t-xs) var(--mono); }
+.chip .pulse { width: 7px; height: 7px; border-radius: 50%; background: currentColor; position: relative; }
+.chip.live { color: var(--claude); background: color-mix(in srgb, var(--claude) 12%, transparent); }
+.chip.live .pulse::after { content: ''; position: absolute; inset: -4px; border-radius: 50%;
+    border: 1.5px solid currentColor; opacity: 0; animation: pulse 2s var(--ease) infinite; }
+@keyframes pulse { 0% { transform: scale(.4); opacity: .8; } 70%,100% { transform: scale(1.1); opacity: 0; } }
+.chip.turn { color: var(--you); background: var(--you-soft); }
+.chip.refresh { color: var(--faint); background: color-mix(in srgb, var(--faint) 10%, transparent); }
+.chip.refresh .pulse { animation: refreshPulse 1.2s ease-in-out infinite; }
+@keyframes refreshPulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .chip.refresh .pulse { animation: none; } }
+.tbtn { height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 0 11px;
+    border: 1px solid var(--edge); border-radius: 999px; background: transparent; color: var(--dim);
+    font: 600 var(--t-sm) var(--sans); transition: all var(--t-fast) var(--ease); }
+.tbtn:hover { background: var(--sel); color: var(--text); border-color: var(--edge2); }
+select.tbtn { appearance: none; padding-right: 22px;
+    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position: calc(100% - 14px) 55%, calc(100% - 10px) 55%; background-size: 4px 4px; background-repeat: no-repeat; }
+/* top bar controls (owner D2a): one height, one border, one pressed look */
+.seg { display: inline-flex; align-items: center; gap: 2px; height: 36px; padding: 3px;
+    border: 1px solid var(--edge); border-radius: 10px; background: var(--panel); }
+.seg button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: none;
+    border-radius: 7px; background: none; color: var(--dim); font: 600 var(--t-sm) var(--sans);
+    transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
+.seg button:hover { color: var(--text); background: var(--sel); }
+.seg button[aria-pressed="true"] { color: var(--text); background: var(--bg); box-shadow: 0 0 0 1px var(--edge2); }
+.seg .icon { width: 16px; height: 16px; }
+.seg .n { font: 600 var(--t-xs) var(--mono); color: var(--faint); font-variant-numeric: tabular-nums; }
+.st-all { --sc: var(--dim); } .st-you { --sc: var(--you); } .st-work { --sc: var(--claude); } .st-ended { --sc: var(--faint); }
+.st-seg button .icon { color: var(--sc); }
+.st-seg button[aria-pressed="true"] .n { color: var(--sc); }
+.icon-seg button { width: 30px; padding: 0; justify-content: center; }
+.tctl { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px;
+    border: 1px solid var(--edge); border-radius: 10px; background: var(--panel); color: var(--dim);
+    font: 600 var(--t-sm) var(--sans); transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
+.tctl:hover { color: var(--text); background: var(--sel); }
+.tctl.icon { width: 36px; padding: 0; justify-content: center; }
+.tctl[aria-pressed="true"] { color: var(--text); box-shadow: 0 0 0 1px var(--edge2); }
+.tctl .icon { width: 16px; height: 16px; }
+@media (max-width: 640px) {
+    .topbar { gap: 6px; padding: 0 8px; }
+    .seg, .tctl { height: 32px; } .seg button { height: 24px; padding: 0 8px; } .tctl.icon { width: 32px; }
+    .tb-name { display: none; }
+    /* the header figures filter the same way, so the bar keeps only what fits */
+    #stSeg, #densSeg, .tb-spend { display: none; }
+    .tctl .chev { display: none; }
+}
+/* the top bar scales with the text-size setting, like the page under it */
+.topbar { zoom: var(--zoom, 1); }
+.tctl select { appearance: none; border: none; background: none; color: var(--text); font: inherit; padding: 0; cursor: pointer; }
+.tctl select:focus { outline: none; }
+.tctl .chev { width: 12px; height: 12px; color: var(--faint); margin-left: -2px; pointer-events: none; }
+.vp-grp:has(#vpDir), .vp-grp:has(#vpTheme) { display: none; }
+.seg button:focus:not(:focus-visible) { outline: none; }
+.st-seg button { padding: 0 9px; gap: 5px; }
+.mh-sub { font: var(--t-sm) var(--sans); color: var(--faint); }
+/* the board in figures */
+.hstats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.hs { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 112px; padding: 8px 14px 9px;
+    border: 1px solid var(--edge); border-radius: 10px; background: var(--panel); color: var(--dim); text-align: left;
+    font: inherit; transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease); }
+button.hs:hover { border-color: var(--edge2); background: var(--sel); }
+/* a figure that only reports (mail, context) sits on the page, unboxed, so it never reads as a button */
+div.hs { border-color: transparent; background: transparent; }
+.hs.on { border-color: var(--hc, var(--edge2)); box-shadow: 0 0 0 1px var(--hc, var(--edge2)); }
+.hs-v { display: inline-flex; align-items: center; gap: 7px; font: 650 var(--t-lg)/1.25 var(--mono); color: var(--text);
+    font-variant-numeric: tabular-nums; }
+.hs-v .icon { width: 15px; height: 15px; color: var(--hc, var(--faint)); }
+.hs-l { font: var(--t-xs) var(--sans); color: var(--faint); }
+.hs.you { --hc: var(--you); } .hs.work { --hc: var(--claude); } .hs.ended { --hc: var(--faint); }
+.hs.spend { --hc: var(--tool); } .hs.mail { --hc: var(--meta); } .hs.low { --hc: var(--err); }
+.hs.you .hs-v, .hs.low .hs-v { color: var(--hc); }
+.hs.mail.bad .hs-v { color: var(--tool); }
+/* problems, each named by where it is */
+.alerts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 12px 0 2px; }
+.al-lb { font: 700 var(--t-xs) var(--mono); letter-spacing: .01em; color: var(--faint); margin-right: 4px; }
+.al { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px; border-radius: 7px; font: var(--t-xs) var(--sans); cursor: help; }
+.al b { font-weight: 650; white-space: nowrap; }   /* "This Mac" stays one name */
+.al .icon { width: 13px; height: 13px; }
+.al-warn { color: color-mix(in srgb, var(--err) 80%, var(--text)); background: color-mix(in srgb, var(--err) 9%, transparent);
+    border: 1px solid color-mix(in srgb, var(--err) 22%, transparent); }
+.al-info { color: var(--dim); background: var(--sel); border: 1px solid var(--edge); }
+.qhint .qh-lb { color: var(--faint); margin-right: 4px; }
+.qhint .qh-grp { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-right: 14px; }
+/* opening a card: its title becomes the transcript's title (owner D1 note) */
+@view-transition { navigation: auto; }
+.topbar { view-transition-name: topbar; }
+::view-transition-group(*) { animation-duration: 340ms; animation-timing-function: cubic-bezier(.2, 0, 0, 1); }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 220ms; animation-timing-function: cubic-bezier(.2, 0, 0, 1); }
+@media (prefers-reduced-motion: reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none; } }
+
+main { max-width: 1120px; margin: 0 auto; padding: calc(var(--tb-h) + 22px) 18px 70px; }
+.mh-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+h1 { font: 650 var(--t-xl)/1.2 var(--sans); letter-spacing: -.014em; margin: 0; }
+.mh-line { font: var(--t-sm) var(--mono); color: var(--dim); display: flex; flex-wrap: wrap; gap: 4px 18px;
+    font-variant-numeric: tabular-nums; align-items: center; }
+.mh-line b { color: var(--text); font-weight: 700; }
+
+/* query bar */
+.qbar { position: relative; margin-top: 16px; }
+.qbar > .icon { position: absolute; left: 12px; top: 50%; translate: 0 -50%; color: var(--faint); }
+#fq { width: 100%; height: 36px; background: var(--well); border: 1px solid var(--edge);
+    color: var(--text); border-radius: 999px; padding: 0 150px 0 36px; font: var(--t-sm) var(--sans); }
+@media (max-width: 480px) { #fq { padding-right: 16px; } }
+#fq::placeholder { color: var(--faint); }
+#fq:focus { outline: none; border-color: var(--you); box-shadow: 0 0 0 3px var(--you-soft); }
+.qstat { position: absolute; right: 14px; top: 50%; translate: 0 -50%; font: var(--t-xs) var(--mono);
+    color: var(--faint); pointer-events: none; font-variant-numeric: tabular-nums; }
+@media (max-width: 480px) { .qstat { display: none; } }
+.qhint { margin-top: 6px; font: var(--t-xs) var(--mono); color: var(--faint); }
+.qhint code { background: var(--sel); border-radius: 4px; padding: 1px 6px; cursor: pointer; }
+.qhint code:hover { color: var(--text); }
+.p-hit { margin: 0 13px 9px; padding: 4px 10px; border-radius: 6px;
+    background: color-mix(in srgb, var(--tool) 10%, transparent);
+    font: var(--t-xs) var(--mono); color: var(--dim); overflow-wrap: anywhere;
+    width: fit-content; max-width: calc(100% - 26px); }
+.p-hit mark { background: rgba(226,176,91,.3); color: var(--text); border-radius: 2px; }
+
+/* ---------------- peeks density (V5) ---------------- */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); gap: 14px; margin-top: 18px;
+    align-items: start; }   /* each card its own height: no empty band above a short tail */
+.pane { display: flex; flex-direction: column; text-decoration: none; color: inherit;
+    background: var(--panel); border: 1px solid var(--edge); border-radius: var(--r); overflow: hidden;
+    transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease); }
+.pane:hover { border-color: var(--edge2); box-shadow: var(--shadow); }
+/* Rows whose transcript this hub can't read (codex). They carry no href, so
+   say so on hover instead of looking clickable and doing nothing. */
+.noopen { cursor: default; opacity: .72; }
+.noopen:hover { border-color: var(--edge); box-shadow: none; }
+.pane.cur { outline: 2px solid var(--you); outline-offset: 2px; }
+.pane.turn { border-color: color-mix(in srgb, var(--you) 35%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--you) 22%, transparent); }
+.p-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 9px; padding: 9px 13px;
+    border-bottom: 1px solid var(--edge); background: var(--well); }
+.p-st { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; align-self: center; position: relative; }
+.pane.turn .p-st { background: var(--you); }
+.pane.working .p-st { background: var(--claude); }
+.pane.working .p-st::after { content: ''; position: absolute; inset: -4px; border-radius: 50%;
+    border: 1.5px solid var(--claude); opacity: 0; animation: pulse 2s var(--ease) infinite; }
+.p-title { font: 650 var(--t-md) var(--sans); overflow-wrap: anywhere; }
+/* harness lines left out of the tail, counted (hooks, peers, tasks, mode changes) */
+.p-sys { flex: none; font: var(--t-xs) var(--mono); color: var(--faint); border: 1px solid var(--edge);
+    border-radius: 999px; padding: 0 7px; }
+.p-sys[hidden] { display: none; }
+.p-model { flex: none; font: 700 var(--t-xs) var(--mono); letter-spacing: .01em;
+    color: var(--claude); background: color-mix(in srgb, var(--claude) 11%, transparent);
+    border-radius: 4px; padding: 1px 6px; }
+/* card (owner D1a): one header row with stable slots, a two-part footer */
+.p-head { flex-wrap: wrap; align-items: center; }
+.p-title { min-width: 0; flex: 0 1 auto; }
+.p-right { margin-left: auto; flex: none; display: inline-flex; align-items: baseline; gap: 8px; }
+.p-right .p-el { margin-left: 0; }
+[data-copy] { cursor: copy; border-radius: 4px; transition: background var(--t-fast) var(--ease); }
+[data-copy]:hover { background: var(--sel); }
+[data-copy].copied { background: color-mix(in srgb, var(--add) 18%, transparent); }
+.p-foot { flex-direction: column; gap: 7px; padding: 9px 13px 10px; }
+.p-where { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.p-path, .p-act { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.p-path { color: var(--dim); overflow-wrap: anywhere; }
+.p-act { margin-left: auto; flex: none; color: var(--faint); }
+.p-where .icon, .fc .icon { width: 12px; height: 12px; flex: none; }
+.p-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.fc { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: 6px;
+    background: var(--sel); color: var(--dim); white-space: nowrap; }
+.fc .icon { color: var(--faint); }
+.fc.ctx .bar { width: 30px; }
+.fc.ctx.warn { color: var(--tool); background: var(--tool-soft, color-mix(in srgb, var(--tool) 12%, transparent)); }
+.fc.ctx.hot { color: var(--err); background: var(--err-soft); }
+.fc.warn { color: var(--tool); background: color-mix(in srgb, var(--tool) 10%, transparent); }
+.fc.warn .icon, .fc.ctx.warn .icon { color: var(--tool); }
+.fc.meta { color: var(--meta); background: color-mix(in srgb, var(--meta) 10%, transparent); }
+.fc.branch { color: color-mix(in srgb, var(--meta) 70%, var(--dim)); }
+.fc.sys[hidden] { display: none; }
+.p-foot .ipcchip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: 6px;
+    background: color-mix(in srgb, var(--meta) 10%, transparent); }
+.p-line .g .icon { width: 12px; height: 12px; vertical-align: -2px; }
+.p-line .g.t.k-shell, .p-line .g.k-shell { color: var(--tool); } .p-line .g.k-file, .p-line .g.k-edit { color: var(--you); }
+.p-line .g.k-find { color: var(--claude); } .p-line .g.k-agent { color: var(--meta); }
+.p-line .g.k-mcp { color: color-mix(in srgb, var(--err) 60%, var(--meta)); } .p-line .g.k-skill { color: var(--add); }
+.p-state { flex: none; font: 600 var(--t-xs) var(--sans); }
+.pane.turn .p-state { color: var(--you); }
+.pane.working .p-state { color: var(--claude); }
+.pane.ended .p-st { background: var(--faint); }
+.pane.ended .p-state { color: var(--faint); font-weight: 600; }
+.pane.ended .p-tail { opacity: .8; min-height: 0; }
+.p-el { flex: none; margin-left: auto; font: var(--t-xs) var(--mono); color: var(--faint); font-variant-numeric: tabular-nums; }
+.p-tail { flex: 1; padding: 8px 13px 10px; font: var(--t-xs)/1.65 var(--mono); min-height: 0;
+    display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; position: relative; }
+.pane.turn .p-tail { min-height: 0; }
+.p-tail::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 26px;
+    background: linear-gradient(var(--panel), transparent); pointer-events: none; z-index: 1; }
+/* tail lines wrap (the house rule: text wraps, it is never cut with an ellipsis) */
+.p-line { display: flex; gap: 8px; color: var(--dim); }
+.p-line + .p-line { margin-top: 2px; }
+.p-line .tx { min-width: 0; overflow-wrap: anywhere; }
+.p-line .g { flex: none; width: 2ch; text-align: center; }
+.p-line .g.u { color: var(--you); font-weight: 700; }
+.p-line .g.a { color: var(--claude); }
+.p-line .g.t { color: var(--tool); }
+.p-line .g.e { color: var(--faint); }
+.p-line .tx b { color: var(--tool); font-weight: 700; }
+.p-line.fresh { animation: fresh var(--t-slow) var(--ease); }
+@keyframes fresh { from { opacity: 0; translate: 0 5px; } }
+.p-line.cursorline .tx::after { content: '▋'; color: var(--claude); animation: blink 1.1s steps(1) infinite; margin-left: 2px; }
+@keyframes blink { 50% { opacity: 0; } }
+.p-wait { color: var(--faint); font-style: italic; }
+.p-wait b { color: var(--you); font-style: normal; font-weight: 700; }
+.p-alert { display: flex; align-items: center; gap: 7px; margin: 0 13px 9px; padding: 4px 10px;
+    border-radius: 6px; background: var(--err-soft); color: var(--err); font: 600 var(--t-xs) var(--sans); width: max-content; }
+.p-alert .icon { width: 13px; height: 13px; }
+.p-alert.machine { margin: 6px 0 10px; }
+.p-foot { display: flex; flex-wrap: wrap; gap: 3px 14px; padding: 8px 13px;
+    border-top: 1px solid var(--edge); background: var(--well);
+    font: var(--t-xs) var(--mono); color: var(--faint); font-variant-numeric: tabular-nums; }
+.p-foot .ctx { display: inline-flex; align-items: center; gap: 5px; }
+.p-foot .ctx .bar { width: 30px; height: 4px; border-radius: 999px; background: var(--edge2); overflow: hidden; }
+.p-foot .ctx .bar i { display: block; height: 100%; border-radius: 999px; background: var(--dim); }
+.p-foot .ctx.warn, .p-foot .ctx.warn b { color: var(--tool); } .p-foot .ctx.warn .bar i { background: var(--tool); }
+.p-foot .ctx.hot { color: var(--err); } .p-foot .ctx.hot .bar i { background: var(--err); }
+.p-foot .branch { color: color-mix(in srgb, var(--meta) 40%, var(--faint)); 
+    overflow-wrap: anywhere; max-width: 100%; }
+.p-foot .mod { color: var(--tool); }
+.p-foot .ipcchip { color: color-mix(in srgb, var(--meta) 45%, var(--faint)); 
+    overflow-wrap: anywhere; }
+.p-foot .ipcchip.bad { color: var(--warn, #c90); }
+.p-foot .ipcchip.stale { opacity: .55; }
+.ipcdisagree { display: inline-flex; align-items: center; color: var(--warn, #c90); margin-left: 4px; cursor: help; }
+.ipcdisagree .icon, .ipcdisagree svg { width: 14px; height: 14px; }
+.ipcbadge { padding: 1px 7px; border-radius: 9px; background: color-mix(in srgb, var(--surface) 70%, transparent);
+    font-weight: 600; }
+.ipcbadge.bad { color: var(--warn, #c90); }
+.ipcdegraded { margin: 6px 0 10px; padding: 6px 10px; border-radius: 6px; font-size: var(--t-sm);
+    color: var(--warn, #c90); border: 1px solid color-mix(in srgb, var(--warn, #c90) 40%, transparent); }
+
+/* ---------------- table density (V1) ---------------- */
+.tbl { border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; background: var(--panel); margin-top: 10px; }
+.thead, .trow { display: grid; align-items: center; gap: 10px; padding: 0 12px;
+    grid-template-columns: 14px minmax(120px,1.1fr) 52px minmax(180px,2fr) 88px 56px 62px minmax(110px,1fr) 64px; }
+.thead { height: 28px; font: 700 var(--t-xs) var(--mono); letter-spacing: .01em;
+    color: var(--faint); border-bottom: 1px solid var(--edge); background: var(--well); }
+.trow { min-height: 44px; text-decoration: none; border-top: 1px solid var(--edge);
+    font: var(--t-sm) var(--mono); font-variant-numeric: tabular-nums; color: var(--dim);
+    transition: background var(--t-fast) var(--ease); position: relative; }
+.trow:first-of-type { border-top: none; }
+.trow:hover, .trow.cur { background: var(--well); }
+.trow.turn { box-shadow: inset 2px 0 0 var(--you); }
+.trow.working { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--claude) 55%, transparent); }
+.st { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); position: relative; }
+.trow.turn .st { background: var(--you); }
+.trow.working .st { background: var(--claude); }
+.trow.working .st::after { content: ''; position: absolute; inset: -4px; border-radius: 50%;
+    border: 1.5px solid var(--claude); opacity: 0; animation: pulse 2s var(--ease) infinite; }
+.c-dir { font-weight: 700; color: var(--text); overflow-wrap: anywhere; }
+.c-model { color: var(--dim); text-transform: lowercase; }
+.c-state { overflow-wrap: anywhere; }
+.c-state b { font-weight: 700; }
+.trow.turn .c-state b { color: var(--you); } .trow.working .c-state b { color: var(--claude); }
+.c-state .doing { color: var(--faint); }
+.c-ctx { display: inline-flex; align-items: center; gap: 6px; }
+.c-ctx .gauge { width: 40px; height: 4px; border-radius: 2px; background: var(--sel); overflow: hidden; }
+.c-ctx .gauge i { display: block; height: 100%; background: var(--dim); }
+.c-ctx.warn { color: var(--tool); } .c-ctx.warn .gauge i { background: var(--tool); }
+.c-ctx.hot { color: var(--err); } .c-ctx.hot .gauge i { background: var(--err); }
+.c-branch { overflow-wrap: anywhere; color: var(--faint); }
+.c-branch .mod { color: var(--tool); }
+.c-el { text-align: right; color: var(--faint); white-space: nowrap; }
+.t-hit { grid-column: 2 / -1; margin: 0 0 8px; }
+.t-hit .p-hit { margin: 0; }
+.mcp { grid-column: 2 / -1; display: flex; align-items: center; gap: 6px; padding: 0 0 8px;
+    color: var(--err); font: 600 var(--t-xs) var(--sans); }
+.mcp .icon { width: 12px; height: 12px; }
+/* hover/cursor preview — the V1 inspector idea: peek without opening */
+.hpk { position: fixed; z-index: 70; width: 380px; max-width: calc(100vw - 24px); display: none;
+    background: color-mix(in srgb, var(--panel) 92%, transparent); backdrop-filter: blur(8px);
+    border: 1px solid var(--edge2); border-radius: var(--r);
+    /* floats a full layer above the board: deep drop + ambient ring, not the card shadow */
+    box-shadow: 0 24px 56px -12px rgba(0,0,0,.72), 0 4px 14px rgba(0,0,0,.38), 0 0 0 1px rgba(0,0,0,.28);
+    overflow: hidden; pointer-events: none; }
+:root.light .hpk { box-shadow: 0 24px 56px -12px rgba(30,40,70,.4), 0 4px 14px rgba(30,40,70,.2), 0 0 0 1px rgba(30,40,70,.08); }
+.hpk.on { display: block; animation: hpkin var(--t-fast) var(--ease); }
+@keyframes hpkin { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.hpk .p-tail { min-height: 0; }
+.hpk .hd { display: flex; gap: 8px; align-items: baseline; padding: 7px 13px; background: var(--well);
+    border-bottom: 1px solid var(--edge); font: 700 var(--t-xs) var(--mono); color: var(--dim); }
+.hpk .hd b { color: var(--text); }
+.trow .c-model { overflow-wrap: anywhere; }
+
+/* View-panel option icons */
+.vp-seg button { display: inline-flex; align-items: center; gap: 5px; }
+.vp-seg .icon { width: 12px; height: 12px; }
+.vp-seg .sw { width: 12px; height: 12px; border-radius: 4px; border: 1px solid var(--edge2);
+    display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.vp-seg .sw i { width: 5px; height: 5px; border-radius: 50%; }
+
+@media (max-width: 1020px) {
+    .thead, .trow { grid-template-columns: 14px minmax(110px,1.1fr) minmax(170px,2fr) 88px minmax(100px,1fr) 64px; }
+    .c-model, .c-cost, .c-turns, .thead span:nth-child(3), .thead span:nth-child(7) { display: none; }
+    .hpk { display: none !important; }
+}
+@media (max-width: 720px) {
+    .thead { display: none; }
+    .trow { grid-template-columns: 14px 1fr auto; grid-template-rows: auto auto; row-gap: 2px; padding: 9px 12px; }
+    .st { grid-row: 1; }
+    .c-dir { grid-row: 1; grid-column: 2; }
+    .c-el { grid-row: 1; grid-column: 3; }
+    .c-ctx, .c-cost, .c-model, .c-turns { display: none; }
+    .c-state { grid-row: 2; grid-column: 2 / -1; }
+    .c-branch { display: none; }
+}
+
+.sec { display: flex; align-items: center; gap: 8px; margin: 26px 0 8px;
+    font: 700 var(--t-xs) var(--mono); letter-spacing: .01em; color: var(--faint); }
+.sec.you { color: var(--you); }
+.sec.cl { color: var(--claude); }
+.sec .n { background: var(--sel); color: var(--dim); border-radius: 999px; padding: 1px 7px; }
+.sec::after { content: ''; flex: 1; height: 1px; background: var(--edge); }
+.endcap { text-align: center; font: var(--t-xs) var(--mono); letter-spacing: .01em;
+    color: var(--faint); margin: 32px 0 0; }
+.hint { text-align: center; font: var(--t-xs) var(--mono); color: var(--faint); margin-top: 10px; }
+.hint .kbd { font: var(--t-xs) var(--mono); border: 1px solid var(--edge); border-radius: 3px; padding: 1px 4px; background: var(--panel); }
+
+/* states */
+.sk { border-radius: var(--r); background: linear-gradient(90deg, var(--well) 25%, var(--sel) 40%, var(--well) 60%);
+    background-size: 200% 100%; animation: shimmer 1.4s linear infinite; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+.errbanner { display: flex; align-items: center; gap: 12px; margin: 26px 0; padding: 13px 15px;
+    border: 1px solid color-mix(in srgb, var(--err) 40%, transparent); border-left: 3px solid var(--err);
+    border-radius: var(--r); background: var(--err-soft); }
+.errbanner .icon { color: var(--err); width: 17px; height: 17px; }
+.errbanner .t b { display: block; font-weight: 650; }
+.errbanner .t span { color: var(--dim); font-size: var(--t-sm); }
+.errbanner button { margin-left: auto; height: 32px; padding: 0 14px; border-radius: 999px;
+    border: 1px solid var(--edge2); background: var(--panel); color: var(--text); font: 600 var(--t-sm) var(--sans); }
+.emptycard { margin: 15vh auto; text-align: center; color: var(--dim); }
+.emptycard .pane-ghost { width: 260px; height: 90px; margin: 0 auto; border: 1px dashed var(--edge2);
+    border-radius: var(--r); display: flex; align-items: center; justify-content: center;
+    font: var(--t-sm) var(--mono); color: var(--faint); }
+.emptycard h2 { font: 650 var(--t-lg) var(--sans); color: var(--text); margin: 14px 0 5px; }
+.emptycard p { font-size: var(--t-sm); margin: 0 auto; max-width: 360px; }
+
+.demo { position: fixed; left: 12px; bottom: 12px; z-index: 90; font: var(--t-xs) var(--mono); }
+.demo summary { list-style: none; cursor: pointer; color: var(--faint); background: var(--panel);
+    border: 1px dashed var(--edge2); border-radius: 999px; padding: 3px 10px; }
+.demo-body { position: absolute; bottom: 28px; left: 0; width: 150px; background: var(--panel);
+    border: 1px dashed var(--edge2); border-radius: 8px; padding: 8px 10px;
+    display: flex; flex-direction: column; gap: 5px; box-shadow: var(--shadow); color: var(--dim); }
+.demo-body label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+/* ===== handoff: text-size = UI scale on the board (dashboard, not prose) ===== */
+#main { zoom: var(--zoom, 1); }
+
+/* ===== handoff: the View panel ===== */
+.viewpanel { position: fixed; top: calc(var(--tb-h) + 8px); right: 12px; z-index: 78; width: 340px;
+    background: var(--panel); border: 1px solid var(--edge2); border-radius: 13px; box-shadow: var(--shadow);
+    padding: 13px 15px; display: none; flex-direction: column; gap: 13px; }
+.viewpanel.open { display: flex; }
+.vp-cap { font: 700 var(--t-xs) var(--mono); letter-spacing: .01em; color: var(--faint);
+    display: flex; align-items: center; gap: 8px; }
+.vp-cap::after { content: ''; flex: 1; height: 1px; background: var(--edge); }
+.vp-grp { display: flex; flex-direction: column; gap: 6px; }
+.vp-lb { font: 700 var(--t-xs) var(--mono); letter-spacing: .01em; color: var(--faint);
+    display: flex; justify-content: space-between; }
+.vp-lb b { color: var(--dim); font-weight: 700; }
+.vp-seg { display: flex; gap: 3px; background: var(--well); border: 1px solid var(--edge); border-radius: 9px; padding: 3px; }
+.vp-seg button { flex: 1; border: none; background: none; color: var(--dim); border-radius: 6px;
+    padding: 6px 3px; font: 600 var(--t-xs) var(--sans); white-space: nowrap; }
+.vp-seg button[aria-pressed="true"] { background: var(--you-soft); color: var(--you); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--you) 40%, transparent); }
+.vp-seg button:hover { color: var(--text); }
+.vp-range { width: 100%; accent-color: var(--you); }
+.vp-hint { font: var(--t-xs) var(--mono); color: var(--faint); line-height: 1.5; }
+</style>
+<script>(function(){try{var R={tty:'terminal',editorial:'paper',product:'native'},s=localStorage.getItem('cc-skin');s=R[s]||s;if(s&&s!=='native')document.documentElement.dataset.skin=s;document.documentElement.dataset.dir='fleet';var f=parseFloat(localStorage.getItem('hx-fs'));if(f)document.documentElement.style.setProperty('--zoom',(Math.min(18,Math.max(12,f))/14.5).toFixed(3));}catch(e){}})()</script>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5 5l1.7 1.7M17.3 17.3L19 19M19 5l-1.7 1.7M6.7 17.3L5 19"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 13.5A8 8 0 0 1 10.5 4 8 8 0 1 0 20 13.5z"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5L21.5 20h-19zM12 10v4.5M12 17.5h0"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.5"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.5"/><rect x="13" y="13" width="7.5" height="7.5" rx="1.5"/></symbol>
+<symbol id="i-rows" viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h16"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8l1.2 2.6 2.8-.6 1 2.7 2.7 1-.6 2.8 2.6 1.2-2.6 1.2.6 2.8-2.7 1-1 2.7-2.8-.6L12 21.2l-1.2-2.6-2.8.6-1-2.7-2.7-1 .6-2.8L2.3 12l2.6-1.2-.6-2.8 2.7-1 1-2.7 2.8.6z" opacity=".55"/></symbol>
+<symbol id="i-terminal" viewBox="0 0 24 24"><path d="M4 17l6-5-6-5M12 19h8"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M16 4l4 4L8 20H4v-4z"/></symbol>
+<symbol id="i-find" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+<symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 4v4M9 14h.01M15 14h.01"/></symbol>
+<symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5"/></symbol>
+<symbol id="i-puzzle" viewBox="0 0 24 24"><path d="M5 8h3a2 2 0 1 1 4 0h3v3a2 2 0 1 1 0 4v4H5v-4a2 2 0 1 0 0-4z"/></symbol>
+<symbol id="i-msg" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></symbol>
+<symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3v5M12 16v5M3 12h5M16 12h5M6 6l3 3M15 15l3 3M6 18l3-3M15 9l3-3"/></symbol>
+<symbol id="i-todo" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+<symbol id="i-coin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M15 9h-4a2 2 0 0 0 0 4h2a2 2 0 0 1 0 4H9M12 6v2M12 16v2"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+<symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-6"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h6l2 2h10v11H3z"/></symbol>
+<symbol id="i-turns" viewBox="0 0 24 24"><path d="M4 5h11v8H8l-4 3zM9 16h7l4 3v-9h-3"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></symbol>
+<symbol id="i-sort" viewBox="0 0 24 24"><path d="M7 4v16M4 17l3 3 3-3M17 20V4M14 7l3-3 3 3"/></symbol>
+<symbol id="i-type" viewBox="0 0 24 24"><path d="M4 7V5h16v2M9 19h6M12 5v14"/></symbol>
+<symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></symbol>
+<symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3 13h5l2 3h4l2-3h5"/><path d="M5 5h14l2 8v6H3v-6z"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 8l6 4-6 4z"/></symbol>
+<symbol id="i-stop" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1"/></symbol>
+<symbol id="i-hand" viewBox="0 0 24 24"><path d="M8 13V5a1.5 1.5 0 0 1 3 0v6M11 11V4a1.5 1.5 0 0 1 3 0v7M14 11V5a1.5 1.5 0 0 1 3 0v8c0 4-3 7-6 7s-5-2-6-4l-2-4a1.5 1.5 0 0 1 2.5-1.5L8 13"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-10 7"/></symbol>
+</defs></svg>
+
+<div class="topbar">
+  <a class="tb-brand" href="/" title="Every Claude Code session on this Mac"><svg class="brand" viewBox="0 0 1200 1200" aria-hidden="true"><use href="#i-claude"/></svg><span class="tb-name">Sessions</span><span class="tb-host"></span></a>
+  <span class="tb-sp"></span>
+  <div class="seg st-seg" id="stSeg" role="tablist" aria-label="Show sessions">
+    <button data-st="all" class="st-all" title="All sessions"><svg class="icon"><use href="#i-layers"/></svg><span class="n" id="nAll"></span></button>
+    <button data-st="you" class="st-you" title="Waiting on you"><svg class="icon"><use href="#i-hand"/></svg><span class="n" id="nYou"></span></button>
+    <button data-st="work" class="st-work" title="Claude is working"><svg class="icon"><use href="#i-play"/></svg><span class="n" id="nWork"></span></button>
+    <button data-st="ended" class="st-ended" title="Ended recently"><svg class="icon"><use href="#i-stop"/></svg><span class="n" id="nEnded"></span></button>
+  </div>
+  <span class="tb-sp"></span>
+  <span class="chip refresh" id="chipRefresh" style="display:none"><span class="pulse"></span>refreshing…</span>
+  <span class="tb-spend" id="tbSpend" hidden></span>
+  <button class="tctl icon" id="searchBtn" title="Search sessions and transcripts (/)"><svg class="icon"><use href="#i-search"/></svg></button>
+  <label class="tctl" title="Sort within groups"><svg class="icon"><use href="#i-sort"/></svg>
+    <select id="sortSel" aria-label="Sort">
+      <option value="urgency">Urgency</option>
+      <option value="recency">Recency</option>
+      <option value="cost">Cost</option>
+      <option value="ctx">Context left</option>
+    </select><svg class="icon chev"><use href="#i-down"/></svg></label>
+  <div class="seg icon-seg" id="densSeg" aria-label="Layout">
+    <button data-dens="peeks" title="Cards (d)"><svg class="icon"><use href="#i-grid"/></svg></button>
+    <button data-dens="table" title="Table (d)"><svg class="icon"><use href="#i-rows"/></svg></button>
+  </div>
+  <button class="tctl icon" id="viewBtn" title="Palette and text size" aria-pressed="false"><svg class="icon"><use href="#i-type"/></svg></button>
+  <button class="tctl icon" id="themeBtn" title="Dark or light (t)"><svg class="icon"><use href="#i-moon"/></svg></button>
+</div>
+
+<main id="main"></main>
+<div class="hpk" id="hpk" aria-hidden="true"></div>
+<script src="/vendor/hub-shared.js?v=2"></script>
+<div class="viewpanel" id="viewPanel">
+  <div class="vp-cap">View</div>
+  <div class="vp-grp"><span class="vp-lb">Direction</span>
+    <div class="vp-seg" id="vpDir">
+      <button data-dir="fleet"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="5" rx="1"/><rect x="3" y="11" width="18" height="5" rx="1"/><path d="M3 21h12"/></svg>Fleet</button><button data-dir="v5grid"><svg class="icon"><use href="#i-grid"/></svg>Grid</button><button data-dir="base"><svg class="icon"><use href="#i-rows"/></svg>Base</button>
+    </div>
+    <span class="vp-hint" id="vpDirHint"></span>
+  </div>
+  <div class="vp-grp"><span class="vp-lb">Palette</span>
+    <div id="vpSkin"></div>
+  </div>
+  <div class="vp-grp"><span class="vp-lb">Theme</span>
+    <div class="vp-seg" id="vpTheme"><button data-theme="dark"><svg class="icon"><use href="#i-moon"/></svg>Dark</button><button data-theme="light"><svg class="icon"><use href="#i-sun"/></svg>Light</button></div>
+  </div>
+  <div class="vp-grp"><span class="vp-lb">Text size <b id="vpFsVal">100%</b></span>
+    <input class="vp-range" type="range" id="vpFs" min="12" max="18" step="0.5" value="14.5">
+    <span class="vp-hint">Scales every text on both pages, transcripts included.</span>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const ic = n => `<svg class="icon" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+// 'hub-theme' holds only an explicit choice. The old 'cv-theme' also held
+// OS-resolved values saved at load, which cannot be told apart, so it is dropped.
+const SS = { theme: 'hub-theme', dens: 'v6-density', sort: 'v6-sort' };
+try { localStorage.removeItem('cv-theme'); } catch (e) {}
+function applyTheme(t) {
+    document.documentElement.classList.toggle('light', t === 'light');
+    $('#themeBtn').innerHTML = ic(t === 'light' ? 'sun' : 'moon');
+    document.querySelectorAll('#vpTheme button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.theme === t)));
+}
+/* Only a choice made here is saved. Saving the OS-resolved theme at load
+   pinned it, so the page never followed the OS again after one visit. */
+function chooseTheme(t) {
+    applyTheme(t);
+    try { localStorage.setItem(SS.theme, t); } catch (e) {}
+}
+const osTheme = matchMedia('(prefers-color-scheme: light)');
+function savedTheme() { try { return localStorage.getItem(SS.theme); } catch (e) { return null; } }
+applyTheme(savedTheme() || (osTheme.matches ? 'light' : 'dark'));
+osTheme.addEventListener('change', e => { if (!savedTheme()) applyTheme(e.matches ? 'light' : 'dark'); });
+$('#themeBtn').onclick = () => vt(() => chooseTheme(document.documentElement.classList.contains('light') ? 'dark' : 'light'));
+
+/* ── real data ──────────────────────────────────────────────────────────
+   This page holds no session data of its own. FEED refills from
+   GET /api/sessions every poll; per-session tails stream from each
+   session's own GET /s/<id>/data?since=<seq> (keyed by session_id —
+   never by feed position). */
+const FEED = { host: '', live: [], recent: [] };
+const ctxCls = p => p < 10 ? 'hot' : p < 25 ? 'warn' : '';
+const kfmt = n => { n = +n || 0; return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'K' : String(n); };
+// null cost means nobody could price this model, which is not the same as free.
+// Matches the menu bar, which already renders an unpriced session as '–'.
+const cfmt = c => c == null ? '–' : '$' + (+c).toFixed(2);
+// Only claude transcripts are readable: the hub resolves them under
+// ~/.claude/projects, and the reader keys on user/assistant lines that a codex
+// rollout doesn't have. Opening one would render an empty session rather than
+// fail, so these rows don't link at all.
+const openable = s => !s.provider || s.provider === 'claude';
+const noOpenAttrs = s => openable(s) ? '' :
+    ` data-noopen="1" title="${esc(s.provider)} session: its transcript isn't readable here"`;
+function prettyModel(id) {
+    let s = String(id || '');
+    if (s.includes('/')) s = s.split('/')[0];   // foreign providers ("openai/0.142.5") → provider name only
+    const parts = s.replace(/^claude-/, '').split('-');
+    if (!parts[0]) return '?';
+    const name = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
+    const ver = parts.slice(1).filter(p => /^\d{1,2}$/.test(p)).join('.');
+    return ver ? `${name} ${ver}` : name;
+}
+function etimeMin(raw) {   // ps etime: [[DD-]HH:]MM:SS → minutes
+    if (!raw) return 9e9;
+    let days = 0, rest = String(raw);
+    if (rest.includes('-')) { const p = rest.split('-'); days = +p[0] || 0; rest = p[1]; }
+    const t = rest.split(':').map(n => +n || 0);
+    let h = 0, m = 0;
+    if (t.length === 3) { h = t[0]; m = t[1]; } else if (t.length === 2) { m = t[0]; }
+    return days * 1440 + h * 60 + m;
+}
+function fmtElapsed(raw) {
+    const m = etimeMin(raw); if (m >= 9e9) return '';
+    const d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mm = m % 60;
+    return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${mm}m` : `${mm}m`;
+}
+function relTime(iso) {
+    if (!iso) return '';
+    const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    if (isNaN(s)) return '';
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return Math.floor(s / 86400) + 'd ago';
+}
+function cleanTitle(t) { t = (t || '').trim(); return (t && t !== '?') ? t : ''; }
+function baseName(p) { p = (p || '').replace(/\/+$/, ''); const i = p.lastIndexOf('/'); return i >= 0 ? p.slice(i + 1) : p; }
+const DOING = { thinking: 'thinking', responding: 'writing', tool_use: 'running tools', tool_result: 'processing' };
+function durShort(iso) {
+    if (!iso) return '';
+    const s = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (isNaN(s) || s < 0) return '';
+    return s < 60 ? Math.floor(s) + 's' : s < 3600 ? Math.floor(s / 60) + 'm'
+         : s < 86400 ? Math.floor(s / 3600) + 'h' : Math.floor(s / 86400) + 'd';
+}
+/* The state label: Claude Code's own status when the session file gave one
+   ("busy 4m"), else the transcript-tail guess. */
+function statusText(s) {
+    if (s.state === 'ended') return 'Ended';
+    // Claude Code says busy, idle or shell; to the owner that is working or their turn
+    const base = s.parked ? 'Idle' : s.state === 'idle' ? 'Your turn' : 'Working';
+    const since = s.status ? durShort(s.status_since) : '';
+    return since ? `${base} · ${since}` : base;
+}
+/* The same state in a sentence, for the tooltip. */
+function statusTip(s) {
+    if (s.state === 'ended') return `Ended ${s.ago || ''}`.trim();
+    const at = s.status_since ? new Date(s.status_since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    const what = s.parked ? 'Idle, still open in its terminal' : s.state === 'idle' ? (s.status === 'shell' ? 'Waiting for you (in shell mode)' : 'Waiting for you') : 'Claude is working';
+    return at ? `${what} since ${at}` : what;
+}
+function adaptFeed(d) {
+    FEED.host = (d.host || '').replace(/\.local$/, '');
+    FEED.machine = d.machine || {};
+    FEED.live = (d.live || []).map(s => Object.assign({}, s, {
+        // The session file's status wins over the tail guess: busy is working,
+        // idle and shell are the owner's turn.
+        state: s.status ? (s.status === 'busy' ? 'working' : 'idle')
+                        : (s.state === 'idle' ? 'idle' : 'working'),
+        // the scanner's shared rule: a turn left unanswered over an hour is parked
+        parked: s.attention === 'idle',
+        doing: s.state_detail || DOING[s.state] || (s.state && s.state !== 'idle' ? s.state : 'busy'),
+        last_act: relTime(s.last_activity),
+        folder: s.cwd_short || baseName(s.cwd),
+        ctx_remaining: (v => isNaN(v) ? null : v)(parseInt(s.ctx_remaining, 10)),
+        cost_usd: s.cost_usd == null ? null : +s.cost_usd, turns: +s.turns || 0,
+        output_tokens: kfmt(s.output_tokens),
+        git_modified: +s.git_modified || 0,
+        elapsed: fmtElapsed(s.elapsed), _ageMin: etimeMin(s.elapsed),
+        cwd_short: cleanTitle(s.name) || cleanTitle(s.tab_title) || s.cwd_short || baseName(s.cwd) || '(session)',
+        model: prettyModel(s.model_full || s.model),
+    }));
+    const liveIds = new Set(FEED.live.map(s => s.session_id));
+    FEED.recent = (d.recent || [])
+        .filter(r => r.session_id && !liveIds.has(r.session_id))   // a live session's log is also the freshest history file
+        .filter(r => (r.cwd_short || r.project) !== 'subagents')   // sub-agent transcripts aren't sessions (scan-side fix waits on the provider work landing)
+        .slice(0, 12).map(s => Object.assign({}, s, {
+        state: 'ended', cost_usd: s.cost_usd == null ? null : +s.cost_usd, turns: +s.turns || 0,
+        model: prettyModel(s.model_full || s.model), git_branch: '',
+        ago: relTime(s.modified),
+        _ageMin: s.modified ? Math.max(0, (Date.now() - new Date(s.modified).getTime()) / 60000) : 9e9,
+        cwd_short: cleanTitle(s.name) || s.cwd_short || '(session)',
+    }));
+}
+
+/* density + sort, persisted */
+let density = (() => { try { return localStorage.getItem(SS.dens) || 'peeks'; } catch (e) { return 'peeks'; } })();
+let sortBy = (() => { try { return localStorage.getItem(SS.sort) || 'urgency'; } catch (e) { return 'urgency'; } })();
+let curQ = '';
+let cursor = -1; // keyboard selection over rendered items
+
+/* cards or table: an icon pair, the pressed one is the current layout */
+function densLabel() { document.querySelectorAll('#densSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.dens === density))); }
+function setDensity(d) {
+    density = d;
+    try { localStorage.setItem(SS.dens, density); } catch (e) {}
+    densLabel(); vt(() => renderBoard(curQ));
+}
+$('#densSeg').onclick = e => { const b = e.target.closest('button'); if (b && b.dataset.dens !== density) setDensity(b.dataset.dens); };
+/* which state groups show (owner D2a): all, or one of needs you / working / ended */
+let stFilter = (() => { try { return localStorage.getItem('hub-st') || 'all'; } catch (e) { return 'all'; } })();
+const ST_LABEL = { all: 'All sessions', you: 'Waiting on you', work: 'Claude is working', ended: 'Ended recently' };
+function stLabel() {
+    document.querySelectorAll('#stSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.st === stFilter)));
+    const sub = document.getElementById('mhSub'); if (sub) sub.textContent = ST_LABEL[stFilter] || '';
+}
+function setStFilter(st) {
+    stFilter = st; try { localStorage.setItem('hub-st', stFilter); } catch (err) {}
+    stLabel();
+    document.querySelectorAll('.hs[data-st]').forEach(b => b.classList.toggle('on', b.dataset.st === stFilter));
+    vt(() => renderBoard(curQ));
+}
+$('#stSeg').onclick = e => { const b = e.target.closest('button'); if (b) setStFilter(b.dataset.st); };
+// a header figure filters to its group; clicking the one already chosen shows everything
+document.addEventListener('click', e => {
+    const b = e.target.closest('.hs[data-st]');
+    if (b) setStFilter(stFilter === b.dataset.st ? 'all' : b.dataset.st);
+});
+$('#searchBtn').onclick = () => { const fq = $('#fq'); if (fq) { fq.focus(); fq.scrollIntoView({ block: 'center', behavior: 'smooth' }); } };
+stLabel();
+$('#sortSel').value = sortBy;
+$('#sortSel').onchange = () => { sortBy = $('#sortSel').value; try { localStorage.setItem(SS.sort, sortBy); } catch (e) {} renderBoard(curQ); };
+
+/* peek-tail lines */
+/* Harness turns (hook, peer, task, system) and events such as mode changes are
+   kept as `sys` lines: left out of the tail, counted in the card's "+N system".
+   Skill bodies and command output are nobody's news and are dropped. */
+const OWNER_TURNS = new Set(['typed', 'shell', 'command']);
+function lineFor(r) {
+    if (!r) return null;
+    if (r.role === 'user' && r.turn && !OWNER_TURNS.has(r.turn))
+        return ['hook', 'peer', 'task', 'system'].includes(r.turn) ? { sys: true } : null;
+    if (r.role === 'event') return { sys: true };
+    // thinking and empty lines say nothing on a card, so they take no row
+    if (r.role === 'thinking') return null;
+    // Each line ends where the text does (its first line or first sentence),
+    // never mid-word: the card wraps rather than cuts.
+    if (r.role === 'user') {
+        const tx = firstLineOf(r.label || String(r.text || '').replace(/<[^>]+>/g, ' '));
+        return tx ? { g: '❯', c: 'u', tx } : null;
+    }
+    if (r.role === 'assistant') {
+        const tx = firstSentence(firstLineOf(String(r.text || '').replace(/[#*`>]/g, '')));
+        return tx ? { g: '●', c: 'a', tx } : null;
+    }
+    if (r.role === 'tools') { const t = r.tools[0], k = tailKind(t.name);
+        const what = firstLineOf((t.input && t.input.command) || t.preview || '').replace(/…$/, '');
+        return { g: ic(k.icon), c: 't k-' + k.k, tx: `<b>${esc(k.label)}</b> ${esc(what)}`, html: true }; }
+    return null;
+}
+const firstLineOf = s => (String(s || '').split('\n').find(l => l.trim()) || '').replace(/\s+/g, ' ').trim();
+const firstSentence = s => { const m = s.match(/^(.{20,}?[.?!:])(\s|$)/); return m ? m[1] : s; };
+/* A tool's kind on a card: its icon and a short name (an MCP call shows its server). */
+function tailKind(n) {
+    n = n || '';
+    if (n.startsWith('mcp__')) return { k: 'mcp', icon: 'plug', label: (n.split('__')[1] || 'mcp').replace(/^plugin_/, '').split('_')[0] };
+    if (n === 'Bash') return { k: 'shell', icon: 'terminal', label: n };
+    if (n === 'Read') return { k: 'file', icon: 'file', label: n };
+    if (/^(Write|Edit|MultiEdit|NotebookEdit)$/.test(n)) return { k: 'edit', icon: 'edit', label: n };
+    if (/^(Grep|Glob|LS|ToolSearch)$/.test(n)) return { k: 'find', icon: 'find', label: n };
+    if (/^Web/.test(n)) return { k: 'web', icon: 'globe', label: n };
+    if (/^(Task|Agent)$/.test(n)) return { k: 'agent', icon: 'bot', label: n };
+    if (/^(Skill|SlashCommand)$/.test(n)) return { k: 'skill', icon: 'puzzle', label: n };
+    return { k: 'other', icon: 'gear', label: n };
+}
+/* Tails stream from each session's own transcript endpoint, keyed strictly by
+   session_id. Prime = probe total_records via an impossible ?since, then fetch
+   the last slice; after that ?since=<lastSeq> is incremental. */
+const tails = {};                     // sid → { src: [lines], lastSeq, loading }
+const TAIL_KEEP = 40, TAIL_PRIME = 12;
+function ingestTail(sid, recs) {
+    const t = tails[sid]; if (!t) return;
+    t.loading = false;
+    for (const r of recs || []) {
+        if (r.seq <= t.lastSeq) continue;
+        t.lastSeq = r.seq;
+        const l = lineFor(r); if (l) { l.seq = r.seq; t.src.push(l); }   // seq travels so query hits can deep-link
+    }
+    if (t.src.length > TAIL_KEEP) t.src = t.src.slice(-TAIL_KEEP);
+}
+/* SWR cache: tails persist in localStorage so a reopen (or a hover repeat)
+   paints instantly from stale data, then one cheap ?since revalidate catches
+   up. The cache is a placeholder, never a TTL bet — every prime revalidates. */
+const TAILCACHE = 'hub-tail-v5:';   // v5: lines end at a sentence, never cut mid-word
+function loadTailCache(sid) {
+    try { const v = JSON.parse(localStorage.getItem(TAILCACHE + sid)); return v && Array.isArray(v.src) ? v : null; }
+    catch (e) { return null; }
+}
+function saveTailCache(sid) {
+    const t = tails[sid]; if (!t || !t.src.length) return;
+    try { localStorage.setItem(TAILCACHE + sid, JSON.stringify({ lastSeq: t.lastSeq, src: t.src.slice(-TAIL_KEEP) })); } catch (e) {}
+}
+function pruneTailCache() {
+    const keep = new Set(FEED.live.concat(FEED.recent).map(s => TAILCACHE + s.session_id));
+    try {
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith('hub-tail-v') && !keep.has(k)) localStorage.removeItem(k);   // also sweeps old cache versions
+        }
+    } catch (e) {}
+}
+async function primeTail(sid) {
+    if (!sid || (tails[sid] && !tails[sid].cachedOnly)) return;   // a tail painted from cache at start still revalidates
+    const cached = loadTailCache(sid);
+    tails[sid] = { src: cached ? cached.src : [], lastSeq: cached ? cached.lastSeq : 0, loading: true };
+    if (cached) refreshTailDOM(sid);            // stale immediately…
+    try {
+        let from = tails[sid].lastSeq;
+        if (!cached) {
+            const probe = await (await fetch(`/s/${encodeURIComponent(sid)}/data?since=2000000000`, { cache: 'no-cache' })).json();
+            from = Math.max(0, ((probe.meta && probe.meta.total_records) || 0) - TAIL_PRIME);
+        }
+        const d = await (await fetch(`/s/${encodeURIComponent(sid)}/data?since=${from}`, { cache: 'no-cache' })).json();
+        ingestTail(sid, d.records);
+        saveTailCache(sid);
+        refreshTailDOM(sid);                     // …revalidated after
+    } catch (e) { tails[sid].loading = false; }
+}
+function refreshTailDOM(sid) {
+    const s = FEED.live.find(x => x.session_id === sid) || FEED.recent.find(x => x.session_id === sid);
+    if (!s) return;
+    const el = document.querySelector(`[data-tail="${sid}"]`);
+    if (el) {
+        const lines = tailLinesFor(s);
+        el.innerHTML = lines.map((l, i) => lineHTML(l, s.state === 'working' && i === lines.length - 1 ? ' cursorline fresh' : '')).join('');
+    }
+    const pill = document.querySelector(`[data-sys="${sid}"]`);
+    if (pill) { const n = tailSysCount(s); pill.innerHTML = `${ic('zap')}${n} system`; pill.hidden = !n; }
+    if (hpkSid === sid) {
+        const row = document.querySelector(`[data-peek][data-sid="${sid}"]`);
+        if (row) showPeek(row);
+    }
+}
+function tailLinesFor(s) {
+    const t = tails[s.session_id];
+    if (!t) return [];
+    // two replies that open with the same sentence would print the same line twice
+    const vis = t.src.filter(l => !l.sys).filter((l, i, a) => !(i && a[i - 1].tx === l.tx && a[i - 1].c === l.c));
+    const n = s.state === 'idle' ? 2 : s.state === 'ended' ? 3 : 5;
+    return vis.slice(Math.max(0, vis.length - n));
+}
+/* How many harness lines landed since the oldest line the tail shows. */
+function tailSysCount(s) {
+    const t = tails[s.session_id], shown = tailLinesFor(s);
+    if (!t || !shown.length) return 0;
+    return t.src.filter(l => l.sys && l.seq > shown[0].seq).length;
+}
+/* Opening a card: leave its name, model and folder for the transcript's loading
+   state, and name its title so the view transition carries it across. */
+document.addEventListener('click', e => {
+    const a = e.target.closest('#board a.pane[href], #board a.trow[href]');
+    if (!a || e.defaultPrevented || e.metaKey || e.ctrlKey) return;
+    const s = FEED.live.concat(FEED.recent).find(x => x.session_id === a.dataset.sid);
+    if (!s) return;
+    try { sessionStorage.setItem('hub-open', JSON.stringify({ sid: s.session_id, title: s.cwd_short, model: s.model,
+        cwd: (s.cwd || '').replace(/^\/Users\/[^/]+/, '~') })); } catch (err) {}
+    document.querySelectorAll('[style*="view-transition-name"]').forEach(el => { el.style.viewTransitionName = ''; });
+    const t = a.querySelector('.p-title, .c-dir'); if (t) t.style.viewTransitionName = 'sess-title';
+});
+/* Hovering a card refreshes the browser's copy of its transcript, at most once
+   every 5 s per session, so opening it paints at once (the transcript page
+   revalidates on arrival). Needs the Cache API, so this Mac only. */
+const HOVER_FETCHED = {};
+document.addEventListener('pointerover', e => {
+    const a = e.target.closest('#board a[data-sid][href]');
+    if (!a || !window.caches) return;
+    const sid = a.dataset.sid, now = Date.now();
+    if (now - (HOVER_FETCHED[sid] || 0) < 5000) return;
+    HOVER_FETCHED[sid] = now;
+    const url = new URL(`/s/${encodeURIComponent(sid)}/data`, location.href).href;
+    fetch(url, { cache: 'no-cache' }).then(r => r.ok ? r.text() : null).then(text => {
+        if (text) caches.open('hub-data').then(c => c.put(url, new Response(text, { headers: { 'Content-Type': 'application/json' } })));
+    }).catch(() => {});
+});
+/* Name, model, branch and path on a card copy on click instead of opening it. */
+document.addEventListener('click', e => {
+    const el = e.target.closest('[data-copy]');
+    if (!el) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    const txt = el.dataset.copy;
+    const done = () => { el.classList.add('copied'); setTimeout(() => el.classList.remove('copied'), 1100); };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(txt).then(done, () => {});
+    else { const ta = document.createElement('textarea'); ta.value = txt; ta.style.cssText = 'position:fixed;opacity:0';
+        document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (err) {} ta.remove(); done(); }
+}, true);
+const lineHTML = (l, extra) =>
+    `<div class="p-line${extra || ''}"><span class="g ${l.c}">${l.g}</span><span class="tx">${l.html ? l.tx : esc(l.tx)}</span></div>`;
+
+/* ---------------- peeks density ---------------- */
+function paneHTML(s, hit) {
+    const yourTurn = s.state === 'idle';
+    const kind = yourTurn ? 'turn' : 'working';
+    let tail;
+    if (yourTurn) {
+        tail = tailLinesFor(s).map(l => lineHTML(l)).join('') +
+            `<div class="p-line p-wait"><span class="g u">❯</span><span class="tx"><b>your turn</b>${s.last_prompt ? ` · last: ${esc(s.last_prompt)}` : ''}</span></div>`;
+    } else {
+        const lines = tailLinesFor(s);
+        tail = lines.map((l, i) => lineHTML(l, i === lines.length - 1 ? ' cursorline' : '')).join('');
+    }
+    return `<a class="pane ${kind}${openable(s) ? '' : ' noopen'}"${openable(s) ? ` href="/s/${encodeURIComponent(s.session_id)}${hit && hit.seq ? `#r${hit.seq}&q=${encodeURIComponent(hit.w)}` : ''}"` : ''}${noOpenAttrs(s)} data-sid="${esc(s.session_id)}" data-screen-label="session ${esc(s.cwd_short)}">` +
+        headHTML(s, statusText(s), s.elapsed) +
+        `<div class="p-tail" data-tail="${esc(s.session_id)}">${tail}</div>` +
+        (hit ? hitHTML(hit) : '') + footHTML(s) + `</a>`;
+}
+/* A session card's header (owner D1a): one row, stable slots. The name and
+   the model copy on click. */
+function headHTML(s, state, when) {
+    return `<div class="p-head"><span class="p-st"></span>` +
+        `<span class="p-title" data-copy="${esc(s.cwd_short)}" title="Copy">${esc(s.cwd_short)}</span>` +
+        `<span class="p-model" data-copy="${esc(s.model_full || s.model)}" title="Copy ${esc(s.model_full || s.model)}">${esc(s.model)}</span>` +
+        `<span class="p-right"><span class="p-state" data-tip="${esc(statusTip(s))}">${esc(state)}</span>` +
+        `<span class="p-el" data-tip="${s.state === 'ended' ? 'When it ended' : 'How long this session has been running'}">${esc(when || '')}</span></span></div>`;
+}
+/* The footer: where it runs and when it last moved, then the numbers as small
+   icon chips. Path and branch copy on click; problems are tinted, not shouted. */
+function footHTML(s) {
+    const ended = s.state === 'ended';
+    const chip = (icon, body, cls = '', title = '') =>
+        `<span class="fc ${cls}"${title ? ` title="${esc(title)}"` : ''}>${ic(icon)}${body}</span>`;
+    const n = tailSysCount(s);
+    const chips = [
+        !ended && s.ctx_remaining != null ? chip('gauge', `<span class="bar"><i style="width:${s.ctx_remaining}%"></i></span>${s.ctx_remaining}%`, 'ctx ' + ctxCls(s.ctx_remaining), 'context left') : '',
+        s.output_tokens ? chip('up', esc(s.output_tokens), '', 'output tokens') : '',
+        s.cost_usd != null ? chip('coin', cfmt(s.cost_usd), '', 'cost') : '',
+        s.turns ? chip('turns', s.turns, '', 'turns') : '',
+        s.subagent_count ? chip('bot', s.subagent_count, 'meta', 'sub-agents running') : '',
+        s.git_branch ? `<span class="fc branch" data-copy="${esc(s.git_branch)}" title="Copy branch">${ic('branch')}${esc(s.git_branch)}${s.git_modified ? `<span class="mod">*${s.git_modified}</span>` : ''}</span>` : '',
+        ipcChipHTML(s),
+        `<span class="fc sys" data-sys="${esc(s.session_id)}" title="hooks, peers, tasks and mode changes not shown above"${n ? '' : ' hidden'}>${ic('zap')}${n} system</span>`,
+        s.mcp_down ? chip('plug', 'MCP', 'warn', 'MCP down: ' + s.mcp_down) : '',
+    ].filter(Boolean).join('');
+    return `<div class="p-foot"><div class="p-where">` +
+        (s.cwd ? `<span class="p-path" data-copy="${esc(s.cwd)}" title="Copy path">${ic('folder')}${esc((s.cwd || '').replace(/^\/Users\/[^/]+/, '~'))}</span>` : '<span></span>') +
+        (!ended && s.last_act ? `<span class="p-act">${ic('clock')}active ${esc(s.last_act)}</span>` : '') +
+        `</div><div class="p-chips">${chips}</div></div>`;
+}
+/* Degraded-duration banner: silent graceful degradation is itself the bug
+   class the meld exists to kill, so a >24h-degraded bridge (any non-fresh
+   state) surfaces HERE, on the page the owner actually watches. */
+function ipcDegradedHTML(live) {
+    const rows = live.filter(s => s.ipc && s.ipc.alias);
+    const allBad = rows.length > 0 && rows.every(s => s.ipc.state && s.ipc.state !== 'fresh');
+    if (allBad) {
+        if (!localStorage.ipcDegradedSince) localStorage.ipcDegradedSince = Date.now();
+    } else {
+        localStorage.removeItem('ipcDegradedSince');
+        return '';
+    }
+    if (Date.now() - (+localStorage.ipcDegradedSince) < 86400e3) return '';
+    return `<div class="ipcdegraded">ipc bridge degraded for over 24h. Sessions run fine; mail counts are unknown. Runbook: docs/meld-runbook.md</div>`;
+}
+/* A condition every live session shares (the scan lifts it into `machine`)
+   is said once here, not as the same red pill on every card. */
+/* Problems with this Mac or the fleet, each typed (what broke, how bad) and
+   said once, quietly: MCP servers down, the ipc bridge degraded, cards whose
+   ipc read disagrees with the process check. */
+function alertsHTML(live) {
+    const m = FEED.machine || {};
+    const list = [];
+    if (m.mcp_down) list.push({ sev: 'warn', where: 'This Mac', icon: 'plug', text: `MCP servers down: ${m.mcp_down.split(',').map(s => s.trim()).join(', ')}`,
+        tip: 'These MCP servers failed to start for every live session. Tools that need them will fail.' });
+    const rows = live.filter(s => s.ipc && s.ipc.alias);
+    if (rows.length && rows.every(s => s.ipc.state && s.ipc.state !== 'fresh'))
+        list.push({ sev: 'warn', where: 'Messaging', icon: 'mail', text: 'ipc broker unreachable, mail counts unknown', tip: 'claude-ipc did not answer for any live session.' });
+    const dis = live.filter(s => s.ipc && s.ipc.disagree).length;
+    if (dis) list.push({ sev: 'info', where: 'Messaging', icon: 'alert', text: `${dis} session${dis > 1 ? 's' : ''} where ipc and the process check disagree`,
+        tip: 'The process is running but ipc thinks it is gone or elsewhere. This page trusts the process check; the card shows which.' });
+    return list.length ? `<div class="alerts"><span class="al-lb">Health</span>${list.map(a =>
+        `<span class="al al-${a.sev}" title="${esc(a.tip)}">${ic(a.icon)}<b>${esc(a.where)}</b>${esc(a.text)}</span>`).join('')}</div>` : '';
+}
+/* The board in figures, read across: who needs you, what is running, what it
+   costs, what is running low. The three state figures filter the board. */
+function headStatsHTML(live, turn) {
+    const low = live.filter(s => s.ctx_remaining != null && s.ctx_remaining < 25).length;
+    const mailRows = live.filter(s => s.ipc && s.ipc.alias);
+    const mailBad = mailRows.some(s => (s.ipc.state && s.ipc.state !== 'fresh') || (s.ipc.state === 'fresh' && !Number.isInteger(s.ipc.inbox)));
+    const mail = mailRows.reduce((a, s) => a + (Number.isInteger(s.ipc.inbox) ? s.ipc.inbox : 0), 0);
+    const tile = (cls, icon, v, label, tip, st) =>
+        `<${st ? `button data-st="${st}"` : 'div'} class="hs ${cls}${st && stFilter === st ? ' on' : ''}" title="${esc(tip)}">` +
+        `<span class="hs-v">${ic(icon)}${esc(String(v))}</span><span class="hs-l">${esc(label)}</span></${st ? 'button' : 'div'}>`;
+    return `<div class="hstats">` +
+        tile('you', 'hand', turn, 'waiting on you', 'Sessions where Claude finished and waits for you. Click to show only these.', 'you') +
+        tile('work', 'play', live.filter(s => s.state !== 'idle').length, 'working', 'Sessions where Claude is busy. Click to show only these.', 'work') +
+        tile('ended', 'stop', FEED.recent.length, 'ended recently', 'Sessions that finished recently. Click to show only these.', 'ended') +
+        (mailRows.length ? tile('mail' + (mailBad ? ' bad' : ''), 'mail', mailBad ? '?' : mail, 'unread messages',
+            mailBad ? 'The ipc broker did not answer for every session, so the total is unknown' : 'Unread ipc messages across the live sessions') : '') +
+        (low ? tile('low', 'gauge', low, 'low on context', 'Live sessions with under 25% of their context left') : '') +
+        `</div>`;
+}
+function machineHTML() {
+    const m = FEED.machine || {};
+    return m.mcp_down ? `<div class="p-alert machine">${ic('alert')}MCP down on this Mac: ${esc(m.mcp_down)}</div>` : '';
+}
+function fmtAgeS(s) {
+    if (!Number.isInteger(s) || s < 0) return '?';
+    if (s < 90) return s + 's';
+    if (s < 5400) return Math.round(s / 60) + 'm';
+    return Math.round(s / 3600) + 'h';
+}
+/* The render of the ipc join: alias, unread when the broker answered, an
+   honest "?" when it did not — unreachable is a different fact from an empty
+   inbox. Digest-sourced extras: obligations render only under fresh, a stale
+   read dims and names its age, and a sustained liveness disagreement shows
+   both authorities instead of silently picking one. Every digest number is
+   re-checked client-side (Number.isInteger) before it lands in markup —
+   these values originate in another process's bytes. */
+function ipcChipHTML(s) {
+    if (!s.ipc || !s.ipc.alias) return '';
+    const st = s.ipc.state;
+    const stale = st === 'stale';
+    const bad = st && st !== 'fresh' && !stale;
+    const inboxN = Number.isInteger(s.ipc.inbox) ? s.ipc.inbox : null;
+    const mail = inboxN == null ? (bad || stale ? ' ✉?' : '')
+                                : (inboxN > 0 ? ` ✉${inboxN}` : '');
+    let owes = '';
+    if (st === 'fresh' && Number.isInteger(s.ipc.owes) && s.ipc.owes > 0) {
+        owes = ` · owes ${s.ipc.owes}`;
+        if (Number.isInteger(s.ipc.oldest_owed_age_s)) owes += ` · oldest ${fmtAgeS(s.ipc.oldest_owed_age_s)}`;
+        if (Number.isInteger(s.ipc.deadline_s)) owes += ` · ⏱ ${fmtAgeS(s.ipc.deadline_s)}`;
+    }
+    const dis = s.ipc.disagree
+        ? `<span class="ipcdisagree" title="hub sees this process live; ipc thinks ${esc(s.ipc.disagree.claim || 'it is elsewhere')} (held ${Number.isInteger(s.ipc.disagree.scans) ? s.ipc.disagree.scans : '?'} scans). This page trusts the process check.">${ic('alert')}</span>`
+        : '';
+    const title = `ipc: ${esc(s.ipc.alias)}`
+        + (stale ? ` · stale, as of ${fmtAgeS(s.ipc.age_s)} ago` : '')
+        + (bad ? ' · ' + esc(st) : '')
+        + (Number.isInteger(s.ipc.waiting_on) && s.ipc.waiting_on > 0 ? ` · waiting on ${s.ipc.waiting_on}` : '');
+    return `<span class="ipcchip${bad ? ' bad' : ''}${stale ? ' stale' : ''}" title="${title}">☍ ${esc(s.ipc.alias)}${mail}${owes}</span>${dis}`;
+}
+function endedPaneHTML(s, hit) {
+    return `<a class="pane ended${openable(s) ? '' : ' noopen'}"${openable(s) ? ` href="/s/${encodeURIComponent(s.session_id)}${hit && hit.seq ? `#r${hit.seq}&q=${encodeURIComponent(hit.w)}` : ''}"` : ''}${noOpenAttrs(s)} data-sid="${esc(s.session_id)}" data-peek="1">` +
+        headHTML(s, 'Ended', s.ago) +
+        `<div class="p-tail" data-tail="${esc(s.session_id)}">` + tailLinesFor(s).map(l => lineHTML(l)).join('') + `</div>` +
+        (hit ? hitHTML(hit) : '') + footHTML(s) + `</a>`;
+}
+
+/* ---------------- table density ---------------- */
+function rowHTML(s, hit) {
+    const yourTurn = s.state === 'idle', ended = s.state === 'ended';
+    const kind = ended ? 'ended' : yourTurn ? 'turn' : 'working';
+    return `<a class="trow ${kind}${openable(s) ? '' : ' noopen'}"${openable(s) ? ` href="/s/${encodeURIComponent(s.session_id || '')}${hit && hit.seq ? `#r${hit.seq}&q=${encodeURIComponent(hit.w)}` : ''}"` : ''}${noOpenAttrs(s)} data-sid="${esc(s.session_id || '')}" data-peek="1">` +
+        `<span class="st"></span>` +
+        `<span class="c-dir">${esc(s.cwd_short)}</span>` +
+        `<span class="c-model">${esc(s.model)}</span>` +
+        `<span class="c-state"><b>${esc(statusText(s))}</b>` +
+        `<span class="doing"> · ${esc(ended ? 'finished ' + (s.ago || '') : yourTurn ? (s.last_prompt || '') : (s.doing || ''))}</span></span>` +
+        (ended || s.ctx_remaining == null ? `<span class="c-ctx">·</span>` :
+            `<span class="c-ctx ${ctxCls(s.ctx_remaining)}"><span class="gauge"><i style="width:${s.ctx_remaining}%"></i></span>${s.ctx_remaining}%</span>`) +
+        `<span class="c-cost">${cfmt(s.cost_usd)}</span>` +
+        `<span class="c-turns">${s.turns}t</span>` +
+        `<span class="c-branch">${s.git_branch ? `⎇ ${esc(s.git_branch)}${s.git_modified ? ` <span class="mod">*${s.git_modified}</span>` : ''}` : ''}</span>` +
+        `<span class="c-el">${esc(ended ? s.ago : s.elapsed)}</span>` +
+        (s.mcp_down ? `<span class="mcp">${ic('alert')}MCP down: ${esc(s.mcp_down)}</span>` : '') +
+        (hit ? `<span class="t-hit">${hitHTML(hit)}</span>` : '') + `</a>`;
+}
+/* hover/cursor preview pane */
+const hpk = $('#hpk');
+let hpkSid = null;
+function showPeek(el) {
+    const sid = el.dataset.sid;
+    const s = FEED.live.find(x => x.session_id === sid) || FEED.recent.find(x => x.session_id === sid);
+    if (!s) { hidePeek(); return; }
+    const same = hpkSid === sid && hpk.classList.contains('on');
+    hpkSid = sid;
+    if (!tails[sid] && openable(s)) primeTail(sid);   // ended rows load their tail on first hover
+    const lines = tailLinesFor(s);
+    const loading = tails[sid] && tails[sid].loading && !lines.length;
+    hpk.innerHTML = `<div class="hd"><b>${esc(s.cwd_short)}</b><span>${esc(statusText(s))}</span></div>` +
+        `<div class="p-tail">${lines.map((l, i) => lineHTML(l, s.state === 'working' && i === lines.length - 1 ? ' cursorline' : '')).join('') || `<div class="p-line p-wait"><span class="tx">${loading ? 'loading recent activity…' : 'no recent activity'}</span></div>`}</div>`;
+    if (same) return;   // content refresh only — repositioning mid-hover is the jump the owner flagged
+    const r = el.getBoundingClientRect();
+    hpk.classList.add('on');
+    const w = hpk.offsetWidth, h = hpk.offsetHeight;
+    let x = Math.min(r.right - w, innerWidth - w - 12); x = Math.max(12, x);
+    let y = r.bottom + 6;
+    if (y + h > innerHeight - 10) y = r.top - h - 6;
+    hpk.style.left = x + 'px'; hpk.style.top = Math.max(50, y) + 'px';
+}
+function hidePeek() { hpk.classList.remove('on'); hpkSid = null; }
+document.addEventListener('mouseover', e => {
+    const row = e.target.closest && e.target.closest('[data-peek]');
+    if (row) showPeek(row); else if (!e.target.closest || !e.target.closest('.hpk')) hidePeek();
+});
+addEventListener('scroll', hidePeek, { passive: true });
+
+/* ---------------- query engine ---------------- */
+/* Last 10 committed queries (Enter, or opening a result while filtering)
+   persist and render as chips next to the try-examples. */
+const QHIST = 'hub-q-hist';
+function loadHist() { try { return JSON.parse(localStorage.getItem(QHIST)) || []; } catch (e) { return []; } }
+function pushHist(q) {
+    q = (q || '').trim(); if (!q) return;
+    const h = [q].concat(loadHist().filter(x => x !== q)).slice(0, 10);
+    try { localStorage.setItem(QHIST, JSON.stringify(h)); } catch (e) {}
+    renderQhint();
+}
+function renderQhint() {
+    const el = $('#qhint'); if (!el) return;
+    const hist = loadHist();
+    el.innerHTML = (hist.length ? `<span class="qh-grp"><span class="qh-lb">Recent</span>${hist.map(q => `<code>${esc(q)}</code>`).join('')}</span>` : '') +
+        `<span class="qh-grp"><span class="qh-lb" title="Type field:value to filter; plain words also search every transcript">Filter by</span>` +
+        `<code title="Model name">model:opus</code><code title="Git branch">branch:main</code><code title="Folder or path">dir:versable</code><code title="idle means waiting on you">state:idle</code></span>`;
+}
+function parseQ(q) {
+    const f = {}, free = [];
+    q.split(/\s+/).filter(Boolean).forEach(t => {
+        const m = t.match(/^(\w+):(.+)$/);
+        if (m) f[m[1].toLowerCase()] = m[2].toLowerCase(); else free.push(t.toLowerCase());
+    });
+    return { f, free };
+}
+/* Whole-transcript search: an in-memory text index per session, fetched on
+   demand — a typed free-text query is the only trigger, never boot, so phone
+   data stays cheap. First need pulls the session's full /data once; live
+   sessions revalidate incrementally (?since=) at most once per query string.
+   Not persisted: full transcripts would blow the localStorage quota. */
+const FT = {};                 // sid → { maxSeq, recs: [{seq, txt}], loading, failed, revalidatedFor }
+const FT_POOL = 4;             // concurrent transcript fetches
+let ftPending = 0;             // fetches in flight (drives the qstat note)
+function ftLine(r) {
+    const txt = r.role === 'tools'
+        ? (r.tools || []).map(t => t.name + ' ' + (t.preview || (t.input && t.input.command) || '')).join(' · ')
+        : String(r.text || '')
+            .replace(/<command-message>[\s\S]*?<\/command-message>/g, '')
+            .replace(/<\/?command-(name|args)>/g, '')
+            .replace(/\s+/g, ' ').trim();
+    return txt ? { seq: r.seq, txt } : null;
+}
+async function fetchFT(sid) {
+    const f = FT[sid] || (FT[sid] = { maxSeq: 0, recs: [] });
+    if (f.loading) return;
+    f.loading = true;
+    try {
+        const res = await fetch(`/s/${encodeURIComponent(sid)}/data${f.maxSeq ? `?since=${f.maxSeq}` : ''}`, { cache: 'no-cache' });
+        if (!res.ok) throw 0;
+        const d = await res.json();
+        for (const r of d.records || []) {
+            if (r.seq <= f.maxSeq) continue;
+            f.maxSeq = r.seq;
+            const l = ftLine(r); if (l) f.recs.push(l);
+        }
+    } finally { f.loading = false; }
+}
+function ftNote() {
+    const el = $('#qstat'); if (!el) return;
+    el.textContent = el.textContent.replace(/ · scanning transcripts…$/, '') + (ftPending ? ' · scanning transcripts…' : '');
+}
+let ftDeb;
+function scheduleFT(q, sids) {
+    clearTimeout(ftDeb);
+    ftDeb = setTimeout(async () => {
+        if (q !== curQ) return;                              // stale keystroke
+        const queue = sids.filter(sid => !(FT[sid] && FT[sid].loading));
+        if (!queue.length) return;
+        const worker = async () => {
+            for (let sid; (sid = queue.shift()); ) {
+                ftPending++; ftNote();
+                try { await fetchFT(sid); }
+                catch (e) { FT[sid].failed = true; }         // e.g. foreign-provider transcripts the hub can't resolve
+                FT[sid].revalidatedFor = q;
+                ftPending--; ftNote();
+            }
+        };
+        await Promise.all(Array.from({ length: Math.min(FT_POOL, queue.length) }, worker));
+        if (!ftPending && curQ) renderBoard(curQ);           // settled → render the final truth
+    }, 300);   // outlasts the 120ms board debounce: never fetch mid-word
+}
+function sessionAttrs(s) {
+    return { model: s.model || '', branch: s.git_branch || '', dir: (s.cwd_short || '') + ' ' + (s.cwd || ''),
+        state: s.state === 'idle' ? 'idle your-turn' : (s.state || ''), name: s.cwd_short || '', prompt: s.last_prompt || '' };
+}
+function fieldsPass(attrs, pq) {
+    for (const [k, v] of Object.entries(pq.f)) {
+        const key = ({ folder: 'dir', file: 'dir', repo: 'dir' })[k] || k;
+        if (!(attrs[key] || '').toLowerCase().includes(v)) return false;
+    }
+    return true;
+}
+function matchSession(s, pq) {
+    const attrs = sessionAttrs(s);
+    if (!fieldsPass(attrs, pq)) return null;
+    const all = Object.values(attrs).join(' ').toLowerCase();
+    let hit = null;
+    for (const w of pq.free) {
+        if (all.includes(w)) continue;
+        // Free text: the streamed tail lines answer from memory first…
+        const t = (tails[s.session_id] || {}).src || [];
+        const m = t.find(l => String(l.tx).toLowerCase().includes(w));
+        if (m) { hit = hit || { txt: String(m.tx).replace(/<[^>]+>/g, ''), w, seq: m.seq }; continue; }
+        // …then the whole-transcript index (fetched on demand by scheduleFT).
+        const f = FT[s.session_id];
+        const fm = f && f.recs.find(x => x.txt.toLowerCase().includes(w));
+        if (!fm) return null;
+        hit = hit || { txt: fm.txt, w, seq: fm.seq };
+    }
+    return { hit };
+}
+function hitHTML(hit) {
+    const i = hit.txt.toLowerCase().indexOf(hit.w);
+    const s0 = Math.max(0, i - 28);
+    return `<div class="p-hit" title="first transcript match">in transcript: …${esc(hit.txt.slice(s0, i))}` +
+        `<mark>${esc(hit.txt.slice(i, i + hit.w.length))}</mark>${esc(hit.txt.slice(i + hit.w.length, i + 76))}…</div>`;
+}
+
+/* ---------------- sort ---------------- */
+function sortGroup(arr) {
+    const a = arr.slice();
+    if (sortBy === 'cost') a.sort((x, y) => (y.s.cost_usd || 0) - (x.s.cost_usd || 0));
+    else if (sortBy === 'ctx') a.sort((x, y) => (x.s.ctx_remaining ?? 101) - (y.s.ctx_remaining ?? 101));
+    else if (sortBy === 'recency') a.sort((x, y) => (x.s._ageMin ?? 9e9) - (y.s._ageMin ?? 9e9));   // real ages from the adapter, not display strings
+    return a; // urgency = feed order within state groups
+}
+
+/* ---------------- render ---------------- */
+function render() {
+    const live = FEED.live;
+    const turn = live.filter(s => s.state === 'idle' && !s.parked).length;
+    const parked = live.filter(s => s.parked).length;
+    const hostEl = document.querySelector('.tb-host'); if (hostEl) hostEl.textContent = FEED.host || '';
+    const wasFocused = document.activeElement && document.activeElement.id === 'fq';
+    $('#nAll').textContent = live.length + FEED.recent.length;
+    $('#nYou').textContent = turn;
+    $('#nWork').textContent = live.length - turn - parked;
+    $('#nEnded').textContent = FEED.recent.length;
+    const priced = live.filter(s => s.cost_usd != null);
+    const spend = priced.reduce((a, s) => a + s.cost_usd, 0);
+    const sp = $('#tbSpend');
+    sp.hidden = !priced.length;
+    sp.innerHTML = `${ic('coin')}$${spend.toFixed(2)}`;
+    sp.dataset.tip = `What the ${priced.length} live session${priced.length === 1 ? '' : 's'} have cost so far\n` +
+        priced.slice().sort((a, b) => b.cost_usd - a.cost_usd).slice(0, 6).map(s => `${cfmt(s.cost_usd)}  ${s.cwd_short}`).join('\n');
+    $('#main').innerHTML =
+        `<div class="mh-row"><h1>Sessions</h1><span class="mh-sub" id="mhSub">${esc(ST_LABEL[stFilter] || '')}</span></div>` +
+        headStatsHTML(live, turn) +
+        alertsHTML(live) +
+        ((VDIR && !VDIR.query) ? '' :
+        `<div class="qbar">${ic('search')}<input id="fq" placeholder="Search sessions and transcripts" autocomplete="off" spellcheck="false"><span class="qstat" id="qstat"></span></div>` +
+        `<div class="qhint" id="qhint"></div>`) +
+        `<div id="board"></div>`;
+    const _fq = $('#fq');
+    if (_fq) {
+        let qDeb;   // debounced: a keystroke must not rebuild the board synchronously at fleet scale
+        _fq.addEventListener('input', e => { curQ = e.target.value.trim(); clearTimeout(qDeb); qDeb = setTimeout(() => renderBoard(curQ), 120); });
+        _fq.addEventListener('keydown', e => { if (e.key === 'Enter') pushHist(curQ); });
+        $('#qhint').addEventListener('click', e => {
+            const c = e.target.closest('code'); if (!c) return;
+            _fq.value = c.textContent; _fq.dispatchEvent(new Event('input')); _fq.focus();
+        });
+        renderQhint();
+        _fq.value = curQ;
+        if (wasFocused) _fq.focus();   // a background poll re-render must not steal the query field
+    }
+    renderBoard(curQ);
+}
+function renderBoard(q) {
+    const keepSid = hpkSid;   // a background re-render must not yank an open preview from under the cursor
+    cursor = -1; hidePeek();
+    const pq = parseQ(q);
+    const lm = FEED.live.map(s => ({ s, m: matchSession(s, pq) })).filter(x => x.m);
+    const rm = FEED.recent.map(s => ({ s, m: matchSession(s, pq) })).filter(x => x.m);
+    const need = sortGroup(lm.filter(x => x.s.state === 'idle' && !x.s.parked));
+    const work = sortGroup(lm.filter(x => x.s.state !== 'idle'));
+    const idle = sortGroup(lm.filter(x => x.s.parked));
+    const ended = sortGroup(rm);
+    /* free words the sync pass couldn't answer → scan whole transcripts, on demand */
+    let scanning = ftPending > 0;
+    if (pq.free.length) {
+        const matched = new Set(lm.concat(rm).map(x => x.s.session_id));
+        const liveIds = new Set(FEED.live.map(s => s.session_id));
+        const cand = FEED.live.concat(FEED.recent)
+            .filter(openable)   // the hub can't read a codex transcript to search it
+            .filter(s => s.session_id && !matched.has(s.session_id) && fieldsPass(sessionAttrs(s), pq))
+            .filter(s => { const f = FT[s.session_id];
+                return !f || (!f.failed && liveIds.has(s.session_id) && f.revalidatedFor !== q); })
+            .map(s => s.session_id);
+        if (cand.length) { scanning = true; scheduleFT(q, cand); }
+    }
+    const _qs = $('#qstat'); if (_qs) _qs.textContent = (q ? `${lm.length + rm.length}/${FEED.live.length + FEED.recent.length} match` : `${FEED.live.length} live · ${FEED.recent.length} recent`) + (scanning ? ' · scanning transcripts…' : '');
+    const D = VDIR || DIRECTIONS.fleet;
+    const tbl = (D.layout === 'auto' ? density : D.layout) === 'table';
+    const group = (cls, label, items, fn) => items.length ?
+        `<div class="sec ${cls}">${label} <span class="n">${items.length}</span></div>` +
+        (tbl ? `<div class="tbl">${items.map(x => rowHTML(x.s, x.m.hit)).join('')}</div>`
+             : `<div class="grid">${items.map(x => fn(x.s, x.m.hit)).join('')}</div>`) : '';
+    let boardHTML;
+    if (D.grouped) {
+        const on = st => stFilter === 'all' || stFilter === st;
+        boardHTML = (on('you') ? group('you', 'Needs you', need, paneHTML) : '') +
+            (on('work') ? group('cl', 'Working', work, paneHTML) : '') +
+            (on('all') ? group('', 'Idle', idle, paneHTML) : '') +
+            (on('ended') ? group('', 'Ended', ended, endedPaneHTML) : '');
+    } else {
+        const liveAll = need.concat(work, idle);
+        if (tbl) {
+            boardHTML = (liveAll.length || ended.length)
+                ? `<div class="tbl">${liveAll.map(x => rowHTML(x.s, x.m.hit)).join('')}${ended.map(x => rowHTML(x.s, x.m.hit)).join('')}</div>` : '';
+        } else {
+            boardHTML = (liveAll.length ? `<div class="grid">${liveAll.map(x => paneHTML(x.s, x.m.hit)).join('')}</div>` : '') +
+                (ended.length ? `<div class="sec">Ended <span class="n">${ended.length}</span></div><div class="grid">${ended.map(x => endedPaneHTML(x.s, x.m.hit)).join('')}</div>` : '');
+        }
+    }
+    $('#board').innerHTML =
+        boardHTML +
+        (!lm.length && !rm.length ? `<div class="emptycard" style="margin:8vh auto">` +
+            (scanning ? `<h2>Searching transcripts…</h2><p>Nothing in session details matched "${esc(q)}". Searching full transcripts now.</p>`
+                      : `<h2>No matches</h2><p>Nothing in session attributes or transcripts matched "${esc(q)}".</p>`) + `</div>` : '') +
+        `<div class="endcap">${q ? 'querying attributes + full transcripts' : "that's every session"}</div>` +
+        `<div class="hint"><span class="kbd">↑</span><span class="kbd">↓</span> select · <span class="kbd">↵</span> open · <span class="kbd">d</span> density · <span class="kbd">/</span> query</div>`;
+    if (keepSid) {
+        const el = document.querySelector(`[data-peek][data-sid="${keepSid}"]`);
+        if (el) showPeek(el);
+    }
+}
+/* keyboard selection over rendered items (both densities) */
+document.addEventListener('keydown', e => {
+    if (e.target.matches('input,select,textarea')) {
+        if (e.key === 'Escape') e.target.blur();
+        return;
+    }
+    if (e.key === '/') { e.preventDefault(); const fq = $('#fq'); fq && fq.focus(); return; }
+    if (e.key === 'd') { setDensity(density === 'peeks' ? 'table' : 'peeks'); return; }
+    if (e.key === 't') { $('#themeBtn').click(); return; }
+    const items = [...document.querySelectorAll('#board .pane, #board .trow')];
+    if (!items.length) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        cursor = cursor < 0 ? 0 : Math.min(items.length - 1, Math.max(0, cursor + (e.key === 'ArrowDown' ? 1 : -1)));
+        items.forEach((el, i) => el.classList.toggle('cur', i === cursor));
+        const el = items[cursor], r = el.getBoundingClientRect();
+        if (r.bottom > innerHeight - 24 || r.top < 90) scrollTo({ top: el.offsetTop - 140, behavior: 'smooth' });
+        if (el.dataset.peek) showPeek(el); else hidePeek();
+    } else if (e.key === 'Enter' && cursor >= 0) items[cursor].click();
+});
+
+/* ── polling — the feed every 5s (board re-renders only on real change),
+      per-session tails every 5s (in-place DOM patches, never a board rebuild),
+      both paused while the tab is hidden ── */
+let mode = 'loading';
+let booted = false, lastHash = '';
+function feedHash() {
+    return JSON.stringify(FEED.live.map(s => [s.session_id, s.state, s.doing, s.ctx_remaining, s.cost_usd, s.turns, s.output_tokens, s.git_branch, s.git_modified, s.mcp_down, s.elapsed, s.status, s.status_since, s.last_activity, s.cwd_short]))
+        + '|' + JSON.stringify(FEED.recent.map(s => [s.session_id, s.ago]))
+        + '|' + JSON.stringify(FEED.machine || {});   // the machine banner re-renders too
+}
+let refreshRepoll = 0;
+function setRefreshCue(on) {
+    $('#chipRefresh').style.display = on ? '' : 'none';
+    // A stale serve means fresh data is about one scan away. One quick re-poll
+    // clears the cue and the stale numbers in ~1.5s instead of a full interval.
+    if (on && !refreshRepoll) refreshRepoll = setTimeout(() => { refreshRepoll = 0; pollFeed(); }, 1500);
+}
+async function pollFeed() {
+    if (document.hidden && booted) return;
+    try {
+        const r = await fetch('/api/sessions', { cache: 'no-store' });
+        if (!r.ok) throw new Error(r.status);
+        const text = await r.text();
+        const d = JSON.parse(text);
+        try { sessionStorage.setItem('hub-feed', text); } catch (e) {}
+        setRefreshCue(!!d.refreshing);
+        adaptFeed(d);
+        if (!booted) {
+            pruneTailCache();
+            // Prime every tail BEFORE first paint (time-capped): panes filling
+            // in after render is the layout jump the owner flagged. With the
+            // SWR cache this wait is ~one revalidate round-trip on reopens.
+            const all = FEED.live.concat(FEED.recent).filter(openable).map(s => primeTail(s.session_id));
+            await Promise.race([Promise.allSettled(all), new Promise(r2 => setTimeout(r2, 1800))]);
+            booted = true; lastHash = feedHash();
+            setMode(FEED.live.length || FEED.recent.length ? 'normal' : 'empty');
+            return;
+        }
+        for (const s of FEED.live.concat(FEED.recent).filter(openable)) primeTail(s.session_id);   // no-op once primed
+        const h = feedHash();
+        if (mode === 'empty' && (FEED.live.length || FEED.recent.length)) { lastHash = h; setMode('normal'); }
+        else if (mode === 'normal' && h !== lastHash) { lastHash = h; render(); }
+    } catch (e) { if (!booted) setMode('error'); }   // once booted: keep the last good board
+}
+async function pollTails() {
+    if (document.hidden || !booted) return;
+    for (const s of FEED.live) {
+        const sid = s.session_id, t = tails[sid];
+        if (!sid || !t || t.loading) continue;
+        try {
+            const d = await (await fetch(`/s/${encodeURIComponent(sid)}/data?since=${t.lastSeq}`, { cache: 'no-cache' })).json();
+            if (d.records && d.records.length) { ingestTail(sid, d.records); saveTailCache(sid); refreshTailDOM(sid); }
+        } catch (e) {}
+    }
+}
+setInterval(pollFeed, 5000);
+setInterval(pollTails, 5000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { pollFeed(); pollTails(); } });
+
+function setMode(m) {
+    mode = m;
+    const main = $('#main');
+    if (m === 'normal') return render();
+    if (m === 'loading') main.innerHTML =
+        `<div class="sk" style="height:24px;width:38%"></div>` +
+        `<div class="grid" style="margin-top:18px"><div class="sk" style="height:220px"></div>` +
+        `<div class="sk" style="height:220px"></div><div class="sk" style="height:220px"></div></div>`;
+    if (m === 'empty') main.innerHTML =
+        `<div class="emptycard"><div class="pane-ghost">❯ waiting for sessions…</div><h2>No sessions running</h2>` +
+        `<p>Each live Claude Code session shows up here, as a card or a table row.</p></div>`;
+    if (m === 'error') main.innerHTML =
+        `<div class="errbanner">${ic('alert')}<div class="t"><b>Can't reach the session server</b>` +
+        `<span>Could not reach /api/sessions. The last good board stays up while it retries.</span></div>` +
+        `<button onclick="setMode('loading');pollFeed()">Retry</button></div>`;
+}
+/* ================= handoff view controls (theme · palette · direction · text size) */
+const DIRECTIONS = {
+    fleet:  { grouped: true,  layout: 'auto',  query: true,  sort: true,  hint: 'Sessions grouped by state (needs you, working, ended), with search, live previews and sort.' },
+    v5grid: { grouped: false, layout: 'grid',  query: true,  sort: false, hint: 'Every session as a card in one grid, with search. No grouping.' },
+    base:   { grouped: false, layout: 'table', query: false, sort: false, hint: 'One dense table. Hover a row to preview it. No search or grouping.' },
+};
+let VDIR = null;
+const save = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+const load = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } };
+function seg(sel, val, attr) {
+    document.querySelectorAll(sel + ' button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset[attr] === val)));
+}
+function applyDir(name) {
+    const d = DIRECTIONS[name] || DIRECTIONS.fleet; VDIR = d;
+    document.documentElement.dataset.dir = name;
+    const ss = $('#sortSel'); if (ss) ss.style.display = d.sort ? '' : 'none';
+    const db = $('#densSeg'); if (db) db.style.display = d.layout === 'auto' ? '' : 'none';
+    seg('#vpDir', name, 'dir');
+    const hint = $('#vpDirHint'); if (hint) hint.textContent = d.hint;
+    save('hx-idir', name);
+    if (mode === 'normal') render();
+}
+const applyPalette = HubShared.applyPalette;
+/* the board scales as a whole (it is a dashboard, not prose); 14.5 is 100% on both pages */
+function applyTextSize(px) {
+    document.documentElement.style.setProperty('--zoom', (px / HubShared.FS_DEFAULT).toFixed(3));
+    const v = $('#vpFsVal'); if (v) v.textContent = Math.round(px / HubShared.FS_DEFAULT * 100) + '%';
+    const r = $('#vpFs'); if (r) r.value = px;
+    save('hx-fs', px);
+}
+/* view panel wiring */
+/* View Transitions: soft crossfade on user-initiated look changes only —
+   never on the 5s polls. No-op where unsupported or with reduced motion. */
+const vt = fn => (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches)
+    ? document.startViewTransition(fn) : fn();
+/* opening a result while filtering = a query that worked; remember it */
+document.addEventListener('click', e => { if (curQ && e.target.closest('#board a')) pushHist(curQ); });
+$('#viewBtn').onclick = () => { const p = $('#viewPanel'); const o = p.classList.toggle('open'); $('#viewBtn').setAttribute('aria-pressed', String(o)); };
+document.addEventListener('click', e => {
+    if (!e.target.closest('#viewPanel') && !e.target.closest('#viewBtn')) { $('#viewPanel').classList.remove('open'); $('#viewBtn').setAttribute('aria-pressed', 'false'); }
+});
+$('#vpDir').onclick = e => { const b = e.target.closest('button'); if (b) vt(() => applyDir(b.dataset.dir)); };
+$('#vpSkin').onclick = e => { const b = e.target.closest('button'); if (b) vt(() => applyPalette(b.dataset.skin)); };
+$('#vpTheme').onclick = e => { const b = e.target.closest('button'); if (b) vt(() => chooseTheme(b.dataset.theme)); };
+$('#vpFs').oninput = e => applyTextSize(+e.target.value);
+
+window.setMode = setMode;
+densLabel();
+applyDir('fleet');   // the state tabs and the cards/table pair replaced the old directions
+HubShared.paletteButtons($('#vpSkin'));
+applyPalette(HubShared.savedPalette());
+applyTextSize(HubShared.savedSize());
+/* Coming back from a transcript: paint the last feed this tab saw at once, so
+   the first frame already holds the card the transcript's title returns to. */
+(function paintFromLastFeed() {
+    let d = null;
+    try { d = JSON.parse(sessionStorage.getItem('hub-feed') || 'null'); } catch (e) {}
+    if (!d) { setMode('loading'); return; }
+    adaptFeed(d);
+    for (const s of FEED.live.concat(FEED.recent).filter(openable)) {
+        const c = loadTailCache(s.session_id);
+        if (c) tails[s.session_id] = { src: c.src, lastSeq: c.lastSeq, loading: false, cachedOnly: true };
+    }
+    setMode(FEED.live.length || FEED.recent.length ? 'normal' : 'loading');
+})();
+/* Carry the transcript's title back into its card, then let the name go so
+   the next card opened can take it. */
+function nameReturnCard() {
+    let sid = null;
+    try { sid = sessionStorage.getItem('hub-back'); sessionStorage.removeItem('hub-back'); } catch (e) {}
+    if (!sid) return;
+    const t = document.querySelector(`#board [data-sid="${CSS.escape(sid)}"] .p-title, #board [data-sid="${CSS.escape(sid)}"] .c-dir`);
+    if (!t) return;
+    t.style.viewTransitionName = 'sess-title';
+    setTimeout(() => { t.style.viewTransitionName = ''; }, 900);
+}
+nameReturnCard();
+pollFeed();
+</script>
+</body>
+</html>

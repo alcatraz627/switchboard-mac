@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dropdown variants</title>
+<style>
+/*
+ * colors.css — a drop-in colour system for a generated HTML page.
+ *
+ * Copy this into a <style> block (or link it) and the page has a full palette,
+ * a dark and a light mode, and the five variables the dark/light toggle in
+ * conventions/html-output.md expects. Dark is the default, per that rule.
+ *
+ * HOW IT IS PUT TOGETHER — two layers, and the split is the whole point:
+ *
+ *   Layer 0   the ramps. Raw colour, every family 50 -> 950. Nothing outside
+ *             this file's Layer 1 should ever name a ramp step directly.
+ *   Layer 1   the slots. --bg, --text, --brand, --ok-soft and friends. This is
+ *             what your markup uses. Both modes set the same slot names to
+ *             different ramp steps, which is why the toggle is one class flip
+ *             and not a second stylesheet.
+ *
+ * TO REBRAND: change the hue numbers in Layer 0 and stop. Every slot, both
+ * modes, and every element follow, because nothing downstream hardcodes a
+ * colour. That is the property worth protecting — the moment a page writes
+ * `color: #4a9` somewhere, dark mode has a hole in it.
+ *
+ * The hues here are deliberate placeholders (brand 250, accent 190), not any
+ * real product's identity. Swap them.
+ *
+ * Ramps are OKLCH: oklch(lightness chroma hue). Lightness falls evenly down the
+ * ramp; chroma peaks around 500 and eases off both ends, which is what keeps a
+ * 50 from looking muddy and a 950 from looking neon.
+ */
+
+/* ── Layer 0 — ramps (never name these in your markup) ─────────────────── */
+:root {
+  /* neutral — chrome, text, borders, surfaces */
+  --p-neutral-50: oklch(0.985 0.002 255);
+  --p-neutral-100: oklch(0.96 0.004 255);
+  --p-neutral-200: oklch(0.92 0.006 255);
+  --p-neutral-300: oklch(0.86 0.01 255);
+  --p-neutral-400: oklch(0.7 0.018 255);
+  --p-neutral-500: oklch(0.55 0.025 255);
+  --p-neutral-600: oklch(0.45 0.028 255);
+  --p-neutral-700: oklch(0.37 0.03 255);
+  --p-neutral-800: oklch(0.29 0.028 255);
+  --p-neutral-900: oklch(0.22 0.022 255);
+  --p-neutral-950: oklch(0.15 0.016 255);
+
+  /* brand — the one colour a reader should associate with the page */
+  --p-brand-50: oklch(0.97 0.02 250);
+  --p-brand-100: oklch(0.94 0.04 250);
+  --p-brand-200: oklch(0.88 0.07 250);
+  --p-brand-300: oklch(0.81 0.1 250);
+  --p-brand-400: oklch(0.72 0.13 250);
+  --p-brand-500: oklch(0.63 0.15 250);
+  --p-brand-600: oklch(0.55 0.145 250);
+  --p-brand-700: oklch(0.47 0.125 251);
+  --p-brand-800: oklch(0.4 0.1 251);
+  --p-brand-900: oklch(0.33 0.078 252);
+  --p-brand-950: oklch(0.25 0.05 252);
+
+  /* accent — a second voice, for highlights the brand shouldn't claim */
+  --p-accent-50: oklch(0.97 0.02 190);
+  --p-accent-100: oklch(0.94 0.042 190);
+  --p-accent-200: oklch(0.89 0.068 190);
+  --p-accent-300: oklch(0.83 0.092 190);
+  --p-accent-400: oklch(0.75 0.108 190);
+  --p-accent-500: oklch(0.66 0.115 191);
+  --p-accent-600: oklch(0.57 0.108 192);
+  --p-accent-700: oklch(0.48 0.092 193);
+  --p-accent-800: oklch(0.4 0.076 193);
+  --p-accent-900: oklch(0.33 0.058 194);
+  --p-accent-950: oklch(0.25 0.04 194);
+
+  /* success */
+  --p-success-50: oklch(0.97 0.02 150);
+  --p-success-100: oklch(0.94 0.045 150);
+  --p-success-200: oklch(0.88 0.072 150);
+  --p-success-300: oklch(0.81 0.1 150);
+  --p-success-400: oklch(0.72 0.118 150);
+  --p-success-500: oklch(0.63 0.13 150);
+  --p-success-600: oklch(0.55 0.12 150);
+  --p-success-700: oklch(0.47 0.104 150);
+  --p-success-800: oklch(0.4 0.086 150);
+  --p-success-900: oklch(0.33 0.068 150);
+  --p-success-950: oklch(0.25 0.045 150);
+
+  /* warning */
+  --p-warning-50: oklch(0.98 0.025 85);
+  --p-warning-100: oklch(0.95 0.055 85);
+  --p-warning-200: oklch(0.91 0.09 83);
+  --p-warning-300: oklch(0.86 0.125 81);
+  --p-warning-400: oklch(0.81 0.148 78);
+  --p-warning-500: oklch(0.76 0.155 75);
+  --p-warning-600: oklch(0.67 0.142 70);
+  --p-warning-700: oklch(0.58 0.125 65);
+  --p-warning-800: oklch(0.49 0.105 60);
+  --p-warning-900: oklch(0.41 0.085 55);
+  --p-warning-950: oklch(0.32 0.06 50);
+
+  /* danger */
+  --p-danger-50: oklch(0.97 0.018 25);
+  --p-danger-100: oklch(0.93 0.04 25);
+  --p-danger-200: oklch(0.87 0.08 25);
+  --p-danger-300: oklch(0.8 0.12 25);
+  --p-danger-400: oklch(0.73 0.165 26);
+  --p-danger-500: oklch(0.65 0.2 27);
+  --p-danger-600: oklch(0.58 0.195 27);
+  --p-danger-700: oklch(0.5 0.175 27);
+  --p-danger-800: oklch(0.43 0.15 27);
+  --p-danger-900: oklch(0.36 0.12 27);
+  --p-danger-950: oklch(0.28 0.085 27);
+
+  /* info */
+  --p-info-50: oklch(0.97 0.018 230);
+  --p-info-100: oklch(0.94 0.04 230);
+  --p-info-200: oklch(0.88 0.065 230);
+  --p-info-300: oklch(0.81 0.09 230);
+  --p-info-400: oklch(0.72 0.11 230);
+  --p-info-500: oklch(0.63 0.125 230);
+  --p-info-600: oklch(0.55 0.115 230);
+  --p-info-700: oklch(0.47 0.1 230);
+  --p-info-800: oklch(0.4 0.082 230);
+  --p-info-900: oklch(0.33 0.065 230);
+  --p-info-950: oklch(0.25 0.045 230);
+}
+
+/* ── Layer 1 — slots, dark (the default) ───────────────────────────────── */
+:root {
+  /* The five the toggle in html-output.md depends on. Keep these names. */
+  --bg: var(--p-neutral-950);
+  --surface: var(--p-neutral-900);
+  --text: var(--p-neutral-100);
+  --dim: var(--p-neutral-400);
+  --border: var(--p-neutral-800);
+
+  /* Room to build with: a raised surface for cards on cards, and two quieter
+     text tiers, so hierarchy comes from the palette instead of from opacity. */
+  --surface-2: var(--p-neutral-800);
+  --text-2: var(--p-neutral-300);
+  --text-3: var(--p-neutral-500);
+
+  --brand: var(--p-brand-400);
+  --brand-content: var(--p-neutral-950);
+  --brand-hover: var(--p-brand-300);
+  --accent: var(--p-accent-400);
+  --accent-content: var(--p-neutral-950);
+
+  /* Status comes in pairs: -soft backs a pill or a row tint, -line is the ink
+     or rule that sits on it. Using them together is what keeps a status
+     readable in both modes without a per-mode override at the callsite. */
+  --ok-soft: oklch(0.28 0.05 150);
+  --ok-line: var(--p-success-300);
+  --warn-soft: oklch(0.3 0.06 75);
+  --warn-line: var(--p-warning-300);
+  --err-soft: oklch(0.29 0.06 27);
+  --err-line: var(--p-danger-300);
+  --info-soft: oklch(0.28 0.05 230);
+  --info-line: var(--p-info-300);
+
+  --shadow-sm: 0 2px 5px -1px oklch(0 0 0 / 0.45), 0 1px 2px -1px oklch(0 0 0 / 0.4);
+  --shadow-md: 0 8px 18px -4px oklch(0 0 0 / 0.55), 0 3px 6px -3px oklch(0 0 0 / 0.4);
+  --shadow-lg: 0 22px 44px -10px oklch(0 0 0 / 0.65), 0 8px 16px -8px oklch(0 0 0 / 0.45);
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 1rem;
+
+  color-scheme: dark;
+}
+
+/* ── Layer 1 — slots, light ────────────────────────────────────────────── */
+/* `body.light` is the toggle's contract (html-output.md). The [data-theme]
+   selector is here too so this file also works on pages that theme from the
+   root element; drop whichever one your page doesn't use. */
+body.light,
+:root[data-theme="light"] {
+  --bg: var(--p-neutral-50);
+  --surface: oklch(1 0 0);
+  --text: var(--p-neutral-900);
+  --dim: var(--p-neutral-500);
+  --border: var(--p-neutral-200);
+
+  --surface-2: var(--p-neutral-100);
+  --text-2: var(--p-neutral-700);
+  --text-3: var(--p-neutral-500);
+
+  /* A step deeper than dark's brand: filled controls read light text here, and
+     the airy 400 that works on a near-black page cannot hold white. */
+  --brand: var(--p-brand-600);
+  --brand-content: oklch(1 0 0);
+  --brand-hover: var(--p-brand-700);
+  --accent: var(--p-accent-600);
+  --accent-content: oklch(1 0 0);
+
+  --ok-soft: var(--p-success-100);
+  --ok-line: var(--p-success-700);
+  /* 900, not 700: the mid warning ink drops under 4.5:1 on its own soft tint at
+     pill sizes. Warning is the one family where the obvious pairing fails. */
+  --warn-soft: var(--p-warning-100);
+  --warn-line: var(--p-warning-900);
+  --err-soft: var(--p-danger-100);
+  --err-line: var(--p-danger-700);
+  --info-soft: var(--p-info-100);
+  --info-line: var(--p-info-700);
+
+  --shadow-sm: 0 2px 4px -1px oklch(0.3 0.02 255 / 0.12), 0 1px 2px -1px oklch(0.3 0.02 255 / 0.1);
+  --shadow-md: 0 6px 14px -3px oklch(0.3 0.02 255 / 0.18), 0 3px 6px -3px oklch(0.3 0.02 255 / 0.12);
+  --shadow-lg: 0 18px 36px -8px oklch(0.3 0.02 255 / 0.26), 0 6px 12px -6px oklch(0.3 0.02 255 / 0.14);
+
+  color-scheme: light;
+}
+
+/* A floor to build on, so a page that just includes this file already reads
+   correctly in both modes instead of inheriting the browser's white. */
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* The shared look for every HTML page an agent builds: reports, previews, decision
+   pages, shared Artifacts. Colours come from conventions/html-assets/colors.css, which
+   pagekit.py inlines above this file. Nothing here names a colour directly, so a theme
+   change is one edit in colors.css. Guide: conventions/pages.md */
+
+:root {
+  --kit-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --kit-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --kit-width: 1100px;
+  --kit-measure: 74ch;
+}
+* { box-sizing: border-box; }
+html { scroll-padding-top: 96px; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 var(--kit-sans); }
+
+/* The bar stays on top. Table headers stop just under it. */
+.kit-bar { position: sticky; top: 0; z-index: 5; background: var(--surface); border-bottom: 1px solid var(--border); }
+.kit-bar-inner { max-width: var(--kit-width); margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.kit-title { font: 600 17px/1.2 var(--kit-sans); margin: 0; margin-right: auto; }
+.kit-theme { font: 500 12.5px var(--kit-sans); color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; cursor: pointer; }
+.kit-theme:focus-visible, .kit-tab:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.kit-tabs { display: flex; flex-wrap: wrap; gap: 5px; max-width: var(--kit-width); margin: 0 auto; padding: 0 16px 10px; }
+.kit-tab { font: 500 12.5px var(--kit-sans); color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; cursor: pointer; }
+.kit-tab[aria-selected="true"] { color: var(--brand-content); background: var(--brand); border-color: var(--brand); }
+
+.kit-page { max-width: var(--kit-width); margin: 0 auto; padding: 28px 16px 80px; }
+.kit-page h1 { font: 600 30px/1.15 var(--kit-sans); margin: 0 0 14px; text-wrap: balance; }
+.kit-page h2 { font: 600 20px/1.25 var(--kit-sans); margin: 40px 0 12px; text-wrap: balance; }
+.kit-page h3 { font: 600 16px/1.3 var(--kit-sans); margin: 28px 0 8px; }
+.kit-page h4 { font: 600 14px/1.3 var(--kit-sans); margin: 20px 0 6px; }
+.kit-page p, .kit-page li { max-width: var(--kit-measure); }
+.kit-page p { margin: 0 0 12px; }
+.kit-page ul, .kit-page ol { padding-left: 22px; margin: 0 0 14px; }
+.kit-page li { margin: 5px 0; }
+.kit-page a { color: var(--brand); }
+.kit-page code { font: 13px var(--kit-mono); background: var(--surface-2); padding: 1px 5px; border-radius: var(--radius-sm); }
+.kit-page pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px; overflow-x: auto; font: 13px/1.45 var(--kit-mono); }
+.kit-page pre code { background: none; padding: 0; }
+.kit-dim { color: var(--dim); }
+
+/* Tables. pagekit.size_columns sets each column's width from what it holds. */
+.kit-table-wrap { overflow-x: auto; }
+.kit-page table { border-collapse: collapse; width: 100%; margin: 14px 0 20px; font-size: 14px; table-layout: fixed; }
+.kit-page table.kit-wide { min-width: 1400px; }
+.kit-page th, .kit-page td { overflow-wrap: anywhere; vertical-align: top; text-align: left; }
+.kit-page thead { position: relative; z-index: 2; }
+.kit-page thead th { font: 600 11px var(--kit-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); padding: 8px 10px; border-bottom: 2px solid var(--border); background: var(--bg); }
+.kit-page thead.kit-stuck th { background: var(--surface); box-shadow: 0 1px 0 var(--border), var(--shadow-sm); }
+.kit-page td { padding: 9px 10px; border-bottom: 1px solid var(--border); }
+.kit-page td:first-child { font-weight: 500; }
+.kit-page tr:hover td { background: var(--surface-2); }
+.kit-page td p { margin: 0 0 4px; max-width: none; }
+.kit-page td ul { margin: 0; padding-left: 16px; }
+.kit-page td li { margin: 2px 0; max-width: none; }
+
+/* Labelled lists that sit side by side, for things a reader compares. */
+.kit-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 22px; align-items: start; }
+.kit-col { background: var(--surface); border: 1px solid var(--border); border-top: 3px solid var(--border); border-radius: var(--radius-md); padding: 10px 14px 8px; }
+.kit-col.kit-good { border-top-color: var(--ok-line); }
+.kit-col.kit-warn { border-top-color: var(--warn-line); }
+.kit-col.kit-bad { border-top-color: var(--err-line); }
+.kit-col > h4 { font: 600 11px var(--kit-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); margin: 0 0 6px; }
+.kit-col ul { margin: 0; padding-left: 18px; }
+.kit-col li { max-width: none; font-size: 14px; margin: 4px 0; }
+
+/* A card of key and value pairs, for what a page is and who it is for. */
+.kit-card { display: grid; grid-template-columns: 120px 1fr; gap: 6px 16px; padding: 14px 18px; margin: 0 0 24px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--brand); border-radius: var(--radius-md); font-size: 14px; }
+.kit-card > .k { font: 600 11px var(--kit-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); padding-top: 3px; }
+
+/* The one sentence a reader must not miss. */
+.kit-key { margin: 16px 0; padding: 12px 18px; border-left: 3px solid var(--brand); background: var(--surface-2); border-radius: 0 var(--radius-md) var(--radius-md) 0; }
+.kit-key p { margin: 0; max-width: none; }
+
+/* Status notes. Use the word as well as the colour. */
+.kit-note { margin: 14px 0; padding: 10px 14px; border: 1px solid var(--border); border-left-width: 3px; border-radius: var(--radius-md); background: var(--surface); }
+.kit-note.kit-good { border-left-color: var(--ok-line); background: var(--ok-soft); }
+.kit-note.kit-warn { border-left-color: var(--warn-line); background: var(--warn-soft); }
+.kit-note.kit-bad { border-left-color: var(--err-line); background: var(--err-soft); }
+.kit-note.kit-info { border-left-color: var(--info-line); background: var(--info-soft); }
+.kit-note p { margin: 0; max-width: none; }
+
+.kit-chip { display: inline-block; font: 500 11.5px var(--kit-mono); padding: 0 6px; border-radius: var(--radius-sm); line-height: 18px; background: var(--surface-2); border: 1px solid var(--border); }
+
+[hidden] { display: none !important; }
+@media (max-width: 640px) { .kit-page h1 { font-size: 24px; } .kit-card { grid-template-columns: 1fr; } }
+@media print { .kit-bar, .kit-theme { display: none; } body { background: #fff; color: #000; } }
+
+.vgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 28px 24px; margin: 16px 0 28px; align-items: start; }
+@media (max-width: 480px) { .vgrid { grid-template-columns: 1fr; } }
+.vcard { min-width: 0; }
+.vhead { display: flex; gap: 10px; align-items: center; font-weight: 600; margin-bottom: 10px; }
+.vl { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: var(--radius-sm); background: var(--brand); color: var(--brand-content); font-weight: 700; flex: none; }
+.stage { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px 12px; display: flex; justify-content: center; }
+.pc { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; font-size: 13.5px; }
+.pc h5 { margin: 0 0 2px; font: 600 11px var(--kit-sans); letter-spacing: .06em; text-transform: uppercase; }
+.pro h5 { color: var(--ok-line); }
+.con h5 { color: var(--err-line); }
+.pc ul { margin: 0; padding-left: 16px; }
+.pc li { margin: 2px 0; max-width: none; }
+
+.menu { width: 360px; max-width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 6px; font-size: 13px; color: var(--text); line-height: 1.3; }
+.menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 6px; }
+.dim { color: var(--dim); }
+.warn-t { color: var(--warn-line); }
+.clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp { display: flex; gap: 8px; align-items: center; background: var(--err-soft); color: var(--err-line); border-radius: 6px; padding: 5px 8px; margin: 2px 2px 6px; font-size: 12px; }
+.bang { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid var(--err-line); font: 700 10px var(--kit-sans); flex: none; }
+.strip { padding: 4px 10px 6px; color: var(--text-2); font-weight: 500; font-size: 12.5px; }
+.sec { padding: 6px 10px 2px; font: 600 11px var(--kit-sans); color: var(--dim); letter-spacing: .04em; text-transform: uppercase; }
+.sec .n { margin-left: 4px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
+.dot.warn { background: var(--warn-line); }
+.dot.ok { background: var(--ok-line); }
+.dot.idle { background: var(--text-3); }
+.row { display: flex; align-items: center; gap: 9px; padding: 5px 10px; border-radius: 6px; min-width: 0; }
+.row:hover { background: var(--surface-2); }
+.row.two { align-items: flex-start; }
+.row.two .dot { margin-top: 5px; }
+.row .body { flex: 1; min-width: 0; }
+.l1 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.l1 b { font-weight: 600; }
+.l2 { color: var(--dim); font-size: 12px; display: flex; align-items: center; gap: 8px; margin-top: 1px; }
+.l2.clip { display: block; }
+.row.one .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.row.one .tm { width: 30px; text-align: right; font-size: 12px; }
+.row.one .st { font-size: 12px; }
+.pill { font-size: 11px; padding: 0 7px; border-radius: 9px; line-height: 17px; white-space: nowrap; }
+.pill.warn { background: var(--warn-soft); color: var(--warn-line); }
+.pill.ok { background: var(--ok-soft); color: var(--ok-line); }
+.pill.idle { background: var(--surface-2); color: var(--dim); }
+.bar { display: inline-block; height: 5px; border-radius: 3px; background: var(--border); overflow: hidden; flex: none; }
+.bar i { display: block; height: 100%; background: var(--ok-line); }
+.bar.bad i { background: var(--err-line); }
+.sub { justify-content: space-between; }
+.chev { color: var(--dim); font-size: 16px; }
+.icons { display: flex; justify-content: space-between; padding: 2px 6px; }
+.ib { display: flex; flex-direction: column; align-items: center; gap: 1px; width: 62px; padding: 4px 0; border-radius: 6px; }
+.ib:hover { background: var(--surface-2); }
+.ib b { font: 500 16px var(--kit-sans); line-height: 20px; }
+.ib em { font: normal 10.5px var(--kit-sans); color: var(--dim); }
+.foot { text-align: center; color: var(--dim); font-size: 11px; padding: 4px 0 2px; }
+.hint { color: var(--dim); font-size: 11.5px; padding: 4px 10px; }
+
+.seg { display: flex; gap: 2px; background: var(--surface-2); border-radius: 8px; padding: 2px; margin: 2px 2px 6px; }
+.seg span { flex: 1; text-align: center; padding: 4px 2px; border-radius: 6px; font-size: 12px; color: var(--dim); white-space: nowrap; }
+.seg span.on { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: var(--shadow-sm); }
+.seg i { font-style: normal; color: var(--warn-line); margin-left: 2px; }
+
+.hero { margin: 2px 2px 6px; padding: 10px 12px; border-radius: 10px; background: var(--warn-soft); border: 1px solid var(--warn-line); }
+.hero .l1 { justify-content: flex-start; gap: 8px; }
+.hero .l1 .warn-t { margin-left: auto; }
+.hero p { margin: 6px 0 8px; max-width: none; color: var(--text); font-size: 13px; }
+.btns { display: flex; gap: 6px; }
+.btn { padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); font-size: 12px; }
+.btn.pri { background: var(--brand); color: var(--brand-content); border-color: var(--brand); font-weight: 600; }
+
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 2px; }
+.tile { position: relative; border-radius: 10px; padding: 8px 10px; min-height: 66px; background: var(--surface-2); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.tile b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 26px; }
+.tile .tg { font-size: 12px; line-height: 14px; }
+.tile .tw { font-size: 12px; color: var(--text-2); }
+.tile.warn { background: var(--warn-soft); border-color: var(--warn-line); }
+.tile.warn .tg, .tile.warn .tw { color: var(--warn-line); }
+.tile.ok .tg { color: var(--ok-line); }
+.tile.idle { background: var(--surface); border-style: dashed; }
+.tile.idle .tg, .tile.idle b, .tile.idle .tw { color: var(--dim); }
+.ring { position: absolute; right: 9px; top: 9px; width: 20px; height: 20px; border-radius: 50%; background: conic-gradient(var(--ok-line) calc(var(--p) * 1%), var(--border) 0); }
+.ring.bad { background: conic-gradient(var(--err-line) calc(var(--p) * 1%), var(--border) 0); }
+.ring.none { background: var(--border); }
+.ring i { position: absolute; inset: 4px; border-radius: 50%; background: var(--surface-2); }
+.tile.warn .ring i { background: var(--warn-soft); }
+.tile.idle .ring i { background: var(--surface); }
+
+.axis { display: flex; justify-content: space-between; padding: 0 10px 0 28px; font-size: 10.5px; color: var(--dim); }
+.row.tl { align-items: flex-start; }
+.row.tl .dot { margin-top: 5px; }
+.lane { position: relative; height: 8px; margin-top: 4px; border-radius: 4px; background: var(--border); overflow: hidden; }
+.lane i { position: absolute; top: 0; bottom: 0; }
+.lane i.ok { background: var(--ok-line); }
+.lane i.warn { background: var(--warn-line); }
+.lane i.idle { background: var(--text-3); }
+.legend { display: flex; gap: 14px; justify-content: center; font-size: 11px; color: var(--dim); padding: 4px 0; }
+.legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
+.legend i.warn { background: var(--warn-line); }
+.legend i.ok { background: var(--ok-line); }
+.legend i.idle { background: var(--text-3); }
+
+.hover { width: 100%; max-width: 440px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-lg); padding: 12px 14px; font-size: 13px; }
+.hover .l1 { justify-content: flex-start; gap: 8px; margin-bottom: 8px; }
+.kv { display: grid; grid-template-columns: 90px 1fr; gap: 3px 10px; }
+.hk { color: var(--dim); }
+.hv { overflow-wrap: anywhere; }
+.acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.act { padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-2); font-size: 12px; }
+.act.dng { color: var(--err-line); border-color: var(--err-line); }
+
+</style>
+</head>
+<body>
+<header class="kit-bar"><div class="kit-bar-inner"><h1 class="kit-title">Dropdown variants</h1><button type="button" class="kit-theme" data-kit-theme>Light</button></div></header>
+<main class="kit-page">
+
+<h2 id="what-the-dropdown-is-for">What the dropdown is for</h2>
+<p>The menu under the menu-bar icon answers one question at a glance: which session needs me. Six layouts follow, all drawn from the same sample data so only the layout differs.</p>
+
+<h2 id="how-a-session-gets-its-state">How a session gets its state</h2>
+<div class="kit-cols">
+<section class="kit-col kit-warn"><h4>Needs you</h4><ul><li>Waiting for the owner's reply.</li></ul></section>
+<section class="kit-col kit-good"><h4>Working</h4><ul><li>Actively running: thinking, a tool, or writing.</li></ul></section>
+<section class="kit-col"><h4>Idle</h4><ul><li>The agent is still open in a terminal and its process is alive, but it is doing nothing.</li><li>Always shown. Never hidden, never confused with ended.</li></ul></section>
+</div>
+<div class="kit-note kit-info"><p>Liveness is checked by process id on every scan, so there are no false negatives. A closed terminal disappears on the next scan, about 2 s later, so a false "idle" does not linger. Ended sessions live only under Recent.</p></div>
+<p>Colour meaning: yellow waiting, green working, grey idle, red broken or context low.</p>
+
+<h2 id="the-six-variants">The six variants</h2>
+<div class="vgrid"><article class="vcard"><div class="vhead"><span class="vl">A</span><span>Reference: groups, two lines each</span></div><div class="stage"><div class="menu"><div class="mcp"><span class="bang">!</span>MCP down on this Mac: scratchpad, shell-mem</div><div class="strip">2 need you &middot; 3 working &middot; 2 idle &middot; $41 today</div><div class="sec">Needs you <span class="n">2</span></div><div class="row two"><span class="dot warn"></span><div class="body"><div class="l1"><b>sor-fable</b><span class="warn-t">Your turn 20m</span></div><div class="l2 clip">So the PM added more details to their PRD, should I fold them in?</div></div></div><div class="row two"><span class="dot warn"></span><div class="body"><div class="l1"><b>vb-opus</b><span class="warn-t">Your turn 10m</span></div><div class="l2 clip">Is this comprehensive enough to ship?</div></div></div><div class="sec">Working <span class="n">3</span></div><div class="row two"><span class="dot ok"></span><div class="body"><div class="l1"><b>switchboard</b><span class="dim">1m</span></div><div class="l2"><span>Running Bash</span><span class="bar ok" style="width:60px"><i style="width:63%"></i></span><span class="dim">63%</span></div></div></div><div class="row two"><span class="dot ok"></span><div class="body"><div class="l1"><b>csync-29</b><span class="dim">15m</span></div><div class="l2"><span>Editing</span><span class="bar ok" style="width:60px"><i style="width:41%"></i></span><span class="dim">41%</span></div></div></div><div class="row two"><span class="dot ok"></span><div class="body"><div class="l1"><b>clanky-opus</b><span class="dim">16m</span></div><div class="l2"><span>Thinking</span><span class="bar bad" style="width:60px"><i style="width:12%"></i></span><span class="dim">12%</span></div></div></div><div class="sec">Idle <span class="n">2</span></div><div class="row two"><span class="dot idle"></span><div class="body"><div class="l1"><b>enh-cleanup</b><span class="dim">idle 12m</span></div><div class="l2">idle 12m &middot; open in Ghostty</div></div></div><div class="row two"><span class="dot idle"></span><div class="body"><div class="l1"><b>ci-polish</b><span class="dim">idle 48m</span></div><div class="l2">idle 48m &middot; open in Ghostty</div></div></div><hr><div class="row sub"><span>Recent sessions</span><span class="chev">&rsaquo;</span></div><hr><div class="icons"><span class="ib"><b>+</b><em>New</em></span><span class="ib"><b>&#9638;</b><em>Hub</em></span><span class="ib"><b>&#9636;</b><em>Switchboard</em></span><span class="ib"><b>&#9881;</b><em>Settings</em></span><span class="ib"><b>&hellip;</b><em>More</em></span></div><div class="foot">Updated 4s ago</div></div></div><div class="pc"><div class="pro"><h5>Pros</h5><ul><li>Clear groups; the second line carries the detail</li><li>Idle shown, so nothing hides</li></ul></div><div class="con"><h5>Cons</h5><ul><li>Tallest of the six</li></ul></div></div></article><article class="vcard"><div class="vhead"><span class="vl">B</span><span>Dense ticker: one line each, sorted by urgency</span></div><div class="stage"><div class="menu"><div class="mcp"><span class="bang">!</span>MCP down on this Mac: scratchpad, shell-mem</div><div class="row one"><span class="dot warn"></span><b class="nm">sor-fable</b><span class="pill warn">Your turn</span><span class="dim tm">20m</span><span style="width:30px"></span></div><div class="row one"><span class="dot warn"></span><b class="nm">vb-opus</b><span class="pill warn">Your turn</span><span class="dim tm">10m</span><span style="width:30px"></span></div><div class="row one"><span class="dot ok"></span><b class="nm">switchboard</b><span class="pill ok">Bash</span><span class="dim tm">1m</span><span class="bar ok" style="width:30px"><i style="width:63%"></i></span></div><div class="row one"><span class="dot ok"></span><b class="nm">csync-29</b><span class="pill ok">Editing</span><span class="dim tm">15m</span><span class="bar ok" style="width:30px"><i style="width:41%"></i></span></div><div class="row one"><span class="dot ok"></span><b class="nm">clanky-opus</b><span class="pill ok">Thinking</span><span class="dim tm">16m</span><span class="bar bad" style="width:30px"><i style="width:12%"></i></span></div><div class="row one"><span class="dot idle"></span><b class="nm">enh-cleanup</b><span class="pill idle">Idle</span><span class="dim tm">12m</span><span style="width:30px"></span></div><div class="row one"><span class="dot idle"></span><b class="nm">ci-polish</b><span class="pill idle">Idle</span><span class="dim tm">48m</span><span style="width:30px"></span></div><hr><div class="row sub"><span>Recent sessions</span><span class="chev">&rsaquo;</span></div><hr><div class="icons"><span class="ib"><b>+</b><em>New</em></span><span class="ib"><b>&#9638;</b><em>Hub</em></span><span class="ib"><b>&#9636;</b><em>Switchboard</em></span><span class="ib"><b>&#9881;</b><em>Settings</em></span><span class="ib"><b>&hellip;</b><em>More</em></span></div><div class="foot">Updated 4s ago</div></div></div><div class="pc"><div class="pro"><h5>Pros</h5><ul><li>Everything visible without scrolling</li><li>Fast to scan down one column</li></ul></div><div class="con"><h5>Cons</h5><ul><li>No room for what Claude last said</li><li>No group headers to anchor on</li></ul></div></div></article><article class="vcard"><div class="vhead"><span class="vl">C</span><span>Filter tabs: one state at a time</span></div><div class="stage"><div class="menu"><div class="mcp"><span class="bang">!</span>MCP down on this Mac: scratchpad, shell-mem</div><div class="seg"><span class="on">Needs you <i>2</i></span><span>Working <i>3</i></span><span>Idle <i>2</i></span><span>All</span></div><div class="row two"><span class="dot warn"></span><div class="body"><div class="l1"><b>sor-fable</b><span class="warn-t">Your turn 20m</span></div><div class="l2 clip">So the PM added more details to their PRD, should I fold them in?</div></div></div><div class="row two"><span class="dot warn"></span><div class="body"><div class="l1"><b>vb-opus</b><span class="warn-t">Your turn 10m</span></div><div class="l2 clip">Is this comprehensive enough to ship?</div></div></div><div class="hint">Opens on Needs you when anything waits, else Working.</div><hr><div class="row sub"><span>Recent sessions</span><span class="chev">&rsaquo;</span></div><hr><div class="icons"><span class="ib"><b>+</b><em>New</em></span><span class="ib"><b>&#9638;</b><em>Hub</em></span><span class="ib"><b>&#9636;</b><em>Switchboard</em></span><span class="ib"><b>&#9881;</b><em>Settings</em></span><span class="ib"><b>&hellip;</b><em>More</em></span></div><div class="foot">Updated 4s ago</div></div></div><div class="pc"><div class="pro"><h5>Pros</h5><ul><li>Opens straight on what needs you</li><li>Short list, big rows</li></ul></div><div class="con"><h5>Cons</h5><ul><li>Hides the rest behind a click</li><li>Idle appears only after a tap</li></ul></div></div></article><article class="vcard"><div class="vhead"><span class="vl">D</span><span>Focus first: a hero card for the most urgent</span></div><div class="stage"><div class="menu"><div class="mcp"><span class="bang">!</span>MCP down on this Mac: scratchpad, shell-mem</div><div class="strip">2 need you &middot; 3 working &middot; 2 idle &middot; $41 today</div><div class="hero"><div class="l1"><span class="dot warn"></span><b>sor-fable</b><span class="warn-t">waiting 20m</span></div><p>So the PM added more details to their PRD, should I fold them in?</p><div class="btns"><span class="btn pri">Focus terminal</span><span class="btn">Transcript</span></div></div><div class="sec">Needs you <span class="n">1</span></div><div class="row one"><span class="dot warn"></span><b class="nm">vb-opus</b><span class="pill warn">Your turn</span><span class="dim tm">10m</span></div><div class="sec">Working <span class="n">3</span></div><div class="row one"><span class="dot ok"></span><b class="nm">switchboard</b><span class="dim st">Bash</span><span class="dim tm">1m</span><span class="bar ok" style="width:30px"><i style="width:63%"></i></span></div><div class="row one"><span class="dot ok"></span><b class="nm">csync-29</b><span class="dim st">Editing</span><span class="dim tm">15m</span><span class="bar ok" style="width:30px"><i style="width:41%"></i></span></div><div class="row one"><span class="dot ok"></span><b class="nm">clanky-opus</b><span class="dim st">Thinking</span><span class="dim tm">16m</span><span class="bar bad" style="width:30px"><i style="width:12%"></i></span></div><div class="sec">Idle <span class="n">2</span></div><div class="row one"><span class="dot idle"></span><b class="nm">enh-cleanup</b><span class="dim st">idle</span><span class="dim tm">12m</span><span style="width:30px"></span></div><div class="row one"><span class="dot idle"></span><b class="nm">ci-polish</b><span class="dim st">idle</span><span class="dim tm">48m</span><span style="width:30px"></span></div><hr><div class="icons"><span class="ib"><b>+</b><em>New</em></span><span class="ib"><b>&#9638;</b><em>Hub</em></span><span class="ib"><b>&#9636;</b><em>Switchboard</em></span><span class="ib"><b>&#9881;</b><em>Settings</em></span><span class="ib"><b>&hellip;</b><em>More</em></span></div><div class="foot">Updated 4s ago</div></div></div><div class="pc"><div class="pro"><h5>Pros</h5><ul><li>Answer the top one without opening anything</li><li>Full last message visible</li></ul></div><div class="con"><h5>Cons</h5><ul><li>The hero takes space when nothing waits</li><li>Needs a calm-state fallback</li></ul></div></div></article><article class="vcard"><div class="vhead"><span class="vl">E</span><span>Tiles: a Control Center style grid</span></div><div class="stage"><div class="menu"><div class="mcp"><span class="bang">!</span>MCP down on this Mac: scratchpad, shell-mem</div><div class="strip">2 need you &middot; 3 working &middot; 2 idle &middot; $41 today</div><div class="grid2"><div class="tile warn"><div class="tg">&#9679;</div><b>sor-fable</b><div class="tw">Your turn 20m</div><span class="ring none"><i></i></span></div><div class="tile warn"><div class="tg">&#9679;</div><b>vb-opus</b><div class="tw">Your turn 10m</div><span class="ring none"><i></i></span></div><div class="tile ok"><div class="tg">&#9654;</div><b>switchboard</b><div class="tw">Bash</div><span class="ring ok" style="--p:63"><i></i></span></div><div class="tile ok"><div class="tg">&#9654;</div><b>csync-29</b><div class="tw">Editing</div><span class="ring ok" style="--p:41"><i></i></span></div><div class="tile ok"><div class="tg">&#9654;</div><b>clanky-opus</b><div class="tw">Thinking</div><span class="ring bad" style="--p:12"><i></i></span></div><div class="tile idle"><div class="tg">&#10074;&#10074;</div><b>enh-cleanup</b><div class="tw">Idle 12m</div><span class="ring none"><i></i></span></div><div class="tile idle"><div class="tg">&#10074;&#10074;</div><b>ci-polish</b><div class="tw">Idle 48m</div><span class="ring none"><i></i></span></div></div><hr><div class="row sub"><span>Recent sessions</span><span class="chev">&rsaquo;</span></div><hr><div class="icons"><span class="ib"><b>+</b><em>New</em></span><span class="ib"><b>&#9638;</b><em>Hub</em></span><span class="ib"><b>&#9636;</b><em>Switchboard</em></span><span class="ib"><b>&#9881;</b><em>Settings</em></span><span class="ib"><b>&hellip;</b><em>More</em></span></div><div class="foot">Updated 4s ago</div></div></div><div class="pc"><div class="pro"><h5>Pros</h5><ul><li>State reads by colour and shape</li><li>Compact for a few sessions</li></ul></div><div class="con"><h5>Cons</h5><ul><li>Names truncate; no last message</li><li>Awkward past about 8 sessions</li></ul></div></div></article><article class="vcard"><div class="vhead"><span class="vl">F</span><span>Timeline: last 60 minutes per session</span></div><div class="stage"><div class="menu"><div class="mcp"><span class="bang">!</span>MCP down on this Mac: scratchpad, shell-mem</div><div class="strip">2 need you &middot; 3 working &middot; 2 idle &middot; $41 today</div><div class="axis"><span>60m ago</span><span>30m</span><span>now</span></div><div class="row tl"><span class="dot warn"></span><div class="body"><div class="l1"><b>sor-fable</b><span class="dim">waits 20m</span></div><div class="lane"><i class="ok" style="left:0.0%;width:36.7%"></i><i class="idle" style="left:36.7%;width:26.7%"></i><i class="warn" style="left:66.7%;width:33.3%"></i></div></div></div><div class="row tl"><span class="dot warn"></span><div class="body"><div class="l1"><b>vb-opus</b><span class="dim">waits 10m</span></div><div class="lane"><i class="idle" style="left:0.0%;width:23.3%"></i><i class="ok" style="left:23.3%;width:60.0%"></i><i class="warn" style="left:83.3%;width:16.7%"></i></div></div></div><div class="row tl"><span class="dot ok"></span><div class="body"><div class="l1"><b>switchboard</b><span class="dim">Bash 1m</span></div><div class="lane"><i class="ok" style="left:0.0%;width:100.0%"></i></div></div></div><div class="row tl"><span class="dot ok"></span><div class="body"><div class="l1"><b>csync-29</b><span class="dim">Editing 15m</span></div><div class="lane"><i class="idle" style="left:0.0%;width:16.7%"></i><i class="ok" style="left:16.7%;width:83.3%"></i></div></div></div><div class="row tl"><span class="dot ok"></span><div class="body"><div class="l1"><b>clanky-opus</b><span class="dim">Thinking 16m</span></div><div class="lane"><i class="ok" style="left:0.0%;width:13.3%"></i><i class="idle" style="left:13.3%;width:60.0%"></i><i class="ok" style="left:73.3%;width:26.7%"></i></div></div></div><div class="row tl"><span class="dot idle"></span><div class="body"><div class="l1"><b>enh-cleanup</b><span class="dim">idle 12m</span></div><div class="lane"><i class="ok" style="left:0.0%;width:50.0%"></i><i class="idle" style="left:50.0%;width:50.0%"></i></div></div></div><div class="row tl"><span class="dot idle"></span><div class="body"><div class="l1"><b>ci-polish</b><span class="dim">idle 48m</span></div><div class="lane"><i class="idle" style="left:0.0%;width:100.0%"></i></div></div></div><div class="legend"><span><i class="warn"></i>waiting</span><span><i class="ok"></i>working</span><span><i class="idle"></i>idle</span></div><hr><div class="row sub"><span>Recent sessions</span><span class="chev">&rsaquo;</span></div><hr><div class="icons"><span class="ib"><b>+</b><em>New</em></span><span class="ib"><b>&#9638;</b><em>Hub</em></span><span class="ib"><b>&#9636;</b><em>Switchboard</em></span><span class="ib"><b>&#9881;</b><em>Settings</em></span><span class="ib"><b>&hellip;</b><em>More</em></span></div><div class="foot">Updated 4s ago</div></div></div><div class="pc"><div class="pro"><h5>Pros</h5><ul><li>Shows who waited longest and who is busy</li><li>History without opening a window</li></ul></div><div class="con"><h5>Cons</h5><ul><li>Busiest to read</li><li>Lanes are small at menu width</li></ul></div></div></article></div>
+
+<h2 id="hover-detail-card">Hover detail card</h2>
+<p>Shared by every variant. Hovering a row opens it beside the menu. Shown here for switchboard.</p>
+<div class="hover"><div class="l1"><span class="dot ok"></span><b>switchboard</b><span class="dim">Running Bash, 1m</span></div><div class="kv"><div class='hk'>Path</div><div class='hv'>~/Code/Claude/switchboard-mac</div><div class='hk'>Branch</div><div class='hv'>main *4</div><div class='hk'>Model</div><div class='hv'>Opus 5.5</div><div class='hk'>Context</div><div class='hv'>63%</div><div class='hk'>Tokens</div><div class='hv'>412k in, 38k out</div><div class='hk'>Cost</div><div class='hv'>$6.20 today</div><div class='hk'>Memory</div><div class='hv'>1.1 GB</div><div class='hk'>Last prompt</div><div class='hv'>Wire the filter tabs into the menu</div><div class='hk'>Focus file</div><div class='hv'>docs/plan.md</div></div><div class="acts"><span class="act">Focus terminal</span><span class="act">Transcript</span><span class="act">VSCode</span><span class="act">Finder</span><span class="act">Copy resume command</span><span class="act dng">Terminate</span></div></div>
+
+<h2 id="what-to-tell-me">What to tell me</h2>
+<div class="kit-cols">
+<section class="kit-col"><h4>Pick</h4><ul><li>One variant, or a mix such as "B rows with A groups".</li></ul></section>
+<section class="kit-col"><h4>Status strip</h4><ul><li>Should it also show the Claude 5h and 7d limit bars?</li></ul></section>
+</div>
+
+</main>
+<script>
+// Behaviour every page shares: the theme switch, tables that scroll inside
+// their own box, table headers that follow the reader, and plain tabs.
+// Inlined into a page by pagekit.py. Guide: conventions/pages.md
+(function () {
+  const root = document.documentElement;
+
+  // Theme. Dark is the default; the choice is remembered when the browser allows it.
+  function readTheme() { try { return localStorage.getItem('kit-theme'); } catch (e) { return null; } }
+  function applyTheme(t) {
+    root.dataset.theme = t;
+    document.body.classList.toggle('light', t === 'light');
+    document.querySelectorAll('[data-kit-theme]').forEach(b => { b.textContent = t === 'light' ? 'Dark' : 'Light'; b.setAttribute('aria-label', 'Switch to ' + (t === 'light' ? 'dark' : 'light') + ' theme'); });
+  }
+  applyTheme(readTheme() || root.dataset.theme || 'dark');
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-kit-theme]'); if (!b) return;
+    const next = root.dataset.theme === 'light' ? 'dark' : 'light';
+    applyTheme(next);
+    try { localStorage.setItem('kit-theme', next); } catch (err) {}
+  });
+
+  // Every table scrolls sideways inside its own box, never the whole page.
+  document.querySelectorAll('.kit-page table').forEach(t => {
+    if (t.parentElement.classList.contains('kit-table-wrap')) return;
+    const w = document.createElement('div'); w.className = 'kit-table-wrap';
+    t.parentNode.insertBefore(w, t); w.appendChild(t);
+  });
+
+  // Table headers follow the reader. CSS sticky cannot do this, because a
+  // header cannot stick past the scroll box its table sits in.
+  const bar = document.querySelector('.kit-bar');
+  let queued = false;
+  function stick() {
+    queued = false;
+    const top = bar ? bar.getBoundingClientRect().bottom : 0;
+    document.querySelectorAll('.kit-page table').forEach(t => {
+      const h = t.tHead; if (!h || t.offsetParent === null) return;
+      const box = t.getBoundingClientRect();
+      const dy = (box.top < top && box.bottom - h.offsetHeight - 40 > top) ? Math.round(top - box.top) : 0;
+      h.style.transform = dy ? 'translateY(' + dy + 'px)' : '';
+      h.classList.toggle('kit-stuck', dy > 0);
+    });
+  }
+  function queue() { if (!queued) { queued = true; requestAnimationFrame(stick); } }
+  window.addEventListener('scroll', queue, { passive: true });
+  window.addEventListener('resize', queue);
+
+  // Tabs. A button with data-kit-tab="x" shows the element with data-kit-panel="x".
+  const tabs = Array.from(document.querySelectorAll('[data-kit-tab]'));
+  function show(name) {
+    tabs.forEach(t => t.setAttribute('aria-selected', String(t.dataset.kitTab === name)));
+    document.querySelectorAll('[data-kit-panel]').forEach(p => { p.hidden = p.dataset.kitPanel !== name; });
+    window.scrollTo(0, 0); queue();
+  }
+  tabs.forEach(t => t.addEventListener('click', () => { show(t.dataset.kitTab); try { history.replaceState(null, '', '#' + t.dataset.kitTab); } catch (e) {} }));
+  if (tabs.length) {
+    const wanted = (location.hash || '').slice(1);
+    show(tabs.some(t => t.dataset.kitTab === wanted) ? wanted : tabs[0].dataset.kitTab);
+  }
+})();
+
+
+</script>
+</body>
+</html>

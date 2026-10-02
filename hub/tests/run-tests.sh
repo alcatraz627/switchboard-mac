@@ -1,0 +1,721 @@
+#!/usr/bin/env bash
+# tests/run-tests.sh — basic smoke tests for claude-instances.
+#
+# Covers the things most likely to silently regress, among them:
+#   - swift bar compiles
+#   - scan.sh emits valid JSON with the expected shape (full + --quick)
+#
+# Not a comprehensive suite; intentionally bash + python3 stdlib only so it
+# runs anywhere the bar itself runs. No external test framework.
+#
+# Exit codes: 0 = all green, 1 = at least one failure.
+
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+PASS=0
+FAIL=0
+
+# ── tiny test harness ─────────────────────────────────────────────────────────
+
+C_GREEN=$(tput setaf 2 2>/dev/null || echo '')
+C_RED=$(tput setaf 1 2>/dev/null || echo '')
+C_DIM=$(tput dim 2>/dev/null || echo '')
+C_RESET=$(tput sgr0 2>/dev/null || echo '')
+
+t_log() { printf '%b\n' "$@"; }
+t_pass() { PASS=$((PASS+1)); t_log "  ${C_GREEN}✓${C_RESET} $*"; }
+t_fail() { FAIL=$((FAIL+1)); t_log "  ${C_RED}✗${C_RESET} $*"; }
+t_section() { t_log "\n${C_DIM}── $* ──${C_RESET}"; }
+
+# Assert: name, command — stdout/exit captured. Pass if exit=0.
+t_check() {
+    local name="$1"; shift
+    if "$@" >/dev/null 2>&1; then t_pass "$name"
+    else t_fail "$name (cmd failed: $*)"; fi
+}
+
+# Assert: name, expected, actual. Pass if equal.
+t_eq() {
+    local name="$1" expected="$2" actual="$3"
+    if [[ "$expected" == "$actual" ]]; then t_pass "$name"
+    else t_fail "$name — expected: $expected, got: $actual"; fi
+}
+
+# Assert: name, file, pattern. Pass if pattern found in file.
+t_grep() {
+    local name="$1" file="$2" pattern="$3"
+    if rg -q -- "$pattern" "$file" 2>/dev/null; then t_pass "$name"
+    else t_fail "$name — no match for /$pattern/ in $file"; fi
+}
+
+# ── T1 — bash syntax checks ──────────────────────────────────────────────────
+
+t_section "syntax checks"
+t_check "lib/scan.sh parses"        bash -n lib/scan.sh
+t_check "native/build.sh parses"    bash -n native/build.sh
+t_check "tests/run-tests.sh parses" bash -n tests/run-tests.sh
+
+# ── T2 — swift compile check ─────────────────────────────────────────────────
+
+t_section "swift compile"
+
+# The bar waited for the scanner to exit before reading its output, which hangs
+# forever once the JSON passes the 64 KB pipe buffer. The probe writes 256 KB;
+# the alarm is the assertion (a wait-first helper is killed, exit 142).
+DRAIN_BIN=$(mktemp)
+if /usr/bin/swiftc -O native/ProcessRun.swift tests/fixtures/drain-probe/main.swift -o "$DRAIN_BIN" 2>/dev/null; then
+    t_eq "scanner output past the pipe buffer is read, not hung" "262144:warn:0" \
+         "$(perl -e 'alarm 8; exec @ARGV' "$DRAIN_BIN" 2>/dev/null)"
+else
+    t_fail "drain probe did not compile"
+fi
+rm -f "$DRAIN_BIN"
+
+# Terminate signalled a pid from a scan up to a minute old; a reused pid named a
+# stranger. The probe runs a real sleep: a stale or missing start time must not
+# be signalled, the right one must end it.
+TERM_BIN=$(mktemp)
+if /usr/bin/swiftc -O native/Terminate.swift tests/fixtures/terminate-probe/main.swift -o "$TERM_BIN" 2>/dev/null; then
+    t_eq "terminate refuses a reused pid, ends the right one" \
+         "wrong=0 unknown=0 alive=true right=1 ended=true" \
+         "$(perl -e 'alarm 15; exec @ARGV' "$TERM_BIN" 2>/dev/null)"
+else
+    t_fail "terminate probe did not compile"
+fi
+rm -f "$TERM_BIN"
+SWIFT_OUT=$(mktemp)
+# The bar is split across logical files; compile them as one module. The list is
+# read from build.sh rather than copied, because a copy drifts silently.
+# A bare native/*.swift glob is wrong too, since color-sampler.swift is a
+# standalone tool the module deliberately excludes.
+SWIFT_SRCS=$(grep -oE '\$SCRIPT_DIR/[A-Za-z]+\.swift' native/build.sh | sed 's|\$SCRIPT_DIR|native|')
+if [[ -z "$SWIFT_SRCS" ]]; then
+    t_fail "could not read the source list out of native/build.sh"
+fi
+if /usr/bin/swiftc -O $SWIFT_SRCS -o "$SWIFT_OUT" 2>&1; then
+    t_pass "bar (split into logical files) compiles (-O)"
+    rm -f "$SWIFT_OUT"
+else
+    t_fail "bar FAILED to compile"
+    rm -f "$SWIFT_OUT"
+fi
+
+# ── Design primitives (P2 — the shared building blocks) ──────────────────────
+t_section "design primitives"
+t_grep "BarFont type scale"            native/ 'enum BarFont'
+t_grep "seg() segment builder"         native/ 'func seg\('
+t_grep "row() concatenator"            native/ 'func row\('
+t_grep "columned() tab-stop alignment" native/ 'func columned\('
+t_grep "middleTruncate path helper"    native/ 'func middleTruncate'
+t_grep "tailTruncate id helper"        native/ 'func tailTruncate'
+t_grep "clampLines prose helper"       native/ 'func clampLines'
+t_grep "severity scale (closed set)"   native/ 'func severityToken'
+
+# ── Live row P4 (ctx bar, truncation, submenu copies) ────────────────────────
+t_section "live row (P4)"
+t_grep "per-instance ctx bar helper"   native/ 'func appendBar'
+t_grep "ctx bar wired in metrics row"  native/ 'appendBar\(to: metricsRow'
+t_grep "cwd path middle-truncated"     native/ 'middleTruncate\(path'
+t_grep "focus file middle-truncated"   native/ 'middleTruncate\(disp'
+t_grep "copy directory path action"    native/ 'func copyDirPath'
+t_grep "copy resume command action"    native/ 'func copyResumeCmd'
+
+# ── Usage lives in Switchboard, not here ─────────────────────────────────────
+t_section "usage removed"
+t_check "no rate-limit code in the bar"      bash -c '! rg -q "rateLimit|zoneColor|usage-zones-changed" native/ --glob "*.swift"'
+t_check "hub index draws no usage meters"    bash -c '! rg -q "FEED.limits|class=\"meter" lib/hub-index.html'
+t_check "scan emits no limits"               bash -c '! rg -q "get_limits" lib/scan.sh'
+t_check "no events, aggregates or claudew"   bash -c '! rg -q "recent_events|compute_aggregates|claudew|summary_cache" lib/scan.sh lib/hub-server.py'
+t_check "no events or perm glyph in the bar" bash -c '! rg -q "recentEvents|PermissionRequest|EventsTabView" native/ --glob "*.swift"'
+t_check "legacy transcript server is gone"   bash -c '! test -e lib/detail.sh && ! test -e lib/detail-server.py && ! rg -q "TranscriptServer" native/'
+
+# ── History collapse P6 ──────────────────────────────────────────────────────
+t_section "history collapse (P6)"
+t_grep "history collapsed to one row"  native/ 'for sess in history.prefix\(14\)'
+t_grep "history rows column-aligned"   native/ 'columned\(cells, stops: \[196'
+
+# ── T3 — scan.sh full produces valid JSON ────────────────────────────────────
+
+t_section "scan.sh full"
+SCAN_OUT=$(mktemp)
+bash lib/scan.sh > "$SCAN_OUT" 2>/dev/null
+if python3 -c "import json,sys; json.load(open('$SCAN_OUT'))" 2>/dev/null; then
+    t_pass "scan.sh emits valid JSON"
+else
+    t_fail "scan.sh output is not valid JSON"
+fi
+# Required top-level keys.
+for key in live history; do
+    if python3 -c "
+import json,sys
+d = json.load(open('$SCAN_OUT'))
+sys.exit(0 if '$key' in d else 1)" 2>/dev/null; then
+        t_pass "scan.sh full has '$key'"
+    else
+        t_fail "scan.sh full missing '$key'"
+    fi
+done
+# Per-instance fields exist when there's at least one live instance.
+LIVE_COUNT=$(python3 -c "import json; print(len(json.load(open('$SCAN_OUT')).get('live', [])))" 2>/dev/null || echo 0)
+if [[ "$LIVE_COUNT" -gt 0 ]]; then
+    for field in pid model cwd git_branch git_modified last_prompt; do
+        if python3 -c "
+import json,sys
+inst = json.load(open('$SCAN_OUT'))['live'][0]
+sys.exit(0 if '$field' in inst else 1)" 2>/dev/null; then
+            t_pass "scan.sh live[0] has '$field'"
+        else
+            t_fail "scan.sh live[0] missing '$field'"
+        fi
+    done
+else
+    t_log "  ${C_DIM}(skipping per-instance field checks — no live Claude sessions)${C_RESET}"
+fi
+rm -f "$SCAN_OUT"
+
+# ── T3.5 — provider seam: every row is claude ───────────────────────────────
+
+t_section "provider seam"
+SEAM_OUT=$(mktemp)
+bash lib/scan.sh > "$SEAM_OUT" 2>/dev/null
+if [[ "$LIVE_COUNT" -gt 0 ]]; then
+    if python3 -c "
+import json,sys
+inst = json.load(open('$SEAM_OUT'))['live'][0]
+sys.exit(0 if inst.get('provider') == 'claude' else 1)" 2>/dev/null; then
+        t_pass "scan.sh live[0] carries provider:'claude'"
+    else
+        t_fail "scan.sh live[0] missing/wrong 'provider'"
+    fi
+else
+    t_log "  ${C_DIM}(skipping live provider check — no live Claude sessions)${C_RESET}"
+fi
+if python3 -c "
+import json,sys
+hist = json.load(open('$SEAM_OUT')).get('history', [])
+sys.exit(0 if hist and hist[0].get('provider') == 'claude' else 1)" 2>/dev/null; then
+    t_pass "scan.sh history[0] carries provider:'claude'"
+else
+    t_fail "scan.sh history[0] missing/wrong 'provider' (or history empty)"
+fi
+rm -f "$SEAM_OUT"
+
+# ── T4 — scan.sh --quick produces valid JSON ─────────────────────────────────
+
+t_section "scan.sh --quick"
+QUICK_OUT=$(mktemp)
+bash lib/scan.sh --quick > "$QUICK_OUT" 2>/dev/null
+if python3 -c "import json; json.load(open('$QUICK_OUT'))" 2>/dev/null; then
+    t_pass "scan.sh --quick emits valid JSON"
+else
+    t_fail "scan.sh --quick output is not valid JSON"
+fi
+# 'live' must be present even on --quick; history etc may be empty.
+if python3 -c "
+import json,sys
+d = json.load(open('$QUICK_OUT'))
+sys.exit(0 if 'live' in d else 1)" 2>/dev/null; then
+    t_pass "scan.sh --quick has 'live'"
+else
+    t_fail "scan.sh --quick missing 'live'"
+fi
+rm -f "$QUICK_OUT"
+
+# LiveRowView (live menu rows): structural markers
+t_grep "LiveRowView class defined" native/ 'class LiveRowView'
+t_grep "intrinsicContentSize override (sizing fix)" native/ 'override var intrinsicContentSize'
+t_grep "menuWillOpen tracks open state" native/ 'func menuWillOpen'
+t_grep "refreshLiveRows wired to data refresh" native/ 'refreshLiveRows()'
+
+# Session hub — the device-spanning transcript server (phone access over Tailscale).
+t_section "session hub"
+t_check "lib/hub-server.py compiles"   python3 -m py_compile lib/hub-server.py
+t_check "lib/hub.sh parses"            bash -n lib/hub.sh
+t_grep "binds tailnet IP (CGNAT 100.64/10)" lib/hub-server.py 'def tailnet_ip'
+t_grep "session route /s/<id>"         lib/hub-server.py 'SID_RE'
+t_grep "files open only for this Mac"    lib/hub-server.py 'client_address\[0\] not in \("127.0.0.1", "::1"\)'
+t_grep "opened files are sandboxed"      lib/hub-server.py '"Content-Security-Policy", "sandbox"'
+t_grep "/data reuses transcript.py"    lib/hub-server.py 'parse_transcript'
+t_grep "SPA derives hub API base"      lib/transcript-app.html 'const API ='
+t_grep "index polls /api/sessions"     lib/hub-index.html '/api/sessions'
+t_grep "Edit renders as a diff"        lib/transcript-app.html 'dl del'
+t_grep "copy works over insecure http" lib/transcript-app.html 'execCommand'
+t_grep "chapters are built on approach"   lib/transcript-app.html 'new IntersectionObserver'
+t_grep "a toggle rebuilds one chapter"    lib/transcript-app.html 'fillChapter\(\+lg.closest'
+t_check "page reads liveness from /data, not the fleet scan" bash -c '! rg -q "/api/sessions" lib/transcript-app.html'
+t_grep "failed polls raise the disconnected bar" lib/transcript-app.html 'Disconnected, retrying'
+t_check "page loads nothing from a CDN" bash -c '! rg -q "https?://cdn" lib/transcript-app.html'
+t_check "vendored marked and highlight.js are present" bash -c 'test -s lib/vendor/marked.min.js && test -s lib/vendor/highlight.min.js && test -s lib/vendor/hljs-github.min.css && test -s lib/vendor/hljs-github-dark.min.css'
+t_grep "bar opens hub transcript"      native/ 'func openHubTranscript'
+t_grep "bar 'Sessions (phone)' action" native/ 'func openHubIndex'
+
+# Functional: spin the hub in-process on an ephemeral port, hit /healthz, tear
+# down — proves the routing wires up without leaving a socket behind.
+HUB_FN=$(python3 - <<'PY' 2>/dev/null
+import importlib.util, threading, time, urllib.request, http.server, os
+lib = os.path.join(os.getcwd(), 'lib')
+spec = importlib.util.spec_from_file_location('hub_server', os.path.join(lib, 'hub-server.py'))
+hub = importlib.util.module_from_spec(spec); spec.loader.exec_module(hub)
+srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), hub.HubHandler)
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+time.sleep(0.2)
+port = srv.server_address[1]
+with urllib.request.urlopen(f'http://127.0.0.1:{port}/healthz', timeout=10) as r:
+    ok = r.status == 200 and b'"ok"' in r.read()
+srv.shutdown()
+print('OK' if ok else 'FAIL')
+PY
+)
+if [[ "$HUB_FN" == "OK" ]]; then t_pass "hub serves /healthz (in-process)"; else t_fail "hub /healthz failed"; fi
+
+# Palette + Settings infrastructure — single source of truth for menu colors
+# plus the Settings tab UI built on it.
+t_section "palette + settings"
+t_grep "PaletteToken enum defined"             native/ 'enum PaletteToken'
+t_grep "PaletteStore singleton"                native/ 'final class PaletteStore'
+t_grep "PaletteStore.set persists hex"         native/ 'func set\(_ token: PaletteToken, hex'
+t_grep "PaletteStore.reset clears override"    native/ 'func reset\(_ token: PaletteToken\)'
+t_grep "NSColor.fromHex parser"                native/ 'static func fromHex'
+t_grep "NSColor.hexString writer"              native/ 'var hexString'
+t_grep "all 12 tokens registered"              native/ 'metricMemory.*memory'
+t_grep "modelDisplay reads PaletteStore"       native/ 'PaletteStore.shared.color\(for: .modelOpus\)'
+t_grep "LiveRowViewRepresentable for SwiftUI"  native/ 'struct LiveRowViewRepresentable: NSViewRepresentable'
+t_grep "Settings window hosts SettingsTabView"  native/SettingsWindowController.swift 'SettingsTabView\('
+# The Dashboard window was removed (owner ruling D1, 2026-09-30); its Overview
+# reported the 20-session history cap as the total.
+t_check "no Dashboard window code remains"     bash -c '! rg -q "DashboardController|DashboardTab|scanAllSessions" native/ --glob "*.swift"'
+t_grep "tailwindPalette table"                 native/ 'tailwindPalette: \[\(hue: String'
+t_grep "PaletteEditorRow row component"        native/ 'struct PaletteEditorRow'
+t_grep "TailwindPicker popover"                native/ 'struct TailwindPicker'
+t_grep "PaletteStore.didChange notification"   native/ 'PaletteStore.didChangeNotification'
+# Hover + reverse-highlight wiring (Settings ↔ preview bidirectional)
+t_grep "tokenForLabel mapping in LiveRowView"  native/ 'tokenForLabel: \[NSTextField: PaletteToken\]'
+t_grep "onHoverToken callback exposed"         native/ 'onHoverToken: \(\(PaletteToken'
+t_grep "setHighlightedToken reverse-highlight" native/ 'func setHighlightedToken'
+t_grep "tracking area for hover detection"     native/ 'NSTrackingArea'
+# Appearance + menu-behavior sections
+t_grep "AppearancePref enum (system/light/dark)" native/ 'enum AppearancePref'
+t_grep "AppearanceSection view defined"        native/ 'struct AppearanceSection'
+t_grep "MenuBehaviorSection view defined"      native/ 'struct MenuBehaviorSection'
+t_grep "appearance applied at launch"          native/ 'applyAppearancePref\(loadAppearancePref'
+# Menu Behavior settings are WIRED, not placeholders
+t_grep "density read in LiveRowView.update"    native/ 'stack.spacing = densitySpacing\(\)'
+t_grep "densitySpacing accessor"               native/ 'func densitySpacing'
+t_grep "menuBehaviorDidChange notification"    native/ 'menuBehaviorDidChange'
+t_grep "BarDelegate observes behavior change"  native/ 'forName: .menuBehaviorDidChange'
+# Per-chip token tagging — covers EVERY palette token in the preview
+t_grep "appendChip helper defined"             native/ 'private func appendChip'
+t_grep "header chips: model badge tagged"      native/ 'token: modelToken'
+t_grep "header chips: subagent tagged"         native/ 'token: .accentSubagent'
+t_grep "header chips: branch tagged"           native/ 'token: .accentBranch'
+t_grep "header chips: modified tagged"         native/ 'token: modToken'
+t_grep "metrics chips: ctx tagged by severity" native/ 'token: ctxToken'
+t_grep "metrics chips: cost tagged"            native/ 'token: .metricCost'
+t_grep "metrics chips: tokens tagged"          native/ 'token: .metricTokens'
+t_grep "metrics chips: memory tagged"          native/ 'token: .metricMemory'
+# Layout-shift fix: drawsBackground set ONCE in addLine, never toggled
+t_grep "drawsBackground = true in addLine"     native/ 'label.drawsBackground = true'
+t_grep "applyHighlightedToken animates"        native/ 'NSAnimationContext.runAnimationGroup'
+# Three new palette tokens for the previously-untagged metric chips
+t_grep "metric.turns token"                    native/ 'case metricTurns'
+t_grep "metric.tools token"                    native/ 'case metricTools'
+t_grep "metric.speed token"                    native/ 'case metricSpeed'
+t_grep "turns chip tagged"                     native/ 'token: .metricTurns'
+t_grep "tools chip tagged"                     native/ 'token: .metricTools'
+t_grep "speed chip tagged"                     native/ 'token: .metricSpeed'
+# B1 — submenu keystrokes wired from a configurable store
+t_grep "SubmenuAction enum"                    native/ 'enum SubmenuAction'
+t_grep "keybindFor accessor"                   native/ 'func keybindFor'
+t_grep "finder item reads keybind"             native/ 'keybindFor\(.openInFinder\)'
+t_grep "transcript item reads keybind"         native/ 'keybindFor\(.viewTranscript\)'
+t_grep "KeybindsSection UI present"            native/ 'struct KeybindsSection'
+t_grep "KeybindRow editor"                     native/ 'struct KeybindRow'
+# A3 — SF Symbol state icon
+t_grep "stateSymbolName helper"                native/ 'func stateSymbolName'
+t_grep "symbolAttributedString helper"         native/ 'func symbolAttributedString'
+# C1 — permission mode
+t_grep "permissionMode field on LiveInstance"  native/ 'permissionMode = "permission_mode"'
+t_grep "permission_mode emitted in scan.sh"    lib/scan.sh "'permission_mode'"
+t_grep "permissionPlan token defined"          native/ 'case permissionPlan'
+t_grep "permission badge rendered"             native/ 'permLetter = "P"'
+# C2 — last tool when idle
+t_grep "LastTool struct"                       native/ 'struct LastTool'
+t_grep "last_tool emitted in scan.sh"          lib/scan.sh "'last_tool'"
+t_grep "transcript read once per scan"      lib/scan.sh 'def read_transcript'
+t_grep "formatAgo helper"                      native/ 'func formatAgo'
+t_grep "last-tool line rendered when fresh"    native/ 'suppressBecauseStale'
+# Refresh + warnings + row visibility — Settings UI plus reader sites
+t_grep "RefreshAndWarningsSection view"        native/ 'struct RefreshAndWarningsSection'
+t_grep "RowElement enum"                       native/ 'enum RowElement'
+t_grep "rowShows accessor"                     native/ 'func rowShows'
+t_grep "tab title gated by rowShows"           native/ 'rowShows\(.tabTitle\)'
+t_grep "compaction-warn gated by rowShows"     native/ 'rowShows\(.compactionWarn\)'
+t_grep "mcp-down gated by rowShows"            native/ 'rowShows\(.mcpDown\)'
+t_grep "RowVisibilitySection view"             native/ 'struct RowVisibilitySection'
+t_grep "RowToggleRow row component"            native/ 'struct RowToggleRow'
+t_grep "menuBehavior notification restarts timer" native/ 'restartScanTimer\(\)'
+t_grep "inline row uses centerY alignment"     native/ 'row.alignment = .centerY'
+t_grep "state-icon uses SF Symbol now"         native/ 'symbolAttributedString'
+
+# ── Cost reporting ───────────────────────────────────────────────────────────
+#
+# The dashboard once reported a fable session's $215 as $0.00: estimate_cost
+# priced any model missing from COST_RATES at zero, which renders exactly like
+# genuinely free. These pin the two halves of the contract — the daemon's own
+# cost file wins, and an unpriced model says so instead of guessing zero.
+
+# ── Live-tail cursor ─────────────────────────────────────────────────────────
+#
+# A tools group flushed mid-burst keeps its seq while still gaining tools, so
+# `since=<seq>` filtering used to hide every tool appended after the client
+# first saw that group — the transcript went quiet and the UI claimed the agent
+# was done. The probe drives the real client loop against a growing fixture and
+# checks both directions: the growth arrives, AND the session still goes idle
+# once the burst actually stops.
+
+t_section "live-tail cursor"
+
+SINCE_OUT=$(python3 "$REPO_ROOT/tests/fixtures/since-probe.py" 2>&1)
+t_eq "since-probe: all cases pass" "0" "$?"
+for _case in "client catches up mid-burst" "grown group is delivered" \
+             "growth counts as activity" "no duplicate records" \
+             "goes idle when the burst stops" "post-close records still arrive" \
+             "results reach a client that already saw the call" \
+             "a complete group followed by Claude's reply is not resent" \
+             "the full output is kept out of records"; do
+    if grep -q "\[PASS\] $_case" <<< "$SINCE_OUT"; then t_pass "since: $_case"
+    else t_fail "since: $_case — $(grep -A1 "\[FAIL\] $_case" <<< "$SINCE_OUT" | tail -1)"; fi
+done
+
+# A codex row used to look exactly like a claude row and 404 on click. The hub
+# can only read claude transcripts: they live under ~/.claude/projects, and the
+# reader keys on user/assistant lines a codex rollout doesn't have — pointing it
+# at one would render an EMPTY session rather than fail, which is worse.
+# /tmp is world-writable, so a per-PID path is untrusted input. Opening a FIFO
+# blocks forever waiting for a writer and takes the whole scan with it — and
+# os.path.exists() is True for a FIFO, so the idiom these readers used was no
+# guard at all. The hard timeout IS the assertion: without isfile() the probe
+# never returns.
+SCAN_PROBE="$REPO_ROOT/tests/fixtures/scan-probe.py"
+_fifo_probe() {   # kind -> what the reader returns, or HUNG
+    local kind="$1" pid=999883
+    mkfifo "/tmp/claude-${kind}-${pid}" 2>/dev/null
+    perl -e 'my $p=fork; if($p==0){setpgrp(0,0); exec(@ARGV)} local $SIG{ALRM}=sub{kill "KILL",-$p; print "HUNG\n"; exit 0}; alarm 8; waitpid($p,0)' \
+        python3 "$SCAN_PROBE" read_pid_file "$pid" "$kind" 2>/dev/null
+    trash "/tmp/claude-${kind}-${pid}" 2>/dev/null || true
+}
+for _k in statusline ctx tpath cost; do
+    t_eq "a FIFO at claude-${_k} does not hang the scan" "" "$(_fifo_probe "$_k")"
+done
+
+# Hub hardening. Each of these reported something confident and false: a scan
+# that failed cached "no sessions" as fact; a cache miss launched N scans
+# instead of one; a broken transcript.py stayed silent until someone hit a 500;
+# and hub.sh called a start successful when the port belonged to another
+# process entirely — which served stale code for hours.
+# Found by the adversarial pass, each a hole in a fix from this same session:
+# a scan that crashed AFTER printing valid JSON was cached as truth; `?since=`
+# (bare) skipped the validation entirely because parse_qs drops blank values;
+# and `**` follows symlinks, so one planted link made a tailnet-reachable
+# server hand out any .jsonl on the disk.
+t_grep "a scan that exits nonzero is a failure" lib/hub-server.py 'scan.sh exited'
+t_grep "blank query values are kept"        lib/hub-server.py 'keep_blank_values=True'
+t_grep "symlinks cannot escape the root"    lib/hub-server.py 'startswith\(root \+ os.sep\)'
+t_grep "a shrunk group is not frozen"       lib/transcript-app.html 'if \(after === before\) continue'
+
+t_grep "stale scans refresh single-flight"  lib/hub-server.py 'single-flight'
+t_grep "a failed scan keeps the last good"  lib/hub-server.py 'keeping the last good result'
+t_grep "broken transcript.py warns at boot" lib/hub-server.py 'WARNING: transcript.py failed to import'
+t_grep "parser errors do not reach clients" lib/hub-server.py 'transcript could not be parsed'
+t_grep "duplicate session ids are surfaced" lib/hub-server.py 'transcripts share id'
+t_grep "hub.sh checks OUR pid holds it"     lib/hub.sh 'grep -qx "\$pid"'
+
+t_grep "hub passes provider through (live)"   lib/hub-server.py '"provider": inst.get'
+t_grep "hub passes provider through (recent)" lib/hub-server.py '"provider": h.get'
+t_grep "unreadable rows carry no link"        lib/hub-index.html 'const openable'
+t_grep "unreadable rows say why"              lib/hub-index.html "transcript isn't readable here"
+t_grep "no prefetch of unreadable rows"       lib/hub-index.html '\.filter\(openable\)'
+
+t_grep "EOF flush marks the group open" lib/transcript.py "grp\['open'\] = True"
+t_grep "reader resends the open group"  lib/hub-server.py 'r\.get\("open"\)'
+t_grep "bad since is rejected, not ignored" lib/hub-server.py 'since must be an integer'
+t_grep "client swaps the open group"    lib/transcript-app.html 'function refreshOpen'
+
+t_section "cost reporting"
+
+COST_PID=999424
+
+# Rates are per model id, from the Claude pricing reference (cached 2026-09-25):
+# input/output per MTok, cache reads 0.1x input (0.05x Opus 5.5, 0.025x Fable
+# 5.1), cache writes 1.25x input for 5 minutes and 2x for an hour. The old
+# table priced every Opus at the retired $15/$75, three to four times too high.
+t_eq "opus 4.8 prices at 5/25"        "30.0"  "$(python3 "$SCAN_PROBE" estimate claude-opus-4-8 1000000 1000000)"
+t_eq "opus 5.5 prices at 4/20"        "24.0"  "$(python3 "$SCAN_PROBE" estimate claude-opus-5-5 1000000 1000000)"
+t_eq "fable 5.1 prices at 10/50"      "60.0"  "$(python3 "$SCAN_PROBE" estimate claude-fable-5-1 1000000 1000000)"
+t_eq "sonnet 4.6 prices at 3/15"      "18.0"  "$(python3 "$SCAN_PROBE" estimate claude-sonnet-4-6 1000000 1000000)"
+t_eq "a dated haiku id prices"        "6.0"   "$(python3 "$SCAN_PROBE" estimate claude-haiku-4-5-20251001 1000000 1000000)"
+t_eq "opus 5.5 cache reads at 0.05x"  "0.2"   "$(python3 "$SCAN_PROBE" estimate claude-opus-5-5 0 0 1000000 0 0)"
+t_eq "fable 5.1 cache reads at 0.025x" "0.25" "$(python3 "$SCAN_PROBE" estimate claude-fable-5-1 0 0 1000000 0 0)"
+t_eq "sonnet 4.6 cache reads at 0.1x" "0.3"   "$(python3 "$SCAN_PROBE" estimate claude-sonnet-4-6 0 0 1000000 0 0)"
+t_eq "5-minute cache writes at 1.25x" "5.0"   "$(python3 "$SCAN_PROBE" estimate claude-opus-5-5 0 0 0 1000000 0)"
+t_eq "1-hour cache writes at 2x"      "8.0"   "$(python3 "$SCAN_PROBE" estimate claude-opus-5-5 0 0 0 0 1000000)"
+# A bare family names no price: which Opus? Unknown is None, not a guess.
+t_eq "a bare family alias is None"    "None"  "$(python3 "$SCAN_PROBE" estimate opus 1000000 1000000)"
+t_eq "unpriced model is None, not 0"  "None"  "$(python3 "$SCAN_PROBE" estimate claude-opus-9-9 1000000 1000000)"
+t_eq "empty model is None"            "None"  "$(python3 "$SCAN_PROBE" estimate '' 1000000 1000000)"
+# A name that merely contains a family word must not inherit its rates.
+t_eq "octopus is not opus"            "None"  "$(python3 "$SCAN_PROBE" estimate octopus 1000000 1000000)"
+t_eq "zero tokens costs nothing"      "0.0"   "$(python3 "$SCAN_PROBE" estimate claude-opus-5-5 0 0)"
+# json.loads accepts a bare Infinity, so a corrupt transcript's usage counts can
+# arrive as inf. An infinite cost serializes as a non-JSON literal and takes the
+# whole scan down.
+t_eq "infinite input tokens are None" "None"  "$(python3 "$SCAN_PROBE" estimate claude-opus-5-5 inf 100)"
+t_eq "infinite output tokens are None" "None" "$(python3 "$SCAN_PROBE" estimate claude-opus-5-5 100 inf)"
+t_eq "NaN tokens are None"            "None"  "$(python3 "$SCAN_PROBE" estimate claude-opus-5-5 nan 100)"
+t_eq "infinite cache tokens are None" "None"  "$(python3 "$SCAN_PROBE" estimate claude-opus-5-5 0 0 inf 0 0)"
+t_eq "sub-agent spend is included; unpriced makes it unknown" "5.0:None" \
+     "$(python3 "$SCAN_PROBE" subagent_cost)"
+
+# read_cost trusts the daemon's file, but never a malformed one.
+printf '215.3312241500002\n' > "/tmp/claude-cost-${COST_PID}"
+t_eq "reads the daemon's cost file"   "215.3312"  "$(python3 "$SCAN_PROBE" read_cost "$COST_PID")"
+printf '' > "/tmp/claude-cost-${COST_PID}"
+t_eq "empty cost file is None"        "None"  "$(python3 "$SCAN_PROBE" read_cost "$COST_PID")"
+printf '   \n' > "/tmp/claude-cost-${COST_PID}"
+t_eq "whitespace cost file is None"   "None"  "$(python3 "$SCAN_PROBE" read_cost "$COST_PID")"
+printf 'not-a-number\n' > "/tmp/claude-cost-${COST_PID}"
+t_eq "garbage cost file is None"      "None"  "$(python3 "$SCAN_PROBE" read_cost "$COST_PID")"
+printf -- '-5\n' > "/tmp/claude-cost-${COST_PID}"
+t_eq "negative cost is None"          "None"  "$(python3 "$SCAN_PROBE" read_cost "$COST_PID")"
+# float() parses these, and json.dumps would emit the bare literal Infinity —
+# not JSON, so every consumer of the scan breaks, not just one card.
+printf 'inf\n' > "/tmp/claude-cost-${COST_PID}"
+t_eq "infinite cost is None"          "None"  "$(python3 "$SCAN_PROBE" read_cost "$COST_PID")"
+printf 'nan\n' > "/tmp/claude-cost-${COST_PID}"
+t_eq "NaN cost is None"               "None"  "$(python3 "$SCAN_PROBE" read_cost "$COST_PID")"
+printf '1e400\n' > "/tmp/claude-cost-${COST_PID}"
+t_eq "overflow-to-inf cost is None"   "None"  "$(python3 "$SCAN_PROBE" read_cost "$COST_PID")"
+trash "/tmp/claude-cost-${COST_PID}" 2>/dev/null || true
+t_eq "missing cost file is None"      "None"  "$(python3 "$SCAN_PROBE" read_cost "$COST_PID")"
+mkdir -p "/tmp/claude-cost-${COST_PID}"
+t_eq "a directory is not a cost"      "None"  "$(python3 "$SCAN_PROBE" read_cost "$COST_PID")"
+rmdir "/tmp/claude-cost-${COST_PID}" 2>/dev/null || true
+
+# /tmp is world-writable: a FIFO here blocks open() forever waiting for a
+# writer, stalling every scan. The hard timeout is the assertion — without the
+# isfile() guard this never returns.
+mkfifo "/tmp/claude-cost-${COST_PID}" 2>/dev/null
+_fifo_read=$(perl -e 'my $p=fork; if($p==0){setpgrp(0,0); exec(@ARGV)} local $SIG{ALRM}=sub{kill "KILL",-$p; print "HUNG\n"; exit 0}; alarm 8; waitpid($p,0)' \
+    python3 "$SCAN_PROBE" read_cost "$COST_PID" 2>/dev/null)
+t_eq "a FIFO does not hang the scan"  "None"  "$_fifo_read"
+trash "/tmp/claude-cost-${COST_PID}" 2>/dev/null || true
+
+
+# Transcripts are just files on disk and json.loads accepts a bare Infinity, so
+# usage counts are untrusted input. Guard at the boundary they enter through.
+t_eq "Infinity token count is 0"      "0"     "$(python3 "$SCAN_PROBE" tokens 'Infinity')"
+t_eq "NaN token count is 0"           "0"     "$(python3 "$SCAN_PROBE" tokens 'NaN')"
+t_eq "string token count is 0"        "0"     "$(python3 "$SCAN_PROBE" tokens '"lots"')"
+t_eq "null token count is 0"          "0"     "$(python3 "$SCAN_PROBE" tokens 'null')"
+t_eq "bool token count is 0"          "0"     "$(python3 "$SCAN_PROBE" tokens 'true')"
+t_eq "real token count survives"      "1234"  "$(python3 "$SCAN_PROBE" tokens '1234')"
+
+# The unit guards above all passed while the scan still emitted a bare Infinity
+# through tokens_in, so assert on the whole scan's real output too.
+t_eq "poisoned transcript keeps the scan valid JSON" "STRICT_JSON_OK" \
+     "$(python3 "$SCAN_PROBE" poison_scan)"
+
+# ── Session counts ───────────────────────────────────────────────────────────
+#
+# Reading only the last 500KB made turns/tool_calls a fiction on any real
+# session: transcripts are mostly huge tool_result lines, so a 58MB session
+# reported 44 of its 4488 turns — and shipped that as the total.
+
+t_section "session counts"
+
+t_eq "counts every turn past the old window" "40:40:True" \
+     "$(python3 "$SCAN_PROBE" turns_big 40)"
+t_eq "counts a small session exactly"        "3:3:False" \
+     "$(python3 "$SCAN_PROBE" turns_big 3)"
+
+# History used to count every JSONL line as a turn (so 12 turns read as 25) and
+# take its tokens from the last line, which is nearly always a tool_result —
+# hence a day of real work totalling 6 input tokens.
+t_eq "history counts turns like live does"   "12:120:60" \
+     "$(python3 "$SCAN_PROBE" history_session 12)"
+# One message is written as one line per content block, each repeating its id
+# and usage; the dropdown summed them and read about 4x the real tokens.
+t_eq "a multi-line message counts once"      "live=2:20:150:1000:2|hist=2:20:150" \
+     "$(python3 "$SCAN_PROBE" dedup_usage)"
+# Sub-agents were counted as child processes, which are background shells.
+t_eq "sub-agents are recent agent transcripts" "0:1:0" "$(python3 "$SCAN_PROBE" subagents)"
+t_eq "each message is priced at the model that wrote it (live and history)" "70.0:70.0" \
+     "$(python3 "$SCAN_PROBE" per_model_cost)"
+# A '<synthetic>' error stub is not a model, and live and ended must agree after /model.
+t_eq "the model shown is the last real one" \
+     "claude-opus-5-5|claude-opus-5-5 claude-fable-5-1|claude-fable-5-1" \
+     "$(python3 "$SCAN_PROBE" model_choice)"
+t_grep "the machine banner is in the change hash" lib/hub-index.html 'JSON.stringify\(FEED.machine'
+# The same MCP-down list sat on every row as N red warnings for one condition.
+t_eq "a fact every row shares is said once" \
+     "[('mcp_down', 'a,b'), ('scratchpad_count', '44')]|['', '', '']|['1', '1', '2']|ctx=50|single={}:a,b" \
+     "$(python3 "$SCAN_PROBE" machine_facts)"
+# An ended session used to change name, project and model the moment it ended.
+t_eq "an ended session keeps its identity" \
+     "1|nice-name|x/my-app|fable|claude-fable-5-1|live_absent|opus,sonnet,opus" \
+     "$(python3 "$SCAN_PROBE" history_identity)"
+
+# ── Day boundaries ───────────────────────────────────────────────────────────
+#
+# "Today" means the reader's today. Bucketing by UTC is self-consistent and
+# still wrong everywhere but UTC: at +05:30 a night's work carried yesterday's
+# UTC date and dropped out of `today` the moment UTC rolled over. The zones are
+# pinned because this bug is invisible in UTC — the tests must fail wherever
+# they run, not only where they were written.
+
+# ── Scan cost ────────────────────────────────────────────────────────────────
+#
+# The scan's expense was never the files — it was spawning lsof and ps once per
+# live session. Both cost far more to start than to answer (one lsof about
+# eight processes takes the same ~0.3s as one about a single process), so 25
+# spawns burned 2.7s of a 2.8s scan. These pin the batching, and the tail read
+# that replaced loading a 26MB log to keep its last 500 lines.
+
+t_section "scan cost"
+
+# -a is load-bearing: lsof ORs its selection flags, so `-p <pids> -d cwd` means
+# "these pids OR any cwd" and dumps the whole process table — ~2400 lines for a
+# pid that doesn't even exist, and the cache then held every process on the box.
+t_grep "lsof ANDs its selection flags"  lib/scan.sh "'lsof', '-a', '-p'"
+t_check "lsof -a really filters"        bash -c '[ "$(lsof -a -p 999999 -d cwd -Fn 2>/dev/null | wc -l | tr -d " ")" = "0" ]'
+t_grep "only requested pids are cached" lib/scan.sh 'cur in want'
+
+t_grep "process info is batched"        lib/scan.sh 'def prime_process_info'
+t_grep "batched before any row is built" lib/scan.sh 'prime_process_info\(\[p for p'
+# Transcripts are streamed line by line; a readlines() is a whole-file slurp.
+t_check "no whole-file slurp in the scan"  bash -c '! rg -q "readlines\(\)" lib/scan.sh'
+
+t_section "ghost sessions"
+
+# A row exists only for a live interactive session file (1006), or a young
+# claude process still writing one (1007). Never a codex daemon (1001), a
+# headless `claude -p` worker with or without a file (1002, 1003), a stale
+# file whose pid is gone (1004), a reused pid (1005), or an old fileless
+# claude process (1008).
+t_eq "only interactive sessions are live"   "1006:interactive:1006:n1006,1007:pending:-:-" \
+     "$(python3 "$SCAN_PROBE" liveness)"
+t_eq "ended list hides stubs under 4 turns" "4,10" \
+     "$(python3 "$SCAN_PROBE" history_stubs)"
+t_eq "last prompt skips notifications, skill bodies, command wrappers, peers, interrupts" \
+     "A=fix the login bug|B=/catchup at notes.md|C=-|D=ship it" \
+     "$(python3 "$SCAN_PROBE" prompt_filter)"
+t_eq "transcript records say who wrote each user line" \
+     "clear:/clear hidden command:/catchup injected typed task hook peer hidden" \
+     "$(python3 "$REPO_ROOT/tests/fixtures/turns-probe.py")"
+t_eq "the input-mode line beside each permission-mode line is not a mode change" \
+     "bypassPermissions auto | now auto" \
+     "$(python3 "$REPO_ROOT/tests/fixtures/turns-probe.py" modes)"
+if command -v node >/dev/null 2>&1; then
+    t_eq "chapters are your messages; harness turns fold in, commands wait for your next message" \
+         "fix the tab bug cmds=/catchup at x.md h=task:1,hook:1,peer:1 div=clear | second ask | Review cmds=/review,/model" \
+         "$(python3 "$REPO_ROOT/tests/fixtures/turns-probe.py" chapters)"
+    t_eq "every URL and path in a transcript becomes a link; trailing punctuation and D1a/D2b do not" \
+         "https://github.com/x/y/pull/9 => https://github.com/x/y/pull/9 | /Users/me/Code/app/lib/scan.sh => /f?p=%2FUsers%2Fme%2FCode%2Fapp%2Flib%2Fscan.sh | ~/.claude/rules/git.md => /f?p=~%2F.claude%2Frules%2Fgit.md | lib/hub-index.html => /f?p=%2FUsers%2Fme%2FCode%2Fapp%2Flib%2Fhub-index.html&rel=lib%2Fhub-index.html" \
+         "$(node "$REPO_ROOT/tests/fixtures/links-probe.js")"
+    t_eq "drawn boxes become callouts, only declared or shell blocks are coloured, task tags become fields" \
+         "box:callout blocks:plain,shell,shell,box card:task=b0q;status=completed summary-body" \
+         "$(node "$REPO_ROOT/tests/fixtures/render-probe.js")"
+    t_eq "card tails leave out hooks and mode changes, and count them" \
+         "❯ second ask | ● Done. | +2" \
+         "$(python3 "$REPO_ROOT/tests/fixtures/turns-probe.py" tail)"
+else
+    t_fail "chapters probe needs node (SKIP-loud: not installed)"
+fi
+t_grep "live rows carry the session file's name/status" lib/hub-server.py '"status_since": inst.get'
+t_eq "one state rule: busy works, a fresh turn needs you, an hour unanswered is idle" \
+     "working needs_you idle needs_you working needs_you" \
+     "$(python3 "$SCAN_PROBE" attention)"
+t_eq "a session's last reply is its closing paragraph, whole, never a code block" \
+     "Should I push? | One line wraps | Ask? | -" \
+     "$(python3 "$SCAN_PROBE" last_paragraph)"
+t_grep "the hub groups by the scanner's state rule" lib/hub-index.html "parked: s.attention === 'idle'"
+t_grep "cards label with the session name"  lib/hub-index.html 'cleanTitle\(s.name\)'
+
+t_section "small truths (R3)"
+
+t_eq "stale tpath pointers are ignored"          "OK:STALE_IGNORED" \
+     "$(python3 "$SCAN_PROBE" tpath_stale)"
+t_grep "hub pidfile is port-scoped"      lib/hub.sh 'claude-hub-\$\{PORT\}\.pid'
+t_grep "hub start verifies the loopback" lib/hub.sh 'healthz'
+t_grep "/data parses through the cache"  lib/hub-server.py 'def _parse_cached'
+t_check "/data cache behaves under real HTTP (isolation, no mutation, eviction)" \
+        python3 "$REPO_ROOT/tests/fixtures/hub-cache-probe.py"
+t_check "repeat navigation stays cheap (LRU fleet cache, single-flight, 304s, stale-serve)" \
+        python3 "$REPO_ROOT/tests/fixtures/hub-perf-probe.py"
+t_grep "tab titles primed once per scan" lib/scan.sh '_tab_topics'
+
+t_section "meld bridge (Phase 0)"
+
+# fresh:stale:unknown(old):unknown(future):skew:fresh(N-1):unknown(bad json):
+# unknown(Infinity poison):unknown(wrong shape) + fresh payload carries values
+t_eq "digest state machine classifies before trusting" \
+     "fresh:stale:unknown:unknown:skew:fresh:unknown:unknown:unknown:CARRIED" \
+     "$(python3 "$SCAN_PROBE" digest_states)"
+t_eq "ipc absent degrades to today, never raises"  "ABSENT_OK" \
+     "$(python3 "$SCAN_PROBE" digest_additive)"
+t_check "vendored digest fixture is valid JSON with contract fields" \
+        python3 -c "import json; d=json.load(open('tests/fixtures/ipc-digest-fixture.json')); assert d['contract_version']==1 and 'sessions' in d and '_unresolved' in d['sessions']"
+
+t_section "meld bridge (Phase 1)"
+
+t_eq "broker silence is unknown, never 0"     "None:unreachable:0:fresh" \
+     "$(python3 "$SCAN_PROBE" ipc_state_field)"
+t_eq "kill switch restores the legacy shape"  "0:ABSENT" \
+     "$(python3 "$SCAN_PROBE" ipc_state_kill)"
+t_grep "hub passes the ipc join to cards"     lib/hub-server.py '"ipc": inst.get'
+t_grep "badge goes ? when any read is stale"  lib/hub-index.html "total is unknown"
+
+t_section "meld bridge (Phase 2)"
+
+t_eq "digest dark-launch: verb absent leaves the legacy shape" "3:fresh:PH1SHAPE:TRIED" \
+     "$(python3 "$SCAN_PROBE" digest_dark)"
+t_eq "fresh digest sources the card, count subprocess retired" "digest:fresh:2:1:1200:300:1:NOCOUNT" \
+     "$(python3 "$SCAN_PROBE" digest_live)"
+t_eq "stale carries dimmed values; skew/unknown carry nothing" "stale:2:HASAGE:skew:None:unknown:None" \
+     "$(python3 "$SCAN_PROBE" digest_wire_states)"
+t_eq "HUB_IPC_DIGEST=0 keeps the retired count path"          "3:fresh:NODIGEST" \
+     "$(python3 "$SCAN_PROBE" digest_kill)"
+t_eq "HUB_IPC_OVERLAY=0 stays fully legacy, no digest spawn"  "3:ABSENT:NODIGEST" \
+     "$(python3 "$SCAN_PROBE" digest_overlay_kill)"
+t_eq "hanging digest: capped, honest, no count stacking"      "unreachable:None:NOCOUNT:FAST" \
+     "$(python3 "$SCAN_PROBE" digest_hang)"
+t_eq "grandchild holding the pipe: capped AND group-killed"   "unreachable:GC_DEAD:FAST" \
+     "$(python3 "$SCAN_PROBE" digest_grandchild)"
+t_eq "one digest spawn covers a cwd's sessions"               "1:digest:digest" \
+     "$(python3 "$SCAN_PROBE" digest_one_spawn)"
+t_eq "disagreements: no ledger, flag on 6th scan, silent on agreement, poison-proof" \
+     "NOLOG:NOFLAG5:FLAG6:SSTATE_OK:POISON_OK" "$(python3 "$SCAN_PROBE" disagree_pass)"
+t_check "count parity smoke (SKIP-loud while verb absent)" \
+        bash tests/fixtures/ipc-parity-smoke.sh
+t_check "contract diff: live digest superset of fixture (SKIP-loud)" \
+        bash tests/fixtures/ipc-contract-diff.sh
+t_grep "owes line renders only under fresh"       lib/hub-index.html "st === 'fresh'"
+t_grep "stale chips carry their age"              lib/hub-index.html "as of"
+t_grep "disagreement flag names both authorities" lib/hub-index.html "ipc thinks"
+t_check "render path never reads the liveness claim" \
+        bash -c '! rg -q "liveness_claim" lib/hub-index.html'
+
+# ── Summary ──────────────────────────────────────────────────────────────────
+
+t_log ""
+t_log "${C_DIM}────────────────────────────────${C_RESET}"
+if [[ "$FAIL" -eq 0 ]]; then
+    t_log "${C_GREEN}all green: $PASS passed${C_RESET}"
+    exit 0
+else
+    t_log "${C_RED}$FAIL failed${C_RESET}, $PASS passed"
+    exit 1
+fi
