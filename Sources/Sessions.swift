@@ -243,12 +243,25 @@ enum SessionActions {
         }
     }
 
-    /// Opens the hub's board in the browser, starting the hub first when it is off.
-    static func openHub(done: @escaping (String?) -> Void = { _ in }) {
+    /// Opens the hub's board in Switchboard's own window, or in the browser
+    /// (`inBrowser`, a middle click), starting the hub first when it is off.
+    static func openHub(inBrowser: Bool = false, done: @escaping (String?) -> Void = { _ in }) {
         DispatchQueue.global(qos: .userInitiated).async {
             if let err = Integrations.startHubIfDown() { DispatchQueue.main.async { done(err) }; return }
             DispatchQueue.main.async {
-                if let u = URL(string: "http://127.0.0.1:5400/") { NSWorkspace.shared.open(u) }
+                if inBrowser { if let u = URL(string: "http://127.0.0.1:5400/") { NSWorkspace.shared.open(u) } }
+                else { TranscriptWindow.showBoard() }
+                done(nil)
+            }
+        }
+    }
+
+    /// A session's transcript in the browser, for a middle click on its row.
+    static func openTranscriptInBrowser(_ s: LiveSession, done: @escaping (String?) -> Void = { _ in }) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let err = Integrations.startHubIfDown() { DispatchQueue.main.async { done(err) }; return }
+            DispatchQueue.main.async {
+                if let u = TranscriptWindow.url(for: s.id) { NSWorkspace.shared.open(u) }
                 done(nil)
             }
         }
@@ -279,13 +292,19 @@ struct SessionsPage: View {
                 Text("No Claude sessions are open").font(.system(size: 11.5)).foregroundStyle(.secondary)
             } else {
                 strip(list)
-                if let h = hero { HeroCard(session: h, now: now) { open(h) } }
+                if let h = hero {
+                    HeroCard(session: h, now: now) { open(h) }
+                        .onMiddleClick("shero-" + h.id, space: ScrollTargets.cardSpace) { openInBrowser(h) }
+                }
                 ForEach([Attention.needsYou, .working, .idle], id: \.self) { a in
                     let group = rest.filter { $0.attention == a }
                     if !group.isEmpty {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(groupTitle(a)).font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
-                            ForEach(group) { s in SessionRow(session: s, now: now, busy: opening == s.id) { open(s) } }
+                            ForEach(group) { s in
+                                SessionRow(session: s, now: now, busy: opening == s.id) { open(s) }
+                                    .onMiddleClick("srow-" + s.id, space: ScrollTargets.cardSpace) { openInBrowser(s) }
+                            }
                         }
                     }
                 }
@@ -300,7 +319,8 @@ struct SessionsPage: View {
                     SessionActions.openHub { failed = $0 }
                 } label: { Label("Hub", systemImage: "rectangle.grid.2x2") }
                     .buttonStyle(.borderless).font(.system(size: 11.5))
-                    .help("Open the session hub's board: every session, past ones too, with search")
+                    .help("Open the session hub's board: every session, past ones too, with search. Middle-click to open it in the browser.")
+                    .onMiddleClick("shub", space: ScrollTargets.cardSpace) { failed = nil; SessionActions.openHub(inBrowser: true) { failed = $0 } }
                 Spacer()
             }
         }
@@ -310,6 +330,11 @@ struct SessionsPage: View {
 
     private func groupTitle(_ a: Attention) -> String {
         switch a { case .needsYou: return "Needs you"; case .working: return "Working"; case .idle: return "Idle" }
+    }
+
+    private func openInBrowser(_ s: LiveSession) {
+        failed = nil
+        SessionActions.openTranscriptInBrowser(s) { failed = $0 }
     }
 
     private func open(_ s: LiveSession) {

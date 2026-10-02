@@ -83,6 +83,7 @@ final class HoverPeek: NSObject {
     private var poll: Timer?
     private var scrollWatch: Any?
     private var keyWatch: Any?
+    private var middleWatch: Any?
     private var cycle = QuickCycle()
     private var inside = false
     /// How long the card stays after the pointer leaves, so a chip can still be reached.
@@ -111,8 +112,14 @@ final class HoverPeek: NSObject {
         poll?.tolerance = 0.1
         // Scrolling over the icon or the card's title bar turns the page; over the content it does not.
         scrollWatch = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
-            guard let self, QuickCycle.turnsPage(at: self.spot(of: e), headerBottom: self.state.headerBottom) else { return e }
-            self.scrolled(e)
+            guard let self else { return e }
+            let spot = self.spot(of: e)
+            if QuickCycle.turnsPage(at: spot, headerBottom: self.state.headerBottom) { self.scrolled(e); return e }
+            // over a slider on the card, the wheel steps the slider
+            if case .card = spot, let v = self.popover.contentViewController?.view {
+                let p = v.convert(e.locationInWindow, from: nil)
+                if ScrollTargets.card.handle(e, at: CGPoint(x: p.x, y: v.isFlipped ? p.y : v.bounds.height - p.y)) { return nil }
+            }
             return e
         }
         // Number keys pick a page while the card has the keyboard and no field is being typed in.
@@ -125,9 +132,14 @@ final class HoverPeek: NSObject {
             self.state.page = self.cycle.page
             return nil
         }
+        // A middle click on a card row opens that thing in its fuller home.
+        middleWatch = NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) { [weak self] e in
+            guard let self, self.popover.isShown, let v = self.popover.contentViewController?.view, e.window === v.window else { return e }
+            return MiddleClickTargets.shared.handle(e, in: v, space: "quickCard") ? nil : e
+        }
     }
 
-    deinit { [scrollWatch, keyWatch].compactMap { $0 }.forEach(NSEvent.removeMonitor) }
+    deinit { [scrollWatch, keyWatch, middleWatch].compactMap { $0 }.forEach(NSEvent.removeMonitor) }
 
     private var cardWindow: NSWindow? { popover.contentViewController?.view.window }
 

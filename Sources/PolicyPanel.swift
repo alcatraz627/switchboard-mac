@@ -210,10 +210,19 @@ struct PolicyPanel: View {
             } else {
                 // Sized to the content, up to the screen cap, so a short tab
                 // does not leave the popover padded with space.
-                ScrollView(.vertical, showsIndicators: true) {
-                    current.content.background(GeometryReader { g in
-                        Color.clear.preference(key: ContentHeightKey.self, value: g.size.height)
-                    })
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: true) {
+                        current.content.background(GeometryReader { g in
+                            Color.clear.preference(key: ContentHeightKey.self, value: g.size.height)
+                        })
+                    }
+                    // a link that lands on a row brings it into view, then the row flashes
+                    .onReceive(Reveal.shared.$key) { k in
+                        guard let k else { return }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(k, anchor: .center) }
+                        }
+                    }
                 }
                 .frame(height: min(max(contentHeight, 120), PT.maxHeight))
                 .scrollContentFrame()
@@ -764,6 +773,8 @@ struct SystemRowView: View {
                     .padding(.leading, indent)
             }
         }
+        .revealFlash(row.key)
+        .id(row.key ?? row.label)
         // A switch reports nothing back; the next probe showing it in the asked
         // position is the confirmation.
         .onChange(of: row.isOn) { now in
@@ -834,12 +845,13 @@ struct SystemRowView: View {
             }
             .fixedSize()
             if let link = row.link, let url = URL(string: link) {
-                Button { NSWorkspace.shared.open(url) } label: {
+                Button { openLink(url) } label: {
                     Image(systemName: "arrow.up.right.square").font(.system(size: 12))
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
-                .help("Open \(link)")
+                .help(TranscriptWindow.isHub(url) ? "Open \(link) in Switchboard's window. Middle-click for the browser." : "Open \(link)")
+                .onMiddleClick("link-" + (row.key ?? row.label), space: ScrollTargets.space) { NSWorkspace.shared.open(url) }
             }
             control.frame(minWidth: row.showsBadge ? 44 : 0, alignment: .trailing)
         }
@@ -1333,6 +1345,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     private var dot: IconDot?
     private var dotWatch: AnyCancellable?
     private var panelScroll: Any?
+    private var panelMiddle: Any?
     private var pageWatch: AnyCancellable?
     private var countWatch: AnyCancellable?
     /// Switches set to flip back on a timer, in words, for the Now page's badges.
@@ -1400,7 +1413,8 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
                                  openSearch: { [weak self] tab, q in
                                      self?.store.queries[tab] = q
                                      self?.peek?.hide(); self?.show(tab: tab)
-                                 })
+                                 },
+                                 openReveal: { [weak self] tab, key in self?.reveal(tab: tab, key: key) })
             peek = HoverPeek(button: b, state: quick, card: AnyView(card),
                              refresh: { [weak self] in self?.refreshQuick() },
                              panelOpen: { [weak self] in self?.popover.isShown ?? false })
@@ -1438,6 +1452,11 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             let at = CGPoint(x: p.x, y: v.isFlipped ? p.y : v.bounds.height - p.y)
             return ScrollTargets.shared.handle(e, at: at) ? nil : e
         }
+        // A middle click on a row that has a fuller home opens it there.
+        panelMiddle = NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) { [weak self] e in
+            guard let self, self.popover.isShown, let v = self.popover.contentViewController?.view, e.window === v.window else { return e }
+            return MiddleClickTargets.shared.handle(e, in: v, space: ScrollTargets.space) ? nil : e
+        }
 
         // Pay the first-open costs now, not on the owner's click: load the
         // values and lay out the view once while nobody is waiting.
@@ -1454,6 +1473,19 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     @objc private func toggle(_ sender: Any?) {
         if popover.isShown { popover.performClose(sender); return }
         show()
+    }
+
+    /// Opens the panel on a tab and lands on one row there: scrolled into view and flashed.
+    func reveal(tab: String, key: String) {
+        peek?.hide()
+        if popover.isShown {
+            UserDefaults.standard.set(tab, forKey: PolicyPanel.tabKey)
+            Visibility.rememberTab(tab)
+        } else {
+            show(tab: tab)
+        }
+        // after the tab has drawn its rows, so the row is there to scroll to
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { Reveal.shared.show(key) }
     }
 
     func show(tab chosen: String? = nil) {

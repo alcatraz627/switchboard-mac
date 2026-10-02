@@ -2339,6 +2339,12 @@ function markBack() {
     if (sid) try { sessionStorage.setItem('hub-back', sid); } catch (e) {}
 }
 $('.tb-back').addEventListener('click', markBack);
+/* hovering the logo refreshes this transcript now, at most once every 2 s */
+let logoRefreshAt = 0;
+$('.tb-back').addEventListener('mouseenter', () => {
+    if (Date.now() - logoRefreshAt < 2000) return;
+    logoRefreshAt = Date.now(); pollLive();
+});
 addEventListener('pagehide', markBack);
 
 /* ================= handoff view controls (theme · palette · direction · text size · timeline) */

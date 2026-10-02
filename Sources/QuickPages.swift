@@ -312,6 +312,8 @@ struct QuickCard: View {
     let openTab: (String) -> Void
     /// Opens a tab with its search filled in, so the row a badge names is in view.
     var openSearch: (String, String) -> Void = { _, _ in }
+    /// Opens a tab and lands on one row there, flashing it.
+    var openReveal: (String, String) -> Void = { _, _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -411,6 +413,10 @@ struct QuickCard: View {
                             if let p = b.opens { state.page = p }
                             else if let t = b.tab { if let q = b.query { openSearch(t, q) } else { openTab(t) } }
                         }
+                        // a middle click always goes to the full tab, even for a badge that opens a hover page
+                        .onMiddleClick("badge-" + b.id, space: ScrollTargets.cardSpace) {
+                            if let t = b.tab ?? b.opens?.tab { if let q = b.query { openSearch(t, q) } else { openTab(t) } }
+                        }
                     }
                 }
             }
@@ -458,33 +464,34 @@ struct QuickCard: View {
             if groups.isEmpty { empty("Nothing waits on you") }
             ForEach(shown, id: \.0) { title, rows in
                 Text(title).font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
-                ForEach(rows) { r in QuickNeedRow(row: r, waiting: title == "Pushes" || title == "Policy asks" || title == "Claude asks") }
+                ForEach(rows) { r in
+                    QuickNeedRow(row: r, waiting: title == "Pushes" || title == "Policy asks" || title == "Claude asks")
+                        .onMiddleClick("qneed-" + (r.key ?? r.label), space: ScrollTargets.cardSpace) {
+                            openReveal("approvals", r.key ?? r.label)
+                        }
+                }
             }
             if total > 5 { more(total - 5, tab: "approvals") }
         }
     }
 
     // ── Bulbs ───────────────────────────────────────────────────────────────
+    /// Bulbs that are on, or were on in the last two hours, as rows; the rest as chips.
+    /// A middle click on either opens the bulb in the Home tab and flashes it there.
     private var bulbs: some View {
-        let on = lights.bulbs.filter { $0.on && $0.reachable }
-        let off = lights.bulbs.filter { !($0.on && $0.reachable) }
-        return VStack(alignment: .leading, spacing: 7) {
+        let rows = lights.bulbs.filter { LightsStore.keepsRow($0, lastOn: lights.lastOn[$0.mac]) }
+        let chips = lights.bulbs.filter { !LightsStore.keepsRow($0, lastOn: lights.lastOn[$0.mac]) }
+        return VStack(alignment: .leading, spacing: 5) {
             if lights.bulbs.isEmpty { empty(lights.discovering ? "Looking for bulbs…" : "No bulbs found") }
-            ForEach(on) { b in
-                HStack(spacing: 7) {
-                    Image(systemName: "lightbulb.fill").font(.system(size: 11)).foregroundStyle(.yellow)
-                    Text(b.title).font(.system(size: 11.5))
-                    Text("\(b.dimming)%").font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.secondary)
-                    Spacer()
-                    Button { lights.set(b, ["state=off"]) } label: { Image(systemName: "power").font(.system(size: 11)) }
-                        .buttonStyle(.borderless).foregroundStyle(.secondary).help("Turn \(b.title) off")
-                        .disabled(lights.busy.contains(b.mac))
-                }
+            ForEach(rows) { b in
+                QuickBulbRow(bulb: b, lights: lights, lastOn: lights.lastOn[b.mac])
+                    .onMiddleClick("qbulb-" + b.mac, space: ScrollTargets.cardSpace) { openReveal("home", BulbRow.revealKey(b.mac)) }
             }
-            if !off.isEmpty {
-                ChipFlow(items: off.map { b in
+            if !chips.isEmpty {
+                ChipFlow(items: chips.map { b in
                     ChipItem(id: b.mac, icon: "lightbulb", text: b.title, enabled: b.reachable && !lights.busy.contains(b.mac),
-                             help: b.reachable ? "Turn \(b.title) on" : "\(b.title) is not answering") { lights.set(b, ["state=on"]) }
+                             help: b.reachable ? "Turn \(b.title) on. Middle-click to open it in Home." : "\(b.title) is not answering",
+                             middle: { openReveal("home", BulbRow.revealKey(b.mac)) }) { lights.set(b, ["state=on"]) }
                 })
             }
         }
@@ -607,6 +614,7 @@ struct QuickCard: View {
         HStack(spacing: 8) {
             Image(systemName: icon).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
             Slider(value: Binding(get: { Double(value) }, set: { set(Float($0)) }), in: 0...1).controlSize(.mini)
+                .scrollSteps("q-level-" + icon, onCard: true, stepper: .slider()) { st in set(sliderStep(value, by: st)) }
             Text(text).font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.secondary).frame(width: 38, alignment: .trailing)
         }
     }
@@ -713,6 +721,8 @@ struct ChipItem: Identifiable {
     let text: String
     let enabled: Bool
     let help: String
+    /// A middle click: open the thing in its fuller home.
+    var middle: (() -> Void)? = nil
     let act: () -> Void
 }
 
@@ -757,6 +767,7 @@ struct ChipFlow: View {
                     .foregroundStyle(c.enabled ? .primary : .secondary)
                 }
                 .buttonStyle(.plain).disabled(!c.enabled).help(c.help)
+                .modifier(MiddleClickIfAny(id: "chip-" + c.id, act: c.middle))
             }
         }
     }
@@ -788,5 +799,70 @@ struct FlowLayout: Layout {
             x += s.width + spacing
             rowH = max(rowH, s.height)
         }
+    }
+}
+
+/// Registers a middle click only when there is something for it to do.
+struct MiddleClickIfAny: ViewModifier {
+    let id: String
+    let act: (() -> Void)?
+    func body(content: Content) -> some View {
+        if let act { content.onMiddleClick(id, space: ScrollTargets.cardSpace, act) } else { content }
+    }
+}
+
+/// One bulb on the hover card. On: its name (a click turns it off), an
+/// intensity slider the wheel steps, and the percentage at the far right.
+/// Off but recently on: a click turns it back on.
+struct QuickBulbRow: View {
+    let bulb: Bulb
+    @ObservedObject var lights: LightsStore
+    let lastOn: Date?
+    @State private var dim: Double?
+    @State private var send: DispatchWorkItem?
+
+    private var level: Double { dim ?? Double(bulb.dimming) }
+    private var busy: Bool { lights.busy.contains(bulb.mac) }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button { lights.set(bulb, ["state=\(bulb.on ? "off" : "on")"]) } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: bulb.on ? "lightbulb.fill" : "lightbulb").font(.system(size: 11))
+                        .foregroundStyle(bulb.on ? Color.yellow : Color.secondary).frame(width: 14)
+                    Text(bulb.title).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                    if !bulb.on {
+                        Text(lastOn.map { "off · on \(relative($0, now: Date()))" } ?? "off")
+                            .font(.system(size: 10.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(bulb.on ? "Turn \(bulb.title) off. Middle-click to open it in Home." : "Turn \(bulb.title) on. Middle-click to open it in Home.")
+            if bulb.on {
+                Slider(value: Binding(get: { level }, set: { change($0) }), in: 10...100).controlSize(.mini)
+                    .frame(width: 110)
+                    .scrollSteps("q-bulb-" + bulb.mac, onCard: true, stepper: .slider()) { st in change(level + Double(st) * 5) }
+                Text("\(Int(level.rounded()))%").font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.secondary)
+                    .frame(width: 32, alignment: .trailing)
+            }
+        }
+        .disabled(!bulb.reachable || busy)
+        .opacity(bulb.reachable ? 1 : 0.55)
+    }
+
+    /// Shows the new level at once and sends it once the slider or wheel rests.
+    private func change(_ v: Double) {
+        let v = min(100, max(10, v.rounded()))
+        dim = v
+        send?.cancel()
+        let w = DispatchWorkItem { [lights, bulb] in
+            lights.set(bulb, ["dimming=\(Int(v))"])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { dim = nil }
+        }
+        send = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: w)
     }
 }

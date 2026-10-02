@@ -1377,6 +1377,12 @@ async function pollTails() {
 setInterval(pollFeed, 5000);
 setInterval(pollTails, 5000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { pollFeed(); pollTails(); } });
+/* hovering the logo refreshes the board now, at most once every 2 s; a click still goes to "/" */
+let logoRefreshAt = 0;
+document.querySelector('.tb-brand')?.addEventListener('mouseenter', () => {
+    if (Date.now() - logoRefreshAt < 2000) return;
+    logoRefreshAt = Date.now(); pollFeed(); pollTails();
+});
 
 function setMode(m) {
     mode = m;

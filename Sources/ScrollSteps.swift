@@ -76,8 +76,11 @@ extension ScrollStepper.Phase {
 /// content, so one scrolled out of sight under the header never catches a scroll.
 final class ScrollTargets {
     static let shared = ScrollTargets()
+    /// The hover card's own places (its sliders), in the card's window.
+    static let card = ScrollTargets()
     static let stepped = Notification.Name("switchboard.scrollStep")
     static let space = "panel"
+    static let cardSpace = "quickCard"
 
     struct Target {
         var frame: CGRect
@@ -116,14 +119,17 @@ final class ScrollTargets {
 
 extension View {
     /// Makes this view a place that takes scroll steps; `act` gets +1 or -1.
-    func scrollSteps(_ id: String, inContent: Bool = false, stepper: @escaping @autoclosure () -> ScrollStepper = .tabs(),
+    /// `onCard` registers it with the hover card instead of the panel.
+    func scrollSteps(_ id: String, inContent: Bool = false, onCard: Bool = false,
+                     stepper: @escaping @autoclosure () -> ScrollStepper = .tabs(),
                      _ act: @escaping (Int) -> Void) -> some View {
-        background(GeometryReader { g in
-            let f = g.frame(in: .named(ScrollTargets.space))
+        let targets = onCard ? ScrollTargets.card : ScrollTargets.shared
+        return background(GeometryReader { g in
+            let f = g.frame(in: .named(onCard ? ScrollTargets.cardSpace : ScrollTargets.space))
             Color.clear
-                .onAppear { ScrollTargets.shared.set(id, frame: f, inContent: inContent, stepper: stepper()) }
-                .onChange(of: f) { nf in ScrollTargets.shared.set(id, frame: nf, inContent: inContent, stepper: stepper()) }
-                .onDisappear { ScrollTargets.shared.remove(id) }
+                .onAppear { targets.set(id, frame: f, inContent: inContent, stepper: stepper()) }
+                .onChange(of: f) { nf in targets.set(id, frame: nf, inContent: inContent, stepper: stepper()) }
+                .onDisappear { targets.remove(id) }
         })
         .onReceive(NotificationCenter.default.publisher(for: ScrollTargets.stepped)) { n in
             guard n.object as? String == id, let s = n.userInfo?["step"] as? Int else { return }

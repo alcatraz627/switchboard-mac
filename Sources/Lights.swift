@@ -101,6 +101,9 @@ final class LightsStore: ObservableObject {
     /// When each bulb's unconfirmed change was sent, by MAC.
     @Published private(set) var pendingSince: [String: Date] = [:]
     @Published var failures: [String: String] = [:]
+    /// When each bulb was last seen on, by MAC, kept across launches: a bulb
+    /// stays a row on the hover card for a while after it goes off.
+    @Published private(set) var lastOn: [String: Date] = LightsStore.loadLastOn()
     private var lastPairs: [String: [String]] = [:]
     private let queue = DispatchQueue(label: "lights.store", qos: .userInitiated)
 
@@ -124,6 +127,7 @@ final class LightsStore: ObservableObject {
                 if let e = r.err { self.error = e; dwarn("bulb scan failed: \(e)"); return }
                 self.error = nil
                 self.bulbs = applyOrder(list, self.order)
+                self.noteOn(list)
             }
         }
     }
@@ -167,8 +171,31 @@ final class LightsStore: ObservableObject {
                     b.name = self.bulbs[j].name
                     self.bulbs[j] = b
                 }
+                // a bulb switched off now was on until now
+                if before.on { self.lastOn[bulb.mac] = Date(); self.saveLastOn() }
+                self.noteOn([self.bulbs[j]])
             }
         }
+    }
+
+    private static let lastOnKey = "switchboard.bulbLastOn"
+    private static func loadLastOn() -> [String: Date] {
+        (UserDefaults.standard.dictionary(forKey: lastOnKey) as? [String: Double] ?? [:]).mapValues { Date(timeIntervalSince1970: $0) }
+    }
+    private func saveLastOn() {
+        UserDefaults.standard.set(lastOn.mapValues(\.timeIntervalSince1970), forKey: Self.lastOnKey)
+    }
+    private func noteOn(_ list: [Bulb]) {
+        var changed = false
+        for b in list where b.on { lastOn[b.mac] = Date(); changed = true }
+        if changed { saveLastOn() }
+    }
+
+    /// How long a bulb that went off keeps its row on the hover card.
+    static let rowAfterOff: TimeInterval = 2 * 3600
+    /// On now, or on within the last two hours: shown as a row, not a chip.
+    static func keepsRow(_ b: Bulb, lastOn: Date?, now: Date = Date()) -> Bool {
+        b.on && b.reachable || (lastOn.map { now.timeIntervalSince($0) < rowAfterOff } ?? false)
     }
 
     func retry(_ bulb: Bulb) {
@@ -433,7 +460,12 @@ struct BulbRow: View {
         }
         .padding(.horizontal, SBStyle.rowH).padding(.vertical, SBStyle.rowV + 1)
         .opacity(bulb.reachable ? 1 : 0.55)
+        .revealFlash(BulbRow.revealKey(bulb.mac))
+        .id(BulbRow.revealKey(bulb.mac))
     }
+
+    /// The key a link uses to land on this bulb's row in the Home tab.
+    static func revealKey(_ mac: String) -> String { "bulb-" + mac }
 
     /// A hue strip for any colour, eight quick swatches, and a way back to white.
     /// It stays inside the panel: the system colour window would take focus and

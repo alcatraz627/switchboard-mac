@@ -7,7 +7,7 @@ import WebKit
 
 /// Says in the window when the hub could not be reached, instead of leaving
 /// it blank; Retry loads the transcript again.
-final class TranscriptNav: NSObject, WKNavigationDelegate {
+final class TranscriptNav: NSObject, WKNavigationDelegate, WKUIDelegate {
     let url: URL
     /// The last load error, for the headless probe.
     var lastError: NSError?
@@ -48,7 +48,30 @@ final class TranscriptNav: NSObject, WKNavigationDelegate {
             web.load(URLRequest(url: url))
             return
         }
+        if let to = action.request.url, Self.opensInBrowser(to, button: action.buttonNumber,
+                                                            command: action.modifierFlags.contains(.command),
+                                                            newWindow: action.targetFrame == nil, link: action.navigationType == .linkActivated) {
+            decisionHandler(.cancel)
+            NSWorkspace.shared.open(to)
+            return
+        }
         decisionHandler(.allow)
+    }
+
+    /// A link meant for a new tab (target=_blank, window.open) opens in the browser.
+    func webView(_ web: WKWebView, createWebViewWith _: WKWebViewConfiguration, for action: WKNavigationAction,
+                 windowFeatures _: WKWindowFeatures) -> WKWebView? {
+        if let to = action.request.url { NSWorkspace.shared.open(to) }
+        return nil
+    }
+
+    /// The hub's own pages stay in the window; a middle click, a Command-click, a
+    /// link asking for a new tab, or a page outside the hub opens in the browser.
+    static func opensInBrowser(_ url: URL, button: Int, command: Bool, newWindow: Bool, link: Bool) -> Bool {
+        let hub = (url.host == "127.0.0.1" || url.host == "localhost") && url.port == 5400
+        if url.scheme == "about" || url.scheme == "data" { return false }
+        if !hub { return link || newWindow }
+        return button == 2 || command || newWindow
     }
 
     private func show(_ web: WKWebView, _ error: Error) {
@@ -105,18 +128,35 @@ enum TranscriptWindow {
 
     /// Show the session's transcript, reusing its window if one is open.
     static func show(sessionID: String, title: String) {
+        guard let url = url(for: sessionID) else { return }
+        show(url: url, key: sessionID, title: title, loading: "Loading the transcript…")
+    }
+
+    /// A page the session hub serves, which opens in Switchboard's window by default.
+    static func isHub(_ url: URL) -> Bool {
+        (url.host == "127.0.0.1" || url.host == "localhost") && url.port == 5400
+    }
+
+    /// The hub's board of every session, in its own window rather than the browser.
+    static func showBoard() {
+        guard let url = URL(string: "http://127.0.0.1:5400/") else { return }
+        show(url: url, key: "board", title: "Session hub", loading: "Loading the session hub…")
+    }
+
+    /// Any hub page in a window of its own, one window per key.
+    static func show(url: URL, key sessionID: String, title: String, loading label: String) {
         if let w = open[sessionID] {
             w.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        guard let url = url(for: sessionID) else { return }
         let frame = NSRect(x: 0, y: 0, width: 900, height: 760)
         let web = WKWebView(frame: frame)
         web.autoresizingMask = [.width, .height]
         let nav = TranscriptNav(url: url)
         navs[sessionID] = nav
         web.navigationDelegate = nav
+        web.uiDelegate = nav
         web.load(URLRequest(url: url))
         // The page is blank until the hub answers; a cover with a label says it is on its way.
         let box = NSView(frame: frame)
@@ -124,7 +164,7 @@ enum TranscriptWindow {
         cover.wantsLayer = true
         cover.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         cover.autoresizingMask = [.width, .height]
-        let loading = NSTextField(labelWithString: "Loading the transcript…")
+        let loading = NSTextField(labelWithString: label)
         loading.textColor = .secondaryLabelColor
         loading.sizeToFit()
         loading.frame.origin = NSPoint(x: (frame.width - loading.frame.width) / 2, y: frame.height / 2)
@@ -148,4 +188,11 @@ enum TranscriptWindow {
         w.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
+}
+
+/// Opens a link: a session hub page in Switchboard's own window, anything else in the browser.
+func openLink(_ url: URL) {
+    guard TranscriptWindow.isHub(url) else { NSWorkspace.shared.open(url); return }
+    let sid = url.path.hasPrefix("/s/") ? String(url.path.dropFirst(3)).trimmingCharacters(in: CharacterSet(charactersIn: "/")) : ""
+    if sid.isEmpty { TranscriptWindow.showBoard() } else { TranscriptWindow.show(sessionID: sid, title: "Transcript") }
 }
