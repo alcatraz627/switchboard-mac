@@ -18,6 +18,15 @@ The route to build:
 
 Flashing local firmware (Cloudcutter to OpenBeken) was considered and left out, since it is model specific and can brick a plug.
 
+## Hub, next round (owner, 2026-10-03; after the Switchboard work)
+
+- In the hub card, make the click copy work for the ipc alias as well.
+- Transcript page: "the message does not show the first message from me and the first from the agent, it starts at my second message". Example: http://127.0.0.1:5400/s/d5499ecd-85ff-4526-9b56-94204708bcec
+- In the hub card preview, clicking a line of transcript text opens the transcript page at that line.
+- Smooth scrolling everywhere.
+- "The html view transitions in the hub pages is crude, explore adding more elements and animations to those."
+- "The navbar scroll to change transcript does not work. In fact I think a lot of your slated ideas are not done." Audit hub/docs/remaining-work.md and the earlier hub plans against what is actually built, and list the gaps before building.
+
 ## Other deferred items
 
 - Codex warn and danger thresholds. Deferred by the owner. Do not raise it again.
