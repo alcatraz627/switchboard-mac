@@ -7,7 +7,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-13%2B-black?logo=apple" alt="macOS 13+">
   <img src="https://img.shields.io/badge/Swift-AppKit%20%2B%20SwiftUI-F05138?logo=swift&logoColor=white" alt="Swift">
-  <img src="https://img.shields.io/badge/version-0.3.0-blue" alt="version 0.3.0">
+  <img src="https://img.shields.io/badge/version-0.4.0-blue" alt="version 0.4.0">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
 </p>
 

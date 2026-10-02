@@ -7,3 +7,4 @@ __pycache__/
 .claude/output/
 _*.claude.md
 .review/
+.playwright-mcp/

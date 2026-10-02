@@ -1,14 +1,56 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-10-02)
 
-- Opening the panel while the menu bar dot is red or yellow lands on the tab
-  that raised it: the problem's tab when red, Approvals when yellow. It jumps
-  once per new cause, so a problem you have already seen does not pull you
-  away from the tab you chose. Spaces and tabs holding a problem carry a red dot.
-- Runtime > Databases: start, stop and inspect Homebrew services.
-- The Usage thresholds are no longer copied into claude-instances'
+- **A hover card you can move around**: rest the pointer on the menu-bar icon
+  and the card opens on the page you last left it on. Scroll over the icon or
+  the card's title bar to move through its pages (scrolling over a page's
+  content leaves the page alone), click a pill, or press its number once the
+  card has the keyboard. Pages: Now, Limits, Approvals, Bulbs, Pinned notes,
+  and, switched on in Settings, Timers, Controls and Local models.
+- **Now is a launcher**: six tab shortcuts above one row of badges, one per
+  thing that needs you. A badge opens its tab with the search filled in, so the
+  row it names is in view. The gear on Now opens the hover card's settings.
+- **Hover settings**: order and hide the pages, choose what Now shows, and set
+  how long the card stays after the pointer leaves (1 to 15 s).
+- **Limits read the way you think of them**: Claude 5h, Claude 7d and Codex
+  7d, each marked with its icon; per-model and reserve windows stay in Usage.
+- **Warnings are not errors**: every problem is an error or a warning. Hook
+  scripts with no event and gates switched off are warnings: orange, they
+  never turn the icon red or pull the panel to their tab. Opening the panel
+  while the dot is red or yellow lands on what raised it, once per new cause.
+- **Typing behaves the same everywhere**: one field look; Enter does the
+  field's main action and Escape only lets go of the keyboard, never closing
+  or deleting anything. Opening Notes or Timers puts the cursor in the new
+  item's field unless you are editing one. Search boxes say only "Search" and
+  keep your search on Escape.
+- **Notes**: a title over a body, either one optional but not both. Enter in a
+  title moves the rest of the line to the top of the body. Copy buttons follow
+  what the note has (the title, the text, the file's path). Eight tag colours,
+  shown as colour only, picked as you write or later. Calmer rows, with copy
+  buttons that appear on hover.
+- **Timers**: Enter in the label opens Start; the same eight colours.
+- **Scroll on a thing adjusts it**: over the space bar or the tab row it moves
+  along that row; over a sound, brightness or delay slider it moves 5% (or a
+  second) a notch.
+- **Controls take two rows each**, and long device and network names, like
+  repo, service and model names elsewhere, lose their middle only when they do
+  not fit.
+- **Local models**: choose how long a loaded model stays (15 minutes to until
+  unloaded), unload all, reload the warm companion, and see the server's
+  default eviction. Keeping a model now checks it actually loaded.
+- **Faster opens**: list tabs are read once at launch and not re-read within
+  20 s, so Plugins (0.6 s) and Hooks (0.3 s) no longer refill as the panel
+  appears. Held pushes and asks show within seconds.
+- **Selectable text**: an opened item's details can be selected and copied.
+- **Runtime > Databases**: start, stop and inspect Homebrew services.
+- Section headers are sentence case. Helpers survive a noisy network and a
+  missing tool, and a late hub answer can no longer change a result already
+  read. The Usage thresholds are no longer copied into claude-instances'
   preferences, which stopped reading them.
+- For checking without a screen: `--snapshot-quick --page <page>` draws one
+  hover page, `--time-tabs` times each list tab's read, and test runs log to
+  their own folder. `--snapshot-hover` is gone with the old hover preview.
 
 ## 0.3.0 (2026-09-30)
 
