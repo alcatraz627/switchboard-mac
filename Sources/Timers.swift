@@ -20,17 +20,17 @@ struct SBTimer: Codable, Identifiable, Equatable {
     var total: TimeInterval { max(1, fireAt.timeIntervalSince(start)) }
 }
 
-/// The eight tag colours timers and notes wear, by name so they survive on disk.
-/// macOS system colours, so each adapts to dark and light; none is red, orange,
-/// yellow or green, which the panel keeps for meaning broken, warning or fine.
+/// The eight tag colours timers and notes wear, by name so they survive on disk:
+/// the Reminders set, spread around the wheel so no two are easily confused.
+/// macOS system colours, so each adapts to dark and light.
 let timerColors: [(String, Color)] = [
-    ("blue", Color(nsColor: .systemBlue)), ("indigo", Color(nsColor: .systemIndigo)),
+    ("red", Color(nsColor: .systemRed)), ("orange", Color(nsColor: .systemOrange)),
+    ("yellow", Color(nsColor: .systemYellow)), ("green", Color(nsColor: .systemGreen)),
+    ("teal", Color(nsColor: .systemTeal)), ("blue", Color(nsColor: .systemBlue)),
     ("purple", Color(nsColor: .systemPurple)), ("pink", Color(nsColor: .systemPink)),
-    ("teal", Color(nsColor: .systemTeal)), ("gray", Color(nsColor: .systemGray)),
-    ("mint", Color(nsColor: .systemMint)), ("brown", Color(nsColor: .systemBrown)),
 ]
-/// Names saved before the set changed, and where each one lands now.
-let legacyTagColors = ["red": "pink", "orange": "brown", "yellow": "mint", "green": "teal", "cyan": "teal"]
+/// Names saved under earlier sets, and where each one lands now.
+let legacyTagColors = ["indigo": "purple", "mint": "green", "brown": "orange", "gray": "blue", "cyan": "teal"]
 /// A saved colour name as one of the eight, or nil when it is none of them.
 func tagColorName(_ name: String) -> String? {
     let n = legacyTagColors[name] ?? name

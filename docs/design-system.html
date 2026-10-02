@@ -12,8 +12,8 @@
   --bg: #f5f5f7; --panel: #ffffff; --card: #f0f0f3; --edge: #d9d9de; --text: #1d1d1f; --dim: #6e6e73; --faint: #a1a1a6;
   --accent: #0a84ff; --fill: rgba(0,0,0,.07);
   --error: #d70015; --warn: #c93400; --waiting: #b58900; --info: #0071a4; --ok: #248a3d;
-  --t-blue: #0071e3; --t-indigo: #5856d6; --t-purple: #8944ab; --t-pink: #d30f45;
-  --t-teal: #0071a4; --t-gray: #8e8e93; --t-mint: #0c817b; --t-brown: #7f6545;
+  --t-red: #d70015; --t-orange: #c93400; --t-yellow: #b25000; --t-green: #248a3d;
+  --t-teal: #0071a4; --t-blue: #0071e3; --t-purple: #8944ab; --t-pink: #d30f45;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
 }
@@ -22,16 +22,16 @@
     --bg: #1c1c1e; --panel: #232326; --card: #2c2c2f; --edge: #3a3a3d; --text: #f5f5f7; --dim: #a1a1a6; --faint: #6e6e73;
     --accent: #0a84ff; --fill: rgba(255,255,255,.08);
     --error: #ff453a; --warn: #ff9f0a; --waiting: #ffd60a; --info: #64d2ff; --ok: #30d158;
-    --t-blue: #0a84ff; --t-indigo: #5e5ce6; --t-purple: #bf5af2; --t-pink: #ff375f;
-    --t-teal: #40c8e0; --t-gray: #98989d; --t-mint: #63e6e2; --t-brown: #ac8e68;
+    --t-red: #ff453a; --t-orange: #ff9f0a; --t-yellow: #ffd60a; --t-green: #30d158;
+    --t-teal: #40c8e0; --t-blue: #0a84ff; --t-purple: #bf5af2; --t-pink: #ff375f;
   }
 }
 :root[data-theme="dark"] {
   --bg: #1c1c1e; --panel: #232326; --card: #2c2c2f; --edge: #3a3a3d; --text: #f5f5f7; --dim: #a1a1a6; --faint: #6e6e73;
   --accent: #0a84ff; --fill: rgba(255,255,255,.08);
   --error: #ff453a; --warn: #ff9f0a; --waiting: #ffd60a; --info: #64d2ff; --ok: #30d158;
-  --t-blue: #0a84ff; --t-indigo: #5e5ce6; --t-purple: #bf5af2; --t-pink: #ff375f;
-  --t-teal: #40c8e0; --t-gray: #98989d; --t-mint: #63e6e2; --t-brown: #ac8e68;
+  --t-red: #ff453a; --t-orange: #ff9f0a; --t-yellow: #ffd60a; --t-green: #30d158;
+  --t-teal: #40c8e0; --t-blue: #0a84ff; --t-purple: #bf5af2; --t-pink: #ff375f;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 var(--sans); }
@@ -140,12 +140,9 @@ th { color: var(--dim); font-weight: 600; }
 <h3>Tag colours</h3>
 <p class="src">Sources/Timers.swift · timerColors, tagColorName</p>
 <div class="stage">
-  <span class="m-ball" style="background:var(--t-blue)" title="blue"></span><span class="m-ball" style="background:var(--t-indigo)" title="indigo"></span>
-  <span class="m-ball" style="background:var(--t-purple)" title="purple"></span><span class="m-ball" style="background:var(--t-pink)" title="pink"></span>
-  <span class="m-ball" style="background:var(--t-teal)" title="teal"></span><span class="m-ball" style="background:var(--t-gray)" title="gray"></span>
-  <span class="m-ball" style="background:var(--t-mint)" title="mint"></span><span class="m-ball" style="background:var(--t-brown)" title="brown"></span>
+  <span class="m-ball" style="background:var(--t-red)" title="red"></span><span class="m-ball" style="background:var(--t-orange)" title="orange"></span><span class="m-ball" style="background:var(--t-yellow)" title="yellow"></span><span class="m-ball" style="background:var(--t-green)" title="green"></span><span class="m-ball" style="background:var(--t-teal)" title="teal"></span><span class="m-ball" style="background:var(--t-blue)" title="blue"></span><span class="m-ball" style="background:var(--t-purple)" title="purple"></span><span class="m-ball" style="background:var(--t-pink)" title="pink"></span>
 </div>
-<p>Eight macOS system colours for notes and timers. None is red, orange, yellow or green, so a tag never reads as a status. They are shown as colour only, never named; older saved names (red, orange, yellow, green) map to pink, brown, mint and teal.</p>
+<p>Eight macOS system colours for notes and timers, the Reminders set: red, orange, yellow, green, teal, blue, purple, pink. They are shown as colour only, never named; names saved under an earlier set (indigo, mint, brown, gray) map to purple, green, orange and blue.</p>
 
 <h2 id="primitives">Primitives</h2>
 <div class="grid">
@@ -173,7 +170,7 @@ th { color: var(--dim); font-weight: 600; }
     <div class="stage"><div class="m-field">⌕ Search</div></div>
     <p class="m-caption">One word of placeholder; the full scope is in the tooltip. Escape keeps the search; the x clears it.</p></div>
   <div class="spec"><h3>Colour balls</h3><p class="src">Inputs.swift · ColorBalls</p>
-    <div class="stage"><span class="m-ball on" style="background:var(--t-blue)"></span><span class="m-ball" style="background:var(--t-indigo)"></span><span class="m-ball" style="background:var(--t-mint)"></span><span class="m-ball" style="background:var(--t-brown)"></span></div>
+    <div class="stage"><span class="m-ball on" style="background:var(--t-blue)"></span><span class="m-ball" style="background:var(--t-green)"></span><span class="m-ball" style="background:var(--t-yellow)"></span><span class="m-ball" style="background:var(--t-pink)"></span></div>
     <p class="m-caption">The chosen one carries a ring. On a note, tapping it again clears the colour.</p></div>
   <div class="spec"><h3>Level slider</h3><p class="src">Controls.swift · slider · Settings.swift · lingerSlider</p>
     <div class="stage" style="flex-wrap:nowrap"><span class="m-slider"></span><span class="m-mono" style="color:var(--dim)">63%</span></div>

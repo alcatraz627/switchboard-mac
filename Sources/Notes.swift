@@ -119,13 +119,13 @@ func probeNotes() -> String {
     // Title and body, either one optional, never both empty; a colour tag survives the file.
     check("a note with only a body is saved", s.add(title: "", body: "just the text")?.heading == "just the text")
     check("a note with neither is refused", s.add(title: "  ", body: "\n") == nil)
-    let tinted = s.add(title: "Tinted", body: "", color: "indigo")!
+    let tinted = s.add(title: "Tinted", body: "", color: "purple")!
     s.load()
-    check("a colour tag survives the file", s.notes.first { $0.id == tinted.id }?.color == "indigo")
-    check("there are eight tag colours, none of them a warning colour",
-          timerColors.count == 8 && !timerColors.contains { ["red", "orange", "yellow", "green"].contains($0.0) })
-    check("an old colour name lands on its new one", tagColorName("green") == "teal" && tagColorName("red") == "pink"
-          && tagColorName("blue") == "blue" && tagColorName("plaid") == nil)
+    check("a colour tag survives the file", s.notes.first { $0.id == tinted.id }?.color == "purple")
+    check("there are eight tag colours, the Reminders set with green and yellow",
+          timerColors.map(\.0) == ["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"])
+    check("an old colour name lands on its new one", tagColorName("indigo") == "purple" && tagColorName("mint") == "green"
+          && tagColorName("gray") == "blue" && tagColorName("green") == "green" && tagColorName("plaid") == nil)
     let nobody = InputRules.copyButtons(title: "Only title", body: "")
     let notitle = InputRules.copyButtons(title: "", body: "only body")
     check("a title-only note offers only the title copy", nobody.title && !nobody.body)
