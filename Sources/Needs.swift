@@ -13,7 +13,7 @@ import AppKit
 import SwiftUI
 
 struct NeedItem: Identifiable {
-    enum Kind { case push, ask, armedApproval, unreadable }
+    enum Kind { case push, ask, prompt, armedApproval, unreadable }
     let id: String            // the file that holds it
     let kind: Kind
     let title: String
@@ -107,6 +107,25 @@ enum NeedsYou {
             out.append(item)
         }
 
+        // Claude Code's own permission prompts, held by hooks/permission-ask.py while it waits for an answer here.
+        let promptDir = root + "/.permission-ask"
+        for f in (try? fm.contentsOfDirectory(atPath: promptDir)) ?? [] where f.hasSuffix(".json") {
+            let path = promptDir + "/" + f
+            let sid = f.components(separatedBy: "--").first ?? ""
+            guard let o = json(path) else { continue }   // a request still being written; the next read gets it
+            let base = String(path.dropLast(".json".count))
+            let tool = (o["tool"] as? String) ?? "a tool", what = (o["what"] as? String) ?? ""
+            var item = NeedItem(id: path, kind: .prompt,
+                                title: what.isEmpty ? "Claude wants to use \(tool)" : "\(tool): \(what)",
+                                sessionID: sid, sessionDir: live[sid] ?? (o["cwd"] as? String), since: since(o, path),
+                                approveLine: nil, files: [path])
+            item.approvedFile = base + ".approved"
+            item.details = [("Tool", tool), ("Asks to", what), ("Session", sid), ("Folder", (o["cwd"] as? String) ?? ""),
+                            ("Waits", (o["wait"] as? NSNumber).map { "\($0.intValue) s for your answer, then asks in the terminal" } ?? "")]
+                .filter { !$0.1.isEmpty }
+            out.append(item)
+        }
+
         // Approvals already typed whose session ended before using them. A session
         // with a held push already lists its approval file there, so it gets one row.
         let pushSessions = Set(out.filter { $0.kind == .push }.map(\.sessionID))
@@ -129,9 +148,10 @@ enum NeedsYou {
             return "could not write \(sentinel)"
         }
         if !probing {
-            _ = Services.shell("/bin/bash", [root + "/scripts/hooks/warn-log.sh", "--hook", item.kind == .push ? "push-gate" : "policy-ask",
+            _ = Services.shell("/bin/bash", [root + "/scripts/hooks/warn-log.sh", "--hook", item.kind == .push ? "push-gate" : item.kind == .prompt ? "permission-ask" : "policy-ask",
                                              "--action", "panel-approved", "--heeded", "yes"], timeout: 5)
         }
+        if item.kind == .prompt { return nil }   // the hook is watching for the file; no message needed
         nudge(item, item.kind == .push
             ? "[push-gate] the owner approved \(item.title.lowercased()) from the Switchboard panel; the single-use approval is written. Re-run the same git push now."
             : "[policy-ask] the owner approved \(item.title.lowercased()) from the Switchboard panel; the single-use approval is written. Run the same call again now; it covers that one call.")
@@ -158,6 +178,11 @@ enum NeedsYou {
     /// Cancel: what typing "cancel push" or "deny <key>" does. Returns what
     /// went wrong, or nil.
     static func cancel(_ item: NeedItem) -> String? {
+        if item.kind == .prompt {
+            // Deny is an answer the hook hands back to Claude, not a removal
+            let denied = String(item.id.dropLast(".json".count)) + ".denied"
+            return FileManager.default.createFile(atPath: denied, contents: Data()) ? nil : "could not write \(denied)"
+        }
         for f in item.files where FileManager.default.fileExists(atPath: f) {
             do { try FileManager.default.removeItem(atPath: f) } catch {
                 return "could not remove \((f as NSString).lastPathComponent): \(error.localizedDescription)"
@@ -182,7 +207,9 @@ enum NeedsYou {
         let approved = items.filter { $0.sessionDir != nil && $0.approved }
         let dead = items.filter { $0.sessionDir == nil }
         var out: [SystemGroup] = []
-        let pushes = live.filter { $0.kind == .push }, asks = live.filter { $0.kind != .push }
+        let pushes = live.filter { $0.kind == .push }, asks = live.filter { $0.kind != .push && $0.kind != .prompt }
+        let prompts = live.filter { $0.kind == .prompt }
+        if !prompts.isEmpty { out.append(SystemGroup(title: "Claude asks", rows: itemRows(prompts, refresh: refresh))) }
         if !pushes.isEmpty { out.append(SystemGroup(title: "Pushes", rows: itemRows(pushes, refresh: refresh))) }
         if !asks.isEmpty { out.append(SystemGroup(title: "Policy asks", rows: itemRows(asks, refresh: refresh))) }
         if !approved.isEmpty { out.append(SystemGroup(title: "Approved, waiting to run", rows: itemRows(approved, refresh: refresh))) }
@@ -215,6 +242,7 @@ enum NeedsYou {
             let when = item.since.map { " · " + age($0) } ?? ""
             let note: String
             switch item.kind {
+            case .prompt: note = where_ + when + " · the terminal asks if you do not answer"
             case .push, .ask:
                 // Honest about the wake: a session with no inbox watcher sleeps
                 // through the request and runs on its next message instead.
@@ -234,7 +262,7 @@ enum NeedsYou {
                     let err = approve(item)
                     DispatchQueue.main.async(execute: refresh)
                     return err
-                }), help: "Approve this one \(item.kind == .push ? "push" : "call"). The session is told to run it now.",
+                }), help: item.kind == .prompt ? "Let Claude do it, this once" : "Approve this one \(item.kind == .push ? "push" : "call"). The session is told to run it now.",
                    doing: "approve it"))
             }
             if let line = item.approveLine {
@@ -247,14 +275,32 @@ enum NeedsYou {
                 c.showsBadge = false
                 return c
             }
-            r.buttons.append(RowButton(label: "Cancel", kind: .run({
+            r.buttons.append(RowButton(label: item.kind == .prompt ? "Deny" : "Cancel", kind: .run({
                 let err = cancel(item)
                 DispatchQueue.main.async(execute: refresh)
                 return err
-            }), help: item.kind == .push ? "Same as typing: cancel push" : item.kind == .ask ? "Same as typing: deny" : "Revoke it",
-               doing: "cancel it"))
+            }), help: item.kind == .push ? "Same as typing: cancel push" : item.kind == .ask ? "Same as typing: deny"
+                : item.kind == .prompt ? "Tell Claude no; it carries on without it" : "Revoke it",
+               doing: item.kind == .prompt ? "deny it" : "cancel it"))
             return r
         }
+    }
+}
+
+/// Whether Claude Code's permission prompts wait for an answer in Switchboard.
+/// Off unless the owner switches it on: while on, each prompt is held back from
+/// the terminal for up to `wait` seconds so it can be answered here.
+enum PermissionRoute {
+    static let wait = 120
+    static var marker: String { SwitchboardPaths.gccRoot + "/.switchboard-answers-prompts" }
+    static var isOn: Bool { FileManager.default.fileExists(atPath: marker) }
+    /// Nil once done, else why not.
+    static func set(_ on: Bool) -> String? {
+        if on {
+            return FileManager.default.createFile(atPath: marker, contents: Data("\(wait)".utf8)) ? nil : "could not write \(marker)"
+        }
+        guard isOn else { return nil }
+        do { try FileManager.default.removeItem(atPath: marker); return nil } catch { return error.localizedDescription }
     }
 }
 
@@ -325,6 +371,26 @@ func probeApprove() -> String {
               && !fm.fileExists(atPath: dir + "/.policy-ask/" + sid + "--slack.post.approved"))
     }
     check("nothing is left waiting after both cancels", NeedsYou.items().isEmpty)
+
+    // A Claude Code permission prompt held by hooks/permission-ask.py.
+    try? fm.createDirectory(atPath: dir + "/.permission-ask", withIntermediateDirectories: true)
+    let req = #"{"nonce":"p1","tool":"Bash","what":"rm -rf build","cwd":"/tmp/app","session":"s9","ts":1,"wait":120}"#
+    fm.createFile(atPath: dir + "/.permission-ask/s9--p1.json", contents: Data(req.utf8))
+    let prompts = NeedsYou.items().filter { $0.kind == .prompt }
+    check("a held permission prompt is listed with its tool and command", prompts.first?.title == "Bash: rm -rf build",
+          prompts.map(\.title).joined(separator: ", "))
+    check("it sits under Claude asks with Approve and Deny",
+          NeedsYou.groups(prompts) {}.first.map { g in g.title == "Claude asks"
+              && g.rows.first?.buttons.map(\.label) == ["Approve", "Deny"] } ?? false)
+    if let p = prompts.first {
+        check("Approve writes the file the hook is waiting for",
+              NeedsYou.approve(p) == nil && fm.fileExists(atPath: dir + "/.permission-ask/s9--p1.approved"))
+        try? fm.removeItem(atPath: dir + "/.permission-ask/s9--p1.approved")
+        check("Deny writes the deny file and leaves the request for the hook to clear",
+              NeedsYou.cancel(p) == nil && fm.fileExists(atPath: dir + "/.permission-ask/s9--p1.denied")
+              && fm.fileExists(atPath: dir + "/.permission-ask/s9--p1.json"))
+    }
+    try? fm.removeItem(atPath: dir + "/.permission-ask")
 
     // A damaged hold file still shows as a row; silence would read as "nothing waits".
     fm.createFile(atPath: dir + "/.push-nonce-damaged", contents: Data("{not json".utf8))

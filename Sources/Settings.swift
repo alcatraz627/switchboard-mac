@@ -31,6 +31,7 @@ struct SettingsTabView: View {
         let pages = quickPages.filter { hoverAll || matches($0.title) }
         let linger = hoverAll || matches("delay") || matches("away") || matches("linger")
         let folder = matches("notes folder") || matches(NotesStore.dir)
+        let prompts = matches("permission") || matches("prompt") || matches("claude asks") || matches("approvals")
         VStack(alignment: .leading, spacing: PT.gap) {
             if !orderedTabs.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
@@ -105,12 +106,33 @@ struct SettingsTabView: View {
             if folder {
                 group("Notes folder", note: "Where each note is saved as a markdown file.", rows: [notesFolderRow])
             }
-            if orderedTabs.isEmpty && hover.isEmpty && pages.isEmpty && !linger && !folder {
+            if prompts {
+                group("Claude's permission prompts",
+                      note: "When on, a prompt Claude Code would ask in the terminal shows under Claude asks in Approvals first. It waits \(PermissionRoute.wait) seconds for your Approve or Deny there, then asks in the terminal as usual.",
+                      rows: [promptsRow])
+            }
+            if orderedTabs.isEmpty && hover.isEmpty && pages.isEmpty && !linger && !folder && !prompts {
                 Text("Nothing in Settings matches \"\(query)\".").font(PT.caption).foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
             }
         }
         .padding(PT.gap)
+    }
+
+    @State private var promptsOn = PermissionRoute.isOn
+    @State private var promptsError: String?
+
+    private var promptsRow: SystemRow {
+        var r = SystemRow(label: "Answer them in Switchboard", state: promptsOn ? .on(menuGreen) : .off,
+                          note: promptsError.map { "couldn't switch: \($0)" } ?? (promptsOn ? "on: prompts wait here first" : "off: the terminal asks, as usual"),
+                          tip: "Holds each Claude Code permission prompt for up to \(PermissionRoute.wait) s so you can answer it from Approvals.",
+                          action: {
+                              promptsError = PermissionRoute.set(!promptsOn)
+                              promptsOn = PermissionRoute.isOn
+                          })
+        r.icon = "hand.raised"
+        r.key = "settings-permission-route"
+        return r
     }
 
     private func note(_ text: String) -> some View {

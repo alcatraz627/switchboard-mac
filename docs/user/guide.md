@@ -505,6 +505,7 @@ Items come from files that Claude Code's gates leave in `~/.claude`: a held push
 
 | Section | What is in it |
 |---|---|
+| Claude asks | Claude Code's own permission prompts, while "Answer them in Switchboard" is on in Settings. A row reads "Bash: rm -rf build". Approve lets Claude do it this once; Deny tells Claude no, and it carries on without it. Each waits two minutes for you, then the terminal asks as usual |
 | Pushes | Pushes to a protected branch held by the push gate, from sessions that are still running |
 | Policy asks | Actions behind an "ask" policy, held for you, from running sessions |
 | Approved, waiting to run | Items you approved that the session has not yet used. The note says when, and that "the session was asked to run it; if it is idle, it runs on your next message to it" |
@@ -558,6 +559,10 @@ The search field in Settings matches tab names, section names, hover pages, the 
 ### Hover pages
 
 Lists every page of the hover card in its order, with a grip and a switch. Drag the grip to reorder the pages, and switch a page off to hide it. Timers, Controls and Local models start off. The last page still shown cannot be hidden, so the card always has one.
+
+### Claude's permission prompts
+
+One switch, "Answer them in Switchboard", off until you turn it on. While on, a prompt Claude Code would ask in the terminal first shows under Claude asks in Approvals and waits two minutes for your answer there; with no answer, the terminal asks as usual. The prompt is held back from the terminal during those two minutes, which is why it is off by default. The hook that does this is `hooks/permission-ask.py` in this repo, registered once in `~/.claude/settings.json`; with the switch off it returns at once.
 
 ### Mouse-away delay
 

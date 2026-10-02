@@ -458,7 +458,7 @@ struct QuickCard: View {
             if groups.isEmpty { empty("Nothing waits on you") }
             ForEach(shown, id: \.0) { title, rows in
                 Text(title).font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
-                ForEach(rows) { r in QuickNeedRow(row: r, waiting: title == "Pushes" || title == "Policy asks") }
+                ForEach(rows) { r in QuickNeedRow(row: r, waiting: title == "Pushes" || title == "Policy asks" || title == "Claude asks") }
             }
             if total > 5 { more(total - 5, tab: "approvals") }
         }

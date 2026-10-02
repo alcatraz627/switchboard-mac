@@ -415,7 +415,8 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            HStack(spacing: 6) {
+            // a Button, not a tap gesture: the card is not the key window, and only buttons take that first click
+            Button(action: open) { HStack(spacing: 6) {
                 Circle().fill(session.attention.color).frame(width: 6, height: 6)
                 Text(session.title).font(.system(size: 11.5, weight: .medium)).lineLimit(1)
                 Text(stateWord).font(.system(size: 10.5))
@@ -426,8 +427,8 @@ struct SessionRow: View {
                     .font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.secondary)
                 if let c = session.ctxLeft { ctxBar(c) }
             }
-            .contentShape(Rectangle())
-            .onTapGesture(perform: open)
+            .contentShape(Rectangle()) }
+            .buttonStyle(.plain)
             SessionIcons(session: session)
         }
         .padding(.vertical, 3).padding(.horizontal, 4)

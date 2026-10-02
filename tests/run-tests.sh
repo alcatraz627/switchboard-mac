@@ -23,7 +23,7 @@ export SWITCHBOARD_LOG_DIR="$WORK/logs"
 
 section "syntax"
 for f in scripts/*.sh tests/*.sh tests/fixtures/*.sh; do check "$f parses" bash -n "$f"; done
-for f in Resources/lib/*.py; do check "$f compiles" python3 -m py_compile "$f"; done
+for f in Resources/lib/*.py hooks/*.py; do check "$f compiles" python3 -m py_compile "$f"; done
 
 section "swift"
 SRCS=()
@@ -181,6 +181,7 @@ mkdir -p "$WORK/ro-state"; chmod 555 "$WORK/ro-state"
 check "wol.py add answers {ok: false} with a sentence when the state folder cannot be written" python3 -c "import json,subprocess;r=subprocess.run(['python3','Resources/lib/wol.py','add','Box','02:00:00:00:00:09'],capture_output=True,text=True,env={'PATH':'/usr/bin:/bin','HOME':'$HOME','SWITCHBOARD_STATE':'$WORK/ro-state'});d=json.loads(r.stdout);assert r.returncode==1 and d['ok'] is False and 'Traceback' not in r.stderr, r"
 chmod 755 "$WORK/ro-state"
 
+check "permission-ask hook: off by default, Approve and Deny answer, silence leaves it to the terminal (scratch folder)" python3 tests/fixtures/permission-ask-probe.py
 check "pm2login.py: start-at-login reads pm2's saved list and changes only its own entry (scratch pm2 folder)" python3 tests/fixtures/pm2login-probe.py
 
 section "state folder adoption (state.py)"
