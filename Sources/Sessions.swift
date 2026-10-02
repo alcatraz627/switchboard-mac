@@ -286,10 +286,10 @@ struct SessionsPage: View {
             if !store.loaded {
                 ReadingStatus(state: .loading)
             } else if let f = store.failure, list.isEmpty {
-                Text(f).font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Button("Try again") { store.refresh() }.controlSize(.small)
+                Text(f).font(.sb(11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Button("Try again") { store.refresh() }.sbControlSize(.small)
             } else if list.isEmpty {
-                Text("No Claude sessions are open").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                Text("No Claude sessions are open").font(.sb(11.5)).foregroundStyle(.secondary)
             } else {
                 strip(list)
                 if let h = hero {
@@ -300,7 +300,7 @@ struct SessionsPage: View {
                     let group = rest.filter { $0.attention == a }
                     if !group.isEmpty {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(groupTitle(a)).font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
+                            Text(groupTitle(a)).font(.sb(10, weight: .semibold)).foregroundStyle(.tertiary)
                             ForEach(group) { s in
                                 SessionRow(session: s, now: now, busy: opening == s.id) { open(s) }
                                     .onMiddleClick("srow-" + s.id, space: ScrollTargets.cardSpace) { openInBrowser(s) }
@@ -310,7 +310,7 @@ struct SessionsPage: View {
                 }
             }
             if let f = failed {
-                Text(f).font(.system(size: 10.5)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                Text(f).font(.sb(10.5)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
             Divider().padding(.horizontal, -12)
             HStack {
@@ -318,7 +318,7 @@ struct SessionsPage: View {
                     failed = nil
                     SessionActions.openHub { failed = $0 }
                 } label: { Label("Hub", systemImage: "rectangle.grid.2x2") }
-                    .buttonStyle(.borderless).font(.system(size: 11.5))
+                    .buttonStyle(.borderless).font(.sb(11.5))
                     .help("Open the session hub's board: every session, past ones too, with search. Middle-click to open it in the browser.")
                     .onMiddleClick("shub", space: ScrollTargets.cardSpace) { failed = nil; SessionActions.openHub(inBrowser: true) { failed = $0 } }
                 Spacer()
@@ -363,7 +363,7 @@ struct SessionsPage: View {
                     .help("When the list was last read")
             }
         }
-        .font(.system(size: 11, weight: .medium))
+        .font(.sb(11, weight: .medium))
         .help("What the open sessions have cost so far: $\(String(format: "%.2f", spend))")
     }
 }
@@ -391,8 +391,8 @@ struct SessionIcons: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if copied == name { copied = nil } }
             }
         } label: {
-            Image(systemName: copied == name ? "checkmark" : name).font(.system(size: 10.5, weight: .medium))
-                .frame(width: 14)
+            Image(systemName: copied == name ? "checkmark" : name).font(.sbIcon(10.5, weight: .medium))
+                .frame(width: si(14))
         }
         .buttonStyle(.borderless)
         .foregroundStyle(copied == name ? Color(nsColor: menuGreen) : .secondary)
@@ -409,17 +409,17 @@ struct HeroCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Circle().fill(Attention.needsYou.color).frame(width: 7, height: 7)
-                Text(session.title).font(.system(size: 12, weight: .semibold))
+                Circle().fill(Attention.needsYou.color).frame(width: si(7), height: si(7))
+                Text(session.title).font(.sb(12, weight: .semibold))
                 Text("waiting \(SessionScan.age(since: session.since, now: now))")
-                    .font(.system(size: 11)).foregroundStyle(Attention.needsYou.color)
+                    .font(.sb(11)).foregroundStyle(Attention.needsYou.color)
                 Spacer(minLength: 4)
                 SessionIcons(session: session)
             }
             Text(session.lastReply.isEmpty ? "Claude finished its turn." : session.lastReply)
-                .font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                .font(.sb(11.5)).fixedSize(horizontal: false, vertical: true)
             Button(action: open) { Label("Open transcript", systemImage: "text.bubble") }
-                .controlSize(.small)
+                .sbControlSize(.small)
                 .help("Read the whole session in the hub")
         }
         .padding(9)
@@ -442,14 +442,14 @@ struct SessionRow: View {
         HStack(spacing: 6) {
             // a Button, not a tap gesture: the card is not the key window, and only buttons take that first click
             Button(action: open) { HStack(spacing: 6) {
-                Circle().fill(session.attention.color).frame(width: 6, height: 6)
-                Text(session.title).font(.system(size: 11.5, weight: .medium)).lineLimit(1)
-                Text(stateWord).font(.system(size: 10.5))
+                Circle().fill(session.attention.color).frame(width: si(6), height: si(6))
+                Text(session.title).font(.sb(11.5, weight: .medium)).lineLimit(1)
+                Text(stateWord).font(.sb(10.5))
                     .foregroundStyle(session.attention == .needsYou ? session.attention.color : .secondary).lineLimit(1)
                 Spacer(minLength: 4)
-                if busy { ProgressView().controlSize(.mini) }
+                if busy { ProgressView().sbControlSize(.mini) }
                 Text(SessionScan.age(since: session.since, now: now))
-                    .font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.secondary)
+                    .font(.sb(10.5).monospacedDigit()).foregroundStyle(.secondary)
                 if let c = session.ctxLeft { ctxBar(c) }
             }
             .contentShape(Rectangle()) }
@@ -477,7 +477,7 @@ struct SessionRow: View {
             Capsule().fill(Color.primary.opacity(0.1))
             Capsule().fill(tint).frame(width: max(2, 26 * CGFloat(min(left, 100)) / 100))
         }
-        .frame(width: 26, height: 4)
+        .frame(width: sc(26), height: sc(4))
         .help("\(left)% of its context left")
     }
 

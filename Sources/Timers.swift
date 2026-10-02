@@ -226,7 +226,7 @@ struct TimersTabView: View {
                     WhenButton(title: "Start a timer for", presets: WhenPreset.timer,
                                onPick: { d, _ in timers.add(label: label, color: color ?? "blue", fireAt: d); label = "" },
                                isOpen: $picking) {
-                        Label("Start", systemImage: "timer").font(.system(size: 11.5, weight: .medium))
+                        Label("Start", systemImage: "timer").font(.sb(11.5, weight: .medium))
                             .padding(.horizontal, 10).padding(.vertical, 5)
                             .background(Capsule().fill(timerColor(color ?? "blue").opacity(0.25)))
                     }
@@ -281,7 +281,7 @@ struct TimerRow: View {
         let left = timer.fireAt.timeIntervalSince(timers.now)
         HStack(spacing: 8) {
             grip
-            Circle().fill(timerColor(timer.color)).frame(width: 9, height: 9)
+            Circle().fill(timerColor(timer.color)).frame(width: si(9), height: si(9))
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
                     // Click the label to rename it; Enter or clicking away saves.
@@ -303,7 +303,7 @@ struct TimerRow: View {
                             .help("Click to rename")
                     }
                     Spacer()
-                    Text(timer.running ? clock(left) : "done").font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    Text(timer.running ? clock(left) : "done").font(.sb(13, weight: .semibold).monospacedDigit())
                         .foregroundStyle(timer.running ? .primary : timerColor(timer.color))
                 }
                 if timer.running {
@@ -319,9 +319,9 @@ struct TimerRow: View {
                     Text("went off " + age(f)).font(PT.caption).foregroundStyle(.secondary)
                 }
             }
-            Button { timers.extend(timer, by: 60) } label: { Image(systemName: "plus.circle").font(.system(size: 11)) }
+            Button { timers.extend(timer, by: 60) } label: { Image(systemName: "plus.circle").font(.sbIcon(11)) }
                 .buttonStyle(.borderless).foregroundStyle(.secondary).help(timer.running ? "One more minute" : "Start again for a minute")
-            Button { timers.remove(timer) } label: { Image(systemName: "xmark.circle").font(.system(size: 11)) }
+            Button { timers.remove(timer) } label: { Image(systemName: "xmark.circle").font(.sbIcon(11)) }
                 .buttonStyle(.borderless).foregroundStyle(.secondary).help(timer.running ? "Cancel it" : "Clear it")
         }
         .padding(.leading, 4).padding(.trailing, PT.rowH).padding(.vertical, PT.rowV + 1)

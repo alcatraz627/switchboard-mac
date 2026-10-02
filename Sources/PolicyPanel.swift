@@ -15,24 +15,25 @@ import SwiftUI
 // ── Type and spacing, one place ─────────────────────────────────────────────
 
 enum PT {
-    static let title   = Font.system(size: 14, weight: .semibold)
-    static let label   = Font.system(size: 12.5)
-    static let caption = Font.system(size: 11)
-    static let section = Font.system(size: 11, weight: .semibold)   // sentence case, so a point larger than caps needed
-    static let mono    = Font.system(size: 11.5, weight: .medium).monospacedDigit()
-    static let rowV: CGFloat = 5.5
-    static let rowH: CGFloat = 12
-    static let gap: CGFloat = 12
+    // read while drawing, so they follow the size chosen in Settings (Scale.swift)
+    static var title: Font   { .sb(14, weight: .semibold) }
+    static var label: Font   { .sb(12.5) }
+    static var caption: Font { .sb(11) }
+    static var section: Font { .sb(11, weight: .semibold) }   // sentence case, so a point larger than caps needed
+    static var mono: Font    { .sb(11.5, weight: .medium).monospacedDigit() }
+    static var rowV: CGFloat { sc(5.5) }
+    static var rowH: CGFloat { sc(12) }
+    static var gap: CGFloat  { sc(12) }
     /// Wide enough for the longest label with a legacy (mouse) scrollbar showing.
-    static let width: CGFloat = 424
+    static var width: CGFloat { sw(424) }
     /// As tall as the screen allows, so the whole list usually fits unscrolled.
     static var maxHeight: CGFloat {
         let h = NSScreen.main?.visibleFrame.height ?? 800
         return max(360, min(h - 150, 980))
     }
-    static let control: CGFloat = 160
-    static let segment: CGFloat = 52
-    static let slider: CGFloat = 108
+    static var control: CGFloat { sw(160) }
+    static var segment: CGFloat { sw(52) }
+    static var slider: CGFloat  { sc(108) }
 }
 
 private let blockedTint = Color(nsColor: .systemRed)
@@ -263,7 +264,7 @@ struct PolicyPanel: View {
         let on = c.id == current.id
         return Button { open(c) } label: {
             HStack(spacing: 3) {
-                Image(systemName: c.icon).font(.system(size: 12, weight: on ? .semibold : .regular))
+                Image(systemName: c.icon).font(.sbIcon(12, weight: on ? .semibold : .regular))
                 if let n = c.badge() { TabBadge(count: n, onAccent: on) }
             }
             .padding(.horizontal, 5).padding(.vertical, 3)
@@ -298,8 +299,8 @@ struct PolicyPanel: View {
                     open(s.tabs.first { $0.id == last } ?? s.tabs[0])
                 } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: s.icon).font(.system(size: 10.5))
-                        Text(s.title).font(.system(size: 11.5, weight: on ? .semibold : .regular)).lineLimit(1)
+                        Image(systemName: s.icon).font(.sbIcon(10.5))
+                        Text(s.title).font(.sb(11.5, weight: on ? .semibold : .regular)).lineLimit(1)
                         if badge > 0 { TabBadge(count: badge, onAccent: on) }
                         else if let l = s.tabs.compactMap({ store.problemLevels[$0.id] }).max() { ProblemMark(level: l, onAccent: on) }
                     }
@@ -335,8 +336,8 @@ struct PolicyPanel: View {
                 Button { open(c) } label: {
                     VStack(spacing: 3) {
                         HStack(spacing: 4) {
-                            Image(systemName: c.icon).font(.system(size: 10.5))
-                            Text(c.title).font(.system(size: 11.5, weight: on ? .semibold : .regular)).lineLimit(1)
+                            Image(systemName: c.icon).font(.sbIcon(10.5))
+                            Text(c.title).font(.sb(11.5, weight: on ? .semibold : .regular)).lineLimit(1)
                             if let n = c.badge() { TabBadge(count: n, onAccent: false) }
                             else if let l = store.problemLevels[c.id] { ProblemMark(level: l) }
                         }
@@ -368,14 +369,14 @@ struct PolicyPanel: View {
 
     private var footer: some View {
         HStack(spacing: 6) {
-            Image(systemName: current.footerIcon).font(.system(size: 9)).foregroundStyle(.secondary)
+            Image(systemName: current.footerIcon).font(.sbIcon(9)).foregroundStyle(.secondary)
             Text(current.footer).font(PT.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
             // A Machine read can take a minute; the spinner says the click was heard.
             if let since = busySince { PendingMark(since: since, help: "Reading…") }
             Button { store.expireCatalog(current.id); current.refresh() } label: {
-                Image(systemName: "arrow.clockwise").font(.system(size: 11))
+                Image(systemName: "arrow.clockwise").font(.sbIcon(11))
             }
             .buttonStyle(.borderless)
             .help("Reload this tab")
@@ -455,7 +456,7 @@ struct AgentsTabView: View {
             HStack(spacing: 4) {
                 Image(systemName: store.scopeIsProject ? "folder" : "globe")
                 Text(store.scope.title)
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+                Image(systemName: "chevron.down").font(.sbIcon(8, weight: .semibold))
             }
             .font(PT.caption)
         }
@@ -470,7 +471,7 @@ struct AgentsTabView: View {
                 } }
             }
             .padding(6)
-            .frame(width: 300)
+            .frame(width: sw(300))
         }
     }
 }
@@ -485,23 +486,23 @@ private struct ScopeRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Group {
-                if selected { Image(systemName: "checkmark").font(.system(size: 10, weight: .semibold)) }
+                if selected { Image(systemName: "checkmark").font(.sbIcon(10, weight: .semibold)) }
                 else { Color.clear }
             }
-            .frame(width: 12, height: 12)
+            .frame(width: si(12), height: si(12))
             .foregroundStyle(Color.accentColor)
             Image(systemName: isGlobal ? "globe" : "folder.fill")
-                .font(.system(size: 12))
+                .font(.sbIcon(12))
                 .foregroundStyle(isGlobal ? Color.secondary : Color.accentColor.opacity(0.8))
             VStack(alignment: .leading, spacing: 1) {
                 Text(scope.title).font(PT.label).lineLimit(1)
-                Text(subtitle).font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                Text(subtitle).font(.sb(10.5)).foregroundStyle(.tertiary)
                     .lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: 4)
             if case .project(let root) = scope {
                 Button { NSWorkspace.shared.open(URL(fileURLWithPath: root)) } label: {
-                    Image(systemName: "arrow.up.forward.app").font(.system(size: 11))
+                    Image(systemName: "arrow.up.forward.app").font(.sbIcon(11))
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
@@ -637,10 +638,10 @@ struct TabBadge: View {
 
     var body: some View {
         Text("\(count)")
-            .font(.system(size: 9.5, weight: .bold).monospacedDigit())
+            .font(.sb(9.5, weight: .bold).monospacedDigit())
             .foregroundStyle(Color.black.opacity(0.85))
             .padding(.horizontal, count > 9 ? 4 : 0)
-            .frame(minWidth: 15, minHeight: 15)
+            .frame(minWidth: si(15), minHeight: si(15))
             .background(Capsule().fill(Color(nsColor: menuYellow)))
             .overlay(Capsule().strokeBorder(onAccent ? Color.white.opacity(0.7) : .clear, lineWidth: 1))
             .help("\(count) waiting on you")
@@ -655,7 +656,7 @@ struct ProblemMark: View {
 
     var body: some View {
         Circle().fill(level.tint)
-            .frame(width: 7, height: 7)
+            .frame(width: si(7), height: si(7))
             .overlay(Circle().strokeBorder(onAccent ? Color.white.opacity(0.8) : .clear, lineWidth: 1))
             .help(level == .error ? "Something here is broken" : "Something here could use a look")
     }
@@ -673,7 +674,7 @@ struct GroupHeader: View {
     var body: some View {
         HStack(spacing: 5) {
             if let icon = Icons.section[name] {
-                Image(systemName: icon).font(.system(size: 9.5, weight: .semibold))
+                Image(systemName: icon).font(.sbIcon(9.5, weight: .semibold))
             }
             Text(name).font(PT.section)
         }
@@ -754,7 +755,7 @@ struct SystemRowView: View {
                         .onSubmit { submitAsk(b) }
                         // Escape lets go of the keyboard and keeps what was typed; Cancel closes it
                         .onExitCommand { askFocused = false }
-                    Button("Cancel") { asking = nil }.controlSize(.small)
+                    Button("Cancel") { asking = nil }.sbControlSize(.small)
                 }
                 .padding(.leading, PT.rowH + indent).padding(.trailing, PT.rowH).padding(.bottom, PT.rowV + 2)
             }
@@ -806,7 +807,7 @@ struct SystemRowView: View {
     private var mainLine: some View {
         HStack(alignment: .center, spacing: 8) {
             if let icon = row.icon {
-                Image(systemName: icon).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
+                Image(systemName: icon).font(.sbIcon(11)).foregroundStyle(.secondary).frame(width: si(16))
             }
             VStack(alignment: .leading, spacing: 2) {
                 Group {
@@ -822,7 +823,7 @@ struct SystemRowView: View {
                         Text("→ \(t.restoreOn ? "On" : "Off") in \(countdown(to: t.until, now: store.now))")
                             .lineLimit(1)
                         Button { store.cancelSystemTimer(key) } label: {
-                            Image(systemName: "xmark.circle.fill").font(.system(size: 10))
+                            Image(systemName: "xmark.circle.fill").font(.sbIcon(10))
                         }
                         .buttonStyle(.borderless)
                         .help("Cancel the timer and keep the current state")
@@ -838,7 +839,7 @@ struct SystemRowView: View {
             Spacer(minLength: 6)
             if let p = pendingFlip { PendingMark(since: p.since) }
             else if busyButton != nil { PendingMark(since: busySince) }
-            else if let key = row.timerKey { timerMenu(key).frame(width: 18) }
+            else if let key = row.timerKey { timerMenu(key).frame(width: si(18)) }
             // Fixed size: long wrapping text beside them must never squeeze a button out.
             HStack(spacing: 8) {
                 ForEach(row.buttons.indices, id: \.self) { i in rowButton(row.buttons[i]) }
@@ -846,7 +847,7 @@ struct SystemRowView: View {
             .fixedSize()
             if let link = row.link, let url = URL(string: link) {
                 Button { openLink(url) } label: {
-                    Image(systemName: "arrow.up.right.square").font(.system(size: 12))
+                    Image(systemName: "arrow.up.right.square").font(.sbIcon(12))
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
@@ -906,7 +907,7 @@ struct SystemRowView: View {
     private func iconButton(_ symbol: String, tip: String, tint: Color? = nil,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 12)).frame(width: 18, height: 16)
+            Image(systemName: symbol).font(.sbIcon(12)).frame(width: si(18), height: si(16))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
@@ -925,7 +926,7 @@ struct SystemRowView: View {
                     }
                 }
             } label: {
-                Image(systemName: b.icon ?? "ellipsis.circle").font(.system(size: 12)).frame(width: 18, height: 16)
+                Image(systemName: b.icon ?? "ellipsis.circle").font(.sbIcon(12)).frame(width: si(18), height: si(16))
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
             .foregroundStyle(.secondary)
@@ -1037,7 +1038,7 @@ struct SystemRowView: View {
                           initial: row.timer?.until,
                           onPick: { d, _ in store.startSystemTimer(key, d) }) {
             Image(systemName: active ? "timer.circle.fill" : "timer")
-                .font(.system(size: 11))
+                .font(.sbIcon(11))
                 .foregroundStyle(active ? AnyShapeStyle(snoozeTint) : AnyShapeStyle(.tertiary))
         }
         .fixedSize()
@@ -1049,7 +1050,7 @@ struct SystemRowView: View {
         if opens {
             HStack(spacing: 4) {
                 if row.showsBadge { StateBadge(state: row.state) }
-                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                Image(systemName: "chevron.right").font(.sbIcon(9, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(expanded ? 90 : 0))
             }
@@ -1061,14 +1062,14 @@ struct SystemRowView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .controlSize(.small)
+            .sbControlSize(.small)
             .fixedSize()
             .disabled(!row.enabled)
         } else if row.isSwitch {
             Toggle("", isOn: Binding(get: { pendingFlip?.target ?? row.isOn },
                                      set: { flip(to: $0) }))
                 .toggleStyle(.switch)
-                .controlSize(.small)
+                .sbControlSize(.small)
                 .labelsHidden()
                 .disabled(!row.enabled)
                 .allowsHitTesting(pendingFlip == nil)
@@ -1079,7 +1080,7 @@ struct SystemRowView: View {
             } label: {
                 HStack(spacing: 4) {
                     StateBadge(state: row.state)
-                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                    Image(systemName: "chevron.down").font(.sbIcon(9, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -1113,7 +1114,7 @@ private struct StateBadge: View {
     }
 
     var body: some View {
-        let label = Text(text).font(.system(size: 10, weight: .semibold).monospacedDigit())
+        let label = Text(text).font(.sb(10, weight: .semibold).monospacedDigit())
             .padding(.horizontal, 7).padding(.vertical, 1.5)
         if let t = tint {
             label.foregroundStyle(Color(nsColor: t))
@@ -1145,7 +1146,7 @@ struct PolicyRowView: View {
                     HStack(spacing: 5) {
                         Text(item.label).font(PT.label).lineLimit(3).fixedSize(horizontal: false, vertical: true)
                         if !item.isDefault {
-                            Circle().fill(changedTint).frame(width: 5, height: 5)
+                            Circle().fill(changedTint).frame(width: si(5), height: si(5))
                                 .help("Changed from the default (\(item.defaultValue.cli))")
                         }
                     }
@@ -1158,7 +1159,7 @@ struct PolicyRowView: View {
                 Group {
                     if let p = pendingChange { PendingMark(since: p.since) } else { snoozeMenu }
                 }
-                .frame(width: 18, alignment: .center)
+                .frame(width: si(18), alignment: .center)
                 control
                     .allowsHitTesting(pendingChange == nil)
                     .frame(width: PT.control, alignment: .trailing)
@@ -1181,7 +1182,7 @@ struct PolicyRowView: View {
                 Text("→ \(word(z.then)) in \(countdown(to: z.until, now: store.now))")
                     .lineLimit(1)
                 Button { store.cancelSnooze(item) } label: {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 10))
+                    Image(systemName: "xmark.circle.fill").font(.sbIcon(10))
                 }
                 .buttonStyle(.borderless)
                 .help("Cancel the timed change and keep the current value")
@@ -1202,7 +1203,7 @@ struct PolicyRowView: View {
         HStack(spacing: 4) {
             Text(text).font(PT.caption).foregroundStyle(.secondary)
             Button { store.reset(item) } label: {
-                Image(systemName: "arrow.uturn.backward").font(.system(size: 9, weight: .semibold))
+                Image(systemName: "arrow.uturn.backward").font(.sbIcon(9, weight: .semibold))
             }
             .buttonStyle(.borderless)
             .foregroundStyle(.secondary)
@@ -1224,7 +1225,7 @@ struct PolicyRowView: View {
                     get: { allowed },
                     set: { store.set(item, .text($0 ? "allow" : "block")) }))
                     .toggleStyle(.switch)
-                    .controlSize(.small)
+                    .sbControlSize(.small)
                     .labelsHidden()
             }
         case .segmented(let opts):
@@ -1235,7 +1236,7 @@ struct PolicyRowView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .controlSize(.small)
+            .sbControlSize(.small)
             .frame(width: CGFloat(max(2, opts.count)) * PT.segment)
         case .menu(let opts):
             Picker("", selection: Binding(
@@ -1245,7 +1246,7 @@ struct PolicyRowView: View {
             }
             .pickerStyle(.menu)
             .labelsHidden()
-            .controlSize(.small)
+            .sbControlSize(.small)
             .fixedSize()
         case .slider(let lo, let hi, let step, let unit):
             HStack(spacing: 8) {
@@ -1259,11 +1260,11 @@ struct PolicyRowView: View {
                            if editing { draft = numeric(item.value); dragging = true }
                            else { dragging = false; store.set(item, .number(draft)) }
                        })
-                    .controlSize(.small)
+                    .sbControlSize(.small)
                     .frame(width: PT.slider)
                 Text("\(Int(dragging ? draft : numeric(shown)))\(unit)")
                     .font(PT.mono)
-                    .frame(width: 36, alignment: .trailing)
+                    .frame(width: sw(36), alignment: .trailing)
             }
         }
     }
@@ -1281,7 +1282,7 @@ struct PolicyRowView: View {
                            store.snooze(item, seconds: max(60, Int(d.timeIntervalSinceNow)), then: targets[min(i, targets.count - 1)])
                        }) {
                 Image(systemName: active ? "clock.fill" : "clock")
-                    .font(.system(size: 11))
+                    .font(.sbIcon(11))
                     .foregroundStyle(active ? AnyShapeStyle(snoozeTint) : AnyShapeStyle(.tertiary))
             }
             .fixedSize()
@@ -1415,7 +1416,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
                                      self?.peek?.hide(); self?.show(tab: tab)
                                  },
                                  openReveal: { [weak self] tab, key in self?.reveal(tab: tab, key: key) })
-            peek = HoverPeek(button: b, state: quick, card: AnyView(card),
+            peek = HoverPeek(button: b, state: quick, card: AnyView(ScaledRoot { card }),
                              refresh: { [weak self] in self?.refreshQuick() },
                              panelOpen: { [weak self] in self?.popover.isShown ?? false })
             let d = IconDot(on: b)
@@ -1430,16 +1431,20 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
                     let shown = order.filter { !hidden.contains($0) }
                     self?.quick.pages = (shown.isEmpty ? Array(order.prefix(1)) : shown).compactMap(QuickPage.init(rawValue:))
                 }
-            countWatch = SessionsStore.shared.$sessions
-                .sink { list in
-                    b.imagePosition = list.isEmpty ? .imageOnly : .imageLeading
-                    b.attributedTitle = list.isEmpty ? NSAttributedString() : NSAttributedString(
-                        string: "\(list.count)", attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)])
+            countWatch = SessionsStore.shared.$sessions.combineLatest(UIScale.shared.$size)
+                .sink { list, _ in
+                    // runs after the size is stored, so the glyph and count are drawn at the new size
+                    DispatchQueue.main.async {
+                        b.image = switchboardGlyph()
+                        b.imagePosition = list.isEmpty ? .imageOnly : .imageLeading
+                        b.attributedTitle = list.isEmpty ? NSAttributedString() : NSAttributedString(
+                            string: "\(list.count)", attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: min(14, 11 * UIScale.text), weight: .medium)])
+                    }
                 }
             SessionsStore.shared.start()
         }
         concerns = SwitchboardConcerns.all(policy: store, usage: usage, lights: lights, controls: controls)
-        let host = NSHostingController(rootView: PolicyPanel(concerns: concerns, store: store))
+        let host = NSHostingController(rootView: ScaledRoot { PolicyPanel(concerns: concerns, store: store) })
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
         popover.behavior = .transient
@@ -1582,7 +1587,8 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
 /// and levels" and stays clearly apart from Control Center's stacked toggles.
 /// An SF Symbol, so it is hinted for the menu bar at 1x and 2x alike.
 func switchboardGlyph() -> NSImage {
-    let cfg = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+    // the menu bar's height is fixed, so the icon grows with the size setting only as far as it fits
+    let cfg = NSImage.SymbolConfiguration(pointSize: min(17, 14 * UIScale.icon), weight: .medium)
     let img = NSImage(systemSymbolName: "slider.vertical.3", accessibilityDescription: "Switchboard")?
         .withSymbolConfiguration(cfg) ?? NSImage()
     img.isTemplate = true
@@ -1667,7 +1673,7 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     let root: AnyView = tab == "scopes"
         ? AnyView(VStack(alignment: .leading, spacing: 0) {
               ForEach(store.scopes, id: \.self) { s in ScopeRow(scope: s, selected: s == store.scope) {} }
-          }.padding(6).frame(width: 300))
+          }.padding(6).frame(width: sw(300)))
         : AnyView(PolicyPanel(concerns: concerns, store: store, unbounded: true, forcedTab: tab))
     let host = NSHostingView(rootView: root.background(Color(nsColor: .windowBackgroundColor)))
     host.appearance = appearance
@@ -1705,7 +1711,7 @@ struct ScopedSearch: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .controlSize(.small)
+            .sbControlSize(.small)
             .padding(.horizontal, PT.gap)
         }
     }
@@ -1724,7 +1730,7 @@ struct SearchField: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary)
+            Image(systemName: "magnifyingglass").font(.sbIcon(11)).foregroundStyle(.secondary)
             // one word; the tab already says what is being searched, and the tooltip says it in full
             TextField("Search", text: $draft)
                 .textFieldStyle(.plain).font(PT.label)
@@ -1743,7 +1749,7 @@ struct SearchField: View {
                 }
             if !draft.isEmpty {
                 Button { draft = ""; text = "" } label: {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 11))
+                    Image(systemName: "xmark.circle.fill").font(.sbIcon(11))
                 }
                 .buttonStyle(.borderless).foregroundStyle(.secondary)
                 .help("Clear")

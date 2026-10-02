@@ -280,8 +280,8 @@ struct StatusBadgeView: View {
         Button(action: act) {
             // the colour rides on the icon and the fill; the words stay full contrast to read
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Image(systemName: badge.icon).font(.system(size: 9.5, weight: .semibold)).foregroundStyle(badge.tint)
-                Text(badge.text).font(.system(size: 10.5, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                Image(systemName: badge.icon).font(.sbIcon(9.5, weight: .semibold)).foregroundStyle(badge.tint)
+                Text(badge.text).font(.sb(10.5, weight: .medium)).fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 7).padding(.vertical, 3)
             .background(RoundedRectangle(cornerRadius: 8).fill(badge.tint.opacity(0.22)))
@@ -337,7 +337,7 @@ struct QuickCard: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
-        .frame(width: 320, alignment: .leading)
+        .frame(width: sw(320), alignment: .leading)
         .background(GlassBackground())
         .coordinateSpace(name: "quickCard")
     }
@@ -351,13 +351,13 @@ struct QuickCard: View {
             Spacer(minLength: 4)
             if let tab = state.page.tab {
                 Button { openTab(tab) } label: {
-                    Image(systemName: "arrow.up.forward.app").font(.system(size: 12, weight: .medium))
+                    Image(systemName: "arrow.up.forward.app").font(.sbIcon(12, weight: .medium))
                 }
                 .buttonStyle(.borderless).foregroundStyle(.secondary).help("Open \(state.page.title) in the panel")
             } else {
                 // Now has no tab of its own; its button opens the hover card's own settings
                 Button { openSearch("settings", "hover") } label: {
-                    Image(systemName: "gearshape").font(.system(size: 12, weight: .medium))
+                    Image(systemName: "gearshape").font(.sbIcon(12, weight: .medium))
                 }
                 .buttonStyle(.borderless).foregroundStyle(.secondary).help("Hover card settings: pages, delay, what Now shows")
             }
@@ -370,8 +370,8 @@ struct QuickCard: View {
                 let on = p == state.page
                 Button { state.page = p } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: p.icon).font(.system(size: 10, weight: .semibold))
-                        if on && named { Text(p.title).font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize() }
+                        Image(systemName: p.icon).font(.sbIcon(10, weight: .semibold))
+                        if on && named { Text(p.title).font(.sb(11, weight: .semibold)).lineLimit(1).fixedSize() }
                     }
                     .padding(.horizontal, on && named ? 8 : 6).padding(.vertical, 3)
                     .background(Capsule().fill(Color.primary.opacity(on ? 0.16 : 0.06)))
@@ -394,8 +394,8 @@ struct QuickCard: View {
                 ForEach(Array(tabs), id: \.id) { t in
                     Button { openTab(t.id) } label: {
                         HStack(spacing: 4) {
-                            Image(systemName: Icons.tab[t.id] ?? "square").font(.system(size: 10.5))
-                            Text(t.title).font(.system(size: 11.5)).lineLimit(1)
+                            Image(systemName: Icons.tab[t.id] ?? "square").font(.sbIcon(10.5))
+                            Text(t.title).font(.sb(11.5)).lineLimit(1)
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, 6)
                         .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.07)))
@@ -405,7 +405,7 @@ struct QuickCard: View {
                 }
             }
             if state.badges.isEmpty {
-                Text("Nothing needs you").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                Text("Nothing needs you").font(.sb(11.5)).foregroundStyle(.secondary)
             } else {
                 FlowLayout(spacing: 5) {
                     ForEach(state.badges) { b in
@@ -463,7 +463,7 @@ struct QuickCard: View {
         return VStack(alignment: .leading, spacing: 7) {
             if groups.isEmpty { empty("Nothing waits on you") }
             ForEach(shown, id: \.0) { title, rows in
-                Text(title).font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
+                Text(title).font(.sb(10, weight: .semibold)).foregroundStyle(.tertiary)
                 ForEach(rows) { r in
                     QuickNeedRow(row: r, waiting: title == "Pushes" || title == "Policy asks" || title == "Claude asks")
                         .onMiddleClick("qneed-" + (r.key ?? r.label), space: ScrollTargets.cardSpace) {
@@ -511,16 +511,16 @@ struct QuickCard: View {
             if pins.isEmpty { empty("No pinned notes. Pin one below or in the Notes tab.") }
             ForEach(pins) { n in
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Image(systemName: "pin.fill").font(.system(size: 9.5)).foregroundStyle(.secondary)
-                    Text(n.heading).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                    Image(systemName: "pin.fill").font(.sbIcon(9.5)).foregroundStyle(.secondary)
+                    Text(n.heading).font(.sb(11.5)).fixedSize(horizontal: false, vertical: true)
                     Spacer()
                     Button {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(n.content, forType: .string)
-                    } label: { Image(systemName: "doc.on.doc").font(.system(size: 10.5)) }
+                    } label: { Image(systemName: "doc.on.doc").font(.sbIcon(10.5)) }
                         .buttonStyle(.borderless).foregroundStyle(.secondary).help("Copy the note")
                     Button { var m = n; m.pinned = false; notes.update(m) } label: {
-                        Image(systemName: "pin.slash").font(.system(size: 10.5))
+                        Image(systemName: "pin.slash").font(.sbIcon(10.5))
                     }
                     .buttonStyle(.borderless).foregroundStyle(.secondary).help("Unpin")
                 }
@@ -544,13 +544,13 @@ struct QuickCard: View {
             if running.isEmpty { empty("No timers running") }
             ForEach(running) { t in
                 HStack(spacing: 7) {
-                    Circle().fill(timerColor(t.color)).frame(width: 8, height: 8)
-                    Text(t.label).font(.system(size: 11.5)).nameFit(t.label)
+                    Circle().fill(timerColor(t.color)).frame(width: si(8), height: si(8))
+                    Text(t.label).font(.sb(11.5)).nameFit(t.label)
                     Spacer(minLength: 6)
-                    Text(clock(t.fireAt.timeIntervalSince(timers.now))).font(.system(size: 12, weight: .semibold).monospacedDigit())
-                    Button { timers.extend(t, by: 60) } label: { Image(systemName: "plus.circle").font(.system(size: 11)) }
+                    Text(clock(t.fireAt.timeIntervalSince(timers.now))).font(.sb(12, weight: .semibold).monospacedDigit())
+                    Button { timers.extend(t, by: 60) } label: { Image(systemName: "plus.circle").font(.sbIcon(11)) }
                         .buttonStyle(.borderless).foregroundStyle(.secondary).help("Add a minute")
-                    Button { timers.remove(t) } label: { Image(systemName: "xmark.circle").font(.system(size: 11)) }
+                    Button { timers.remove(t) } label: { Image(systemName: "xmark.circle").font(.sbIcon(11)) }
                         .buttonStyle(.borderless).foregroundStyle(.secondary).help("Stop it")
                 }
             }
@@ -593,9 +593,9 @@ struct QuickCard: View {
 
     private func switchItem(_ icon: String, _ title: String, _ on: Bool, busy: Bool = false, set: @escaping (Bool) -> Void) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: icon).font(.system(size: 11)).foregroundStyle(.secondary)
-            Text(title).font(.system(size: 11.5))
-            Toggle("", isOn: Binding(get: { on }, set: set)).toggleStyle(.switch).controlSize(.mini).labelsHidden()
+            Image(systemName: icon).font(.sbIcon(11)).foregroundStyle(.secondary)
+            Text(title).font(.sb(11.5))
+            Toggle("", isOn: Binding(get: { on }, set: set)).toggleStyle(.switch).sbControlSize(.mini).labelsHidden()
                 .disabled(busy)
         }
         .fixedSize()
@@ -612,10 +612,10 @@ struct QuickCard: View {
 
     private func level(icon: String, value: Float, text: String, set: @escaping (Float) -> Void) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: icon).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
-            Slider(value: Binding(get: { Double(value) }, set: { set(Float($0)) }), in: 0...1).controlSize(.mini)
+            Image(systemName: icon).font(.sbIcon(11)).foregroundStyle(.secondary).frame(width: si(16))
+            Slider(value: Binding(get: { Double(value) }, set: { set(Float($0)) }), in: 0...1).sbControlSize(.mini)
                 .scrollSteps("q-level-" + icon, onCard: true, stepper: .slider()) { st in set(sliderStep(value, by: st)) }
-            Text(text).font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.secondary).frame(width: 38, alignment: .trailing)
+            Text(text).font(.sb(10.5).monospacedDigit()).foregroundStyle(.secondary).frame(width: sw(38), alignment: .trailing)
         }
     }
 
@@ -650,10 +650,10 @@ struct QuickCard: View {
     }
 
     private func empty(_ s: String) -> some View {
-        Text(s).font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        Text(s).font(.sb(11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     }
     private func more(_ n: Int, tab: String) -> some View {
-        Button { openTab(tab) } label: { Text("\(n) more in the panel").font(.system(size: 11)) }.buttonStyle(.link)
+        Button { openTab(tab) } label: { Text("\(n) more in the panel").font(.sb(11)) }.buttonStyle(.link)
     }
 }
 
@@ -678,9 +678,9 @@ struct QuickNeedRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: waiting ? "hand.raised.fill" : "clock").font(.system(size: 10))
+                Image(systemName: waiting ? "hand.raised.fill" : "clock").font(.sbIcon(10))
                     .foregroundStyle(waiting ? Color(nsColor: menuYellow) : .secondary)
-                Text(row.label).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                Text(row.label).font(.sb(11.5)).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
                 ForEach(Array(row.buttons.enumerated()), id: \.offset) { _, b in
                     if case .run(let act) = b.kind {
@@ -700,15 +700,15 @@ struct QuickNeedRow: View {
                         } label: {
                             Label(b.label, systemImage: b.icon ?? Self.icon(for: b.label)).labelStyle(.titleAndIcon)
                         }
-                        .controlSize(.small).disabled(busy != nil).help(b.help)
+                        .sbControlSize(.small).disabled(busy != nil).help(b.help)
                     }
                 }
             }
             if !row.note.isEmpty {
-                Text(row.note).font(.system(size: 10.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(row.note).font(.sb(10.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if let f = failed {
-                Text(f).font(.system(size: 10.5)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                Text(f).font(.sb(10.5)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -735,10 +735,10 @@ struct ChipFlow: View {
 
     /// How many chips fit in `maxRows` rows of the card's 296 points, from each
     /// chip's text length (icon, padding and gap included).
-    static func fitting(_ texts: [String], rows: Int, width: CGFloat = 296, reserve: CGFloat = 0) -> Int {
+    static func fitting(_ texts: [String], rows: Int, width: CGFloat = sw(296), reserve: CGFloat = 0) -> Int {
         var row = 1, x: CGFloat = 0
         for (i, t) in texts.enumerated() {
-            let w = 34 + CGFloat(t.count) * 6.1
+            let w = sc(34) + CGFloat(t.count) * 6.1 * UIScale.text
             let limit = row == rows ? width - reserve : width
             if x > 0 && x + w > limit { row += 1; x = 0 }
             if row > rows || (row == rows && x + w > limit) { return i }
@@ -750,7 +750,7 @@ struct ChipFlow: View {
     private var shown: [ChipItem] {
         let texts = items.map(\.text)
         guard let overflow, Self.fitting(texts, rows: maxRows) < items.count else { return items }
-        let n = Self.fitting(texts, rows: maxRows, reserve: 74)   // room for the "N more" chip
+        let n = Self.fitting(texts, rows: maxRows, reserve: sw(74))   // room for the "N more" chip
         return Array(items.prefix(n)) + [overflow(items.count - n)]
     }
 
@@ -759,8 +759,8 @@ struct ChipFlow: View {
             ForEach(shown) { c in
                 Button(action: c.act) {
                     HStack(spacing: 4) {
-                        Image(systemName: c.icon).font(.system(size: 9.5))
-                        Text(c.text).font(.system(size: 10.5)).lineLimit(1)
+                        Image(systemName: c.icon).font(.sbIcon(9.5))
+                        Text(c.text).font(.sb(10.5)).lineLimit(1)
                     }
                     .padding(.horizontal, 7).padding(.vertical, 3)
                     .background(Capsule().fill(Color.primary.opacity(0.08)))
@@ -828,12 +828,12 @@ struct QuickBulbRow: View {
         HStack(spacing: 8) {
             Button { lights.set(bulb, ["state=\(bulb.on ? "off" : "on")"]) } label: {
                 HStack(spacing: 7) {
-                    Image(systemName: bulb.on ? "lightbulb.fill" : "lightbulb").font(.system(size: 11))
-                        .foregroundStyle(bulb.on ? Color.yellow : Color.secondary).frame(width: 14)
-                    Text(bulb.title).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                    Image(systemName: bulb.on ? "lightbulb.fill" : "lightbulb").font(.sbIcon(11))
+                        .foregroundStyle(bulb.on ? Color.yellow : Color.secondary).frame(width: si(14))
+                    Text(bulb.title).font(.sb(11.5)).fixedSize(horizontal: false, vertical: true)
                     if !bulb.on {
                         Text(lastOn.map { "off · on \(relative($0, now: Date()))" } ?? "off")
-                            .font(.system(size: 10.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            .font(.sb(10.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 4)
                 }
@@ -842,11 +842,11 @@ struct QuickBulbRow: View {
             .buttonStyle(.plain)
             .help(bulb.on ? "Turn \(bulb.title) off. Middle-click to open it in Home." : "Turn \(bulb.title) on. Middle-click to open it in Home.")
             if bulb.on {
-                Slider(value: Binding(get: { level }, set: { change($0) }), in: 10...100).controlSize(.mini)
-                    .frame(width: 110)
+                Slider(value: Binding(get: { level }, set: { change($0) }), in: 10...100).sbControlSize(.mini)
+                    .frame(width: sc(110))
                     .scrollSteps("q-bulb-" + bulb.mac, onCard: true, stepper: .slider()) { st in change(level + Double(st) * 5) }
-                Text("\(Int(level.rounded()))%").font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.secondary)
-                    .frame(width: 32, alignment: .trailing)
+                Text("\(Int(level.rounded()))%").font(.sb(10.5).monospacedDigit()).foregroundStyle(.secondary)
+                    .frame(width: sw(32), alignment: .trailing)
             }
         }
         .disabled(!bulb.reachable || busy)

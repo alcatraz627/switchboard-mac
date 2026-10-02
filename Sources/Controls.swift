@@ -293,7 +293,7 @@ struct ControlsTabView: View {
                     if controls.muted != nil {
                         Button { controls.toggleMute() } label: {
                             Image(systemName: controls.muted == true ? "speaker.slash" : "speaker.wave.1")
-                                .font(.system(size: 12)).frame(width: 18, height: 16)
+                                .font(.sbIcon(12)).frame(width: si(18), height: si(16))
                         }
                         .buttonStyle(.borderless).foregroundStyle(.secondary)
                         .help(controls.muted == true ? "Unmute" : "Mute")
@@ -335,7 +335,7 @@ struct ControlsTabView: View {
                         Toggle("", isOn: Binding(get: { on }, set: { new in
                             if !new && !confirm("Turn Wi-Fi off?", "Everything on this Mac that uses the network loses it, including remote sessions.") { return }
                             controls.setWiFi(new)
-                        })).toggleStyle(.switch).controlSize(.small).labelsHidden()
+                        })).toggleStyle(.switch).sbControlSize(.small).labelsHidden()
                             .disabled(controls.busy.contains("wifi"))
                     }
                     failure("wifi")
@@ -349,7 +349,7 @@ struct ControlsTabView: View {
                         Toggle("", isOn: Binding(get: { on }, set: { new in
                             if !new && !confirm("Turn Bluetooth off?", "A Bluetooth keyboard, mouse or headphones disconnect at once.") { return }
                             controls.setBluetooth(new)
-                        })).toggleStyle(.switch).controlSize(.small).labelsHidden()
+                        })).toggleStyle(.switch).sbControlSize(.small).labelsHidden()
                             .disabled(controls.busy.contains("bluetooth"))
                     }
                     failure("bluetooth")
@@ -366,7 +366,7 @@ struct ControlsTabView: View {
                                 if controls.busy.contains(d.id) { PendingMark(since: controls.busySince[d.id] ?? Date()) }
                                 Button { controls.toggleDevice(d) } label: {
                                     Image(systemName: d.connected ? "bolt.horizontal.circle.fill" : "bolt.horizontal.circle")
-                                        .font(.system(size: 12)).frame(width: 18, height: 16)
+                                        .font(.sbIcon(12)).frame(width: si(18), height: si(16))
                                 }
                                 .buttonStyle(.borderless).foregroundStyle(.secondary)
                                 .help(d.connected ? "Disconnect" : "Connect")
@@ -397,7 +397,7 @@ struct ControlsTabView: View {
     private func row<C: View>(icon: String, title: String, caption: String?, captionIsName: Bool = false, indent: CGFloat = 0,
                               @ViewBuilder trailing: () -> C) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: icon).font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 18)
+            Image(systemName: icon).font(.sbIcon(12)).foregroundStyle(.secondary).frame(width: si(18))
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(SBStyle.label).nameFit(title)
                 if let caption {
@@ -421,8 +421,8 @@ struct ControlsTabView: View {
         HStack(spacing: 8) {
             Slider(value: Binding(get: { Double(value) }, set: { set(Float($0)) }), in: 0...1,
                    onEditingChanged: { editing in if !editing { commit(value) } })
-                .controlSize(.mini)
-            Text(level).font(SBStyle.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 40, alignment: .trailing)
+                .sbControlSize(.mini)
+            Text(level).font(SBStyle.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: sw(40), alignment: .trailing)
         }
         .padding(.leading, SBStyle.rowH + 26).padding(.trailing, SBStyle.rowH).padding(.bottom, SBStyle.rowV + 2)
         // up raises it, down lowers it, the way a volume wheel turns
@@ -438,7 +438,7 @@ struct ControlsTabView: View {
                 Button(d.name + (d.id == controls.output ? "  ✓" : "")) { controls.pickOutput(d.id) }
             }
         } label: {
-            Image(systemName: "hifispeaker.2").font(.system(size: 12)).foregroundStyle(.secondary)
+            Image(systemName: "hifispeaker.2").font(.sbIcon(12)).foregroundStyle(.secondary)
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
         .help("Choose the output")

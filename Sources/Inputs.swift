@@ -238,7 +238,7 @@ struct NoteSheet: View {
 
     private func placeholder<V: View>(_ p: String, empty: Bool, size: CGFloat, weight: Font.Weight, @ViewBuilder _ v: () -> V) -> some View {
         ZStack(alignment: .topLeading) {
-            if empty { Text(p).font(.system(size: size, weight: weight)).foregroundStyle(.tertiary).allowsHitTesting(false) }
+            if empty { Text(p).font(.sb(size, weight: weight)).foregroundStyle(.tertiary).allowsHitTesting(false) }
             v()
         }
     }

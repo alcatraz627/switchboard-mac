@@ -99,7 +99,7 @@ struct NoteCompose: View {
     }
 
     private func icon(_ name: String, _ help: String, _ act: @escaping () -> Void) -> some View {
-        Button(action: act) { Image(systemName: name).font(.system(size: 11)) }
+        Button(action: act) { Image(systemName: name).font(.sbIcon(11)) }
             .buttonStyle(.borderless).foregroundStyle(.secondary).help(help)
     }
 }
@@ -134,7 +134,7 @@ struct NotesTabView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Button { withAnimation(.easeOut(duration: 0.15)) { showExpired.toggle() } } label: {
                         HStack(spacing: 5) {
-                            Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
+                            Image(systemName: "chevron.right").font(.sbIcon(8, weight: .semibold))
                                 .rotationEffect(.degrees(showExpired ? 90 : 0))
                             Text("Expired \(notes.expired.count)").font(PT.section)
                         }
@@ -145,7 +145,7 @@ struct NotesTabView: View {
                         Card {
                             ForEach(Array(notes.expired.enumerated()), id: \.element.id) { i, n in
                                 if i > 0 { Divider().padding(.leading, PT.rowH) }
-                                NoteRow(note: n, notes: notes, grip: AnyView(Color.clear.frame(width: 14)))
+                                NoteRow(note: n, notes: notes, grip: AnyView(Color.clear.frame(width: si(14))))
                             }
                         }
                         .opacity(0.6)
@@ -166,7 +166,7 @@ struct NotesFolderLink: View {
         HStack(spacing: 6) {
             Button { NSWorkspace.shared.open(URL(fileURLWithPath: dir)) } label: {
                 HStack(spacing: 5) {
-                    Image(systemName: "folder").font(.system(size: 10.5))
+                    Image(systemName: "folder").font(.sbIcon(10.5))
                     Text(abbreviateHome(dir)).font(PT.caption).lineLimit(1).truncationMode(.middle)
                 }
             }
@@ -177,7 +177,7 @@ struct NotesFolderLink: View {
                 copied = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
             } label: {
-                Image(systemName: copied ? "checkmark" : "doc.on.doc").font(.system(size: 10.5))
+                Image(systemName: copied ? "checkmark" : "doc.on.doc").font(.sbIcon(10.5))
                     .foregroundStyle(copied ? Color(nsColor: menuGreen) : .secondary)
             }
             .buttonStyle(.borderless).help("Copy the folder's path")
@@ -211,7 +211,7 @@ struct NoteRow: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 6) {
                 grip
-                if let c = note.color { Circle().fill(timerColor(c)).frame(width: 8, height: 8) }
+                if let c = note.color { Circle().fill(timerColor(c)).frame(width: si(8), height: si(8)) }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(note.heading).font(PT.label).fixedSize(horizontal: false, vertical: true)
                         .strikethrough(note.expired)
@@ -219,7 +219,7 @@ struct NoteRow: View {
                         // a note that starts with a link shows it as one, opening on click
                         Button { NSWorkspace.shared.open(url) } label: {
                             HStack(spacing: 4) {
-                                Image(systemName: url.isFileURL ? "doc" : "link").font(.system(size: 9.5))
+                                Image(systemName: url.isFileURL ? "doc" : "link").font(.sbIcon(9.5))
                                 Text(linkLabel(url)).font(PT.caption).lineLimit(2).multilineTextAlignment(.leading)
                             }
                         }
@@ -240,12 +240,12 @@ struct NoteRow: View {
                 .opacity(hovering || open ? 1 : 0)
                 // a pinned note shows on the menu-bar quick page
                 Button { setPinned(!note.pinned) } label: {
-                    Image(systemName: note.pinned ? "pin.fill" : "pin").font(.system(size: 11))
-                        .foregroundStyle(note.pinned ? Color.accentColor : .secondary).frame(width: 16)
+                    Image(systemName: note.pinned ? "pin.fill" : "pin").font(.sbIcon(11))
+                        .foregroundStyle(note.pinned ? Color.accentColor : .secondary).frame(width: si(16))
                 }
                 .buttonStyle(.borderless).help(note.pinned ? "Unpin: leave the menu-bar quick page" : "Pin to the menu-bar quick page")
                 .opacity(note.pinned || hovering || open ? 1 : 0)
-                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                Image(systemName: "chevron.right").font(.sbIcon(9, weight: .semibold))
                     .rotationEffect(.degrees(open ? 90 : 0)).foregroundStyle(.secondary)
             }
             .padding(.leading, 4).padding(.trailing, PT.rowH).padding(.vertical, PT.rowV)
@@ -416,8 +416,8 @@ struct NoteRow: View {
     /// A set value is a filled pill; an unset one reads as an action ("+ Add reminder").
     private func chip(icon: String, _ text: String, set: Bool) -> some View {
         HStack(spacing: 5) {
-            Image(systemName: set ? icon : "plus").font(.system(size: 10, weight: .medium))
-            Text(text).font(.system(size: 11))
+            Image(systemName: set ? icon : "plus").font(.sbIcon(10, weight: .medium))
+            Text(text).font(.sb(11))
         }
         .padding(.horizontal, 9).padding(.vertical, 4)
         .background(Capsule().fill(set ? Color.accentColor.opacity(0.14) : Color.clear))
@@ -425,7 +425,7 @@ struct NoteRow: View {
         .foregroundStyle(set ? Color.accentColor : .secondary)
     }
     private func clearButton(_ help: String, _ act: @escaping () -> Void) -> some View {
-        Button(action: act) { Image(systemName: "xmark.circle.fill").font(.system(size: 11)) }
+        Button(action: act) { Image(systemName: "xmark.circle.fill").font(.sbIcon(11)) }
             .buttonStyle(.borderless).foregroundStyle(.tertiary).help(help)
     }
 
@@ -446,9 +446,9 @@ struct NoteRow: View {
             copied = icon
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if copied == icon { copied = nil } }
         } label: {
-            Image(systemName: copied == icon ? "checkmark" : icon).font(.system(size: 11))
+            Image(systemName: copied == icon ? "checkmark" : icon).font(.sbIcon(11))
                 .foregroundStyle(copied == icon ? Color(nsColor: menuGreen) : .secondary)
-                .frame(width: 16)
+                .frame(width: si(16))
         }
         .buttonStyle(.borderless).help(help)
     }

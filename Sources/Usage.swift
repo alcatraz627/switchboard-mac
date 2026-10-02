@@ -373,7 +373,7 @@ struct UsageBarRow: View {
                         .frame(width: max(4, g.size.width * CGFloat(min(window.pct, 100)) / 100))
                     ForEach(Array(ticks.enumerated()), id: \.offset) { _, t in
                         Rectangle().fill(Color.primary.opacity(0.45))
-                            .frame(width: 1.5, height: 10)
+                            .frame(width: si(1.5), height: si(10))
                             .offset(x: g.size.width * CGFloat(min(max(t.0, 0), 100)) / 100 - 0.75)
                             .help("\(t.1) at \(t.0)%")
                     }
@@ -395,7 +395,7 @@ struct ZoneSlider: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle().fill(tint).frame(width: 6, height: 6)
+            Circle().fill(tint).frame(width: si(6), height: si(6))
             Text(label).font(SBStyle.label)
             Spacer()
             Slider(value: Binding(get: { dragging ? draft : Double(value) },
@@ -405,9 +405,9 @@ struct ZoneSlider: View {
                        if editing { draft = Double(value); dragging = true }
                        else { dragging = false; value = Int(draft) }
                    })
-                .controlSize(.small)
-                .frame(width: 108)
-            Text("\(dragging ? Int(draft) : value)%").font(SBStyle.mono).frame(width: 36, alignment: .trailing)
+                .sbControlSize(.small)
+                .frame(width: sc(108))
+            Text("\(dragging ? Int(draft) : value)%").font(SBStyle.mono).frame(width: sw(36), alignment: .trailing)
         }
         .padding(.horizontal, SBStyle.rowH).padding(.vertical, SBStyle.rowV)
     }

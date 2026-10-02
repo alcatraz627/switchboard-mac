@@ -304,11 +304,11 @@ struct LightsTabView: View {
                     SBGroupHeader(name: "Lights")
                     Spacer()
                     if lights.bulbs.contains(where: { $0.reachable }) {
-                        Button("All off") { lights.setAll(on: false) }.controlSize(.small)
-                        Button("All on") { lights.setAll(on: true) }.controlSize(.small)
+                        Button("All off") { lights.setAll(on: false) }.sbControlSize(.small)
+                        Button("All on") { lights.setAll(on: true) }.sbControlSize(.small)
                     }
                     Button { lights.discover() } label: {
-                        Image(systemName: "arrow.clockwise").font(.system(size: 10))
+                        Image(systemName: "arrow.clockwise").font(.sbIcon(10))
                     }
                     .buttonStyle(.borderless)
                     .help("Look for bulbs on the network again")
@@ -371,7 +371,7 @@ struct BulbRow: View {
             HStack(spacing: 8) {
                 Image(systemName: bulb.on ? "lightbulb.fill" : "lightbulb")
                     .foregroundStyle(bulb.on ? Color.yellow : Color.secondary)
-                    .frame(width: 16)
+                    .frame(width: si(16))
                 VStack(alignment: .leading, spacing: 1) {
                     if renaming {
                         TextField("Name", text: $draftName)
@@ -395,7 +395,7 @@ struct BulbRow: View {
                 }
                 Spacer()
                 Button { showColour.toggle() } label: {
-                    Image(systemName: "paintpalette").font(.system(size: 11))
+                    Image(systemName: "paintpalette").font(.sbIcon(11))
                         .foregroundStyle(showColour ? Color.accentColor : .secondary)
                 }
                 .buttonStyle(.plain)
@@ -419,33 +419,33 @@ struct BulbRow: View {
                     Divider()
                     Button("Rename") { startRename() }
                 } label: {
-                    Image(systemName: "ellipsis.circle").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Image(systemName: "ellipsis.circle").font(.sbIcon(12)).foregroundStyle(.secondary)
                 }
                 .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
                 .disabled(!bulb.reachable)
                 if let since = lights.pendingSince[bulb.mac] { PendingMark(since: since) }
                 Toggle("", isOn: Binding(get: { bulb.on },
                                          set: { lights.set(bulb, ["state=\($0 ? "on" : "off")"]) }))
-                    .toggleStyle(.switch).controlSize(.small).labelsHidden()
+                    .toggleStyle(.switch).sbControlSize(.small).labelsHidden()
                     .disabled(!bulb.reachable)
                     .allowsHitTesting(!busy)
             }
             if bulb.on && bulb.reachable {
                 HStack(spacing: 8) {
-                    Image(systemName: "sun.min").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Image(systemName: "sun.min").font(.sbIcon(10)).foregroundStyle(.secondary)
                     Slider(value: Binding(get: { editing ? dim : Double(bulb.dimming) }, set: { dim = $0 }),
                            in: 10...100,
                            onEditingChanged: { e in
                                if e { dim = Double(bulb.dimming); editing = true }
                                else { editing = false; lights.set(bulb, ["dimming=\(Int(dim))"]) }
-                           }).controlSize(.mini)
-                    Image(systemName: "thermometer.medium").font(.system(size: 10)).foregroundStyle(.secondary)
+                           }).sbControlSize(.mini)
+                    Image(systemName: "thermometer.medium").font(.sbIcon(10)).foregroundStyle(.secondary)
                     Slider(value: Binding(get: { editing ? warm : Double(bulb.temp ?? 2700) }, set: { warm = $0 }),
                            in: 2200...6500,
                            onEditingChanged: { e in
                                if e { warm = Double(bulb.temp ?? 2700); editing = true }
                                else { editing = false; lights.set(bulb, ["temp=\(Int(warm / 100) * 100)"]) }
-                           }).controlSize(.mini)
+                           }).sbControlSize(.mini)
                         .help("Warm to cool white")
                 }
                 .padding(.leading, 24)
@@ -475,7 +475,7 @@ struct BulbRow: View {
             Slider(value: $hue, in: 0...1, onEditingChanged: { e in
                 if !e { lights.set(bulb, ["rgb=\(hueHex(hue))"]) }
             })
-            .controlSize(.mini)
+            .sbControlSize(.mini)
             .onAppear {
                 if let c = bulb.rgb {
                     hue = Double(NSColor(srgbRed: CGFloat(c.r) / 255, green: CGFloat(c.g) / 255,
@@ -492,14 +492,14 @@ struct BulbRow: View {
                 ForEach(Self.swatches, id: \.0) { s in
                     Button { lights.set(bulb, ["rgb=\(s.0)"]) } label: {
                         Circle().fill(Color(nsColor: NSColor.fromHex(s.0) ?? .gray))
-                            .frame(width: 14, height: 14)
+                            .frame(width: si(14), height: si(14))
                             .overlay(Circle().stroke(Color.primary.opacity(0.15)))
                     }
                     .buttonStyle(.plain).help(s.1)
                 }
                 Spacer()
                 Button("White") { lights.set(bulb, ["temp=\(bulb.temp ?? 2700)"]) }
-                    .controlSize(.mini)
+                    .sbControlSize(.mini)
                     .help("Back to warm or cool white")
             }
         }

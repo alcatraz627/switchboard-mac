@@ -28,9 +28,9 @@ struct ReorderStack<Item: Identifiable, Row: View>: View where Item.ID == String
 
     private func grip(_ id: String) -> some View {
         Image(systemName: "line.3.horizontal")
-            .font(.system(size: 10, weight: .medium))
+            .font(.sbIcon(10, weight: .medium))
             .foregroundStyle(.tertiary)
-            .frame(width: 14, height: 20)
+            .frame(width: si(14), height: si(20))
             .contentShape(Rectangle())
             .onDrag {
                 dragging = id

@@ -33,10 +33,10 @@ struct HoverLinesView: View {
                 case .bar(let label, let pct, let color, let resets, let icon):
                     HStack(spacing: 8) {
                         HStack(spacing: 4) {
-                            if let icon { Image(systemName: icon).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary) }
-                            Text(label).font(.system(size: 11, weight: .medium))
+                            if let icon { Image(systemName: icon).font(.sbIcon(10, weight: .semibold)).foregroundStyle(.secondary) }
+                            Text(label).font(.sb(11, weight: .medium))
                         }
-                        .frame(width: labelWidth, alignment: .leading)
+                        .frame(width: sw(labelWidth), alignment: .leading)
                         GeometryReader { g in
                             ZStack(alignment: .leading) {
                                 Capsule().fill(Color.primary.opacity(0.1))
@@ -44,13 +44,13 @@ struct HoverLinesView: View {
                             }
                         }
                         .frame(height: 6)
-                        Text("\(pct)%").font(.system(size: 11, weight: .semibold).monospacedDigit()).frame(width: 34, alignment: .trailing)
-                        Text(resets).font(.system(size: 10.5)).foregroundStyle(.secondary).frame(width: 58, alignment: .trailing)
+                        Text("\(pct)%").font(.sb(11, weight: .semibold).monospacedDigit()).frame(width: sw(34), alignment: .trailing)
+                        Text(resets).font(.sb(10.5)).foregroundStyle(.secondary).frame(width: sw(58), alignment: .trailing)
                     }
                 case .note(let icon, let text, let tint):
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Image(systemName: icon).font(.system(size: 10.5)).foregroundStyle(tint).frame(width: 14)
-                        Text(text).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                        Image(systemName: icon).font(.sbIcon(10.5)).foregroundStyle(tint).frame(width: si(14))
+                        Text(text).font(.sb(11.5)).fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }

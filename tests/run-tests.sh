@@ -56,6 +56,9 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   done
   check "sessions: grouping, order, hero, a gone session drops out, a recorded scan carries every used field" \
     "$BIN" --probe-sessions --scan-file tests/fixtures/scan-sample.json
+  for z in md lg; do
+    check "the sessions quick page and Settings render at size $z" bash -c "\"$BIN\" --snapshot-quick \"$WORK/quick-sessions-$z.png\" --page sessions --scan-file tests/fixtures/scan-sample.json --size $z && \"$BIN\" --snapshot \"$WORK/settings-$z.png\" --tab settings --size $z"
+  done
   check "the sessions quick page renders from a recorded scan" \
     "$BIN" --snapshot-quick "$WORK/quick-sessions.png" --page sessions --scan-file tests/fixtures/scan-sample.json
   bash hub/lib/scan.sh --quick > "$WORK/live-scan.json" 2>/dev/null

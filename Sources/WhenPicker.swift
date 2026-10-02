@@ -159,17 +159,17 @@ struct WhenPanel: View {
 
     private var panel: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.system(size: 12, weight: .semibold))
+            Text(title).font(.sb(12, weight: .semibold))
             if choices.count > 1 {
                 Picker("", selection: $choice) {
                     ForEach(Array(choices.enumerated()), id: \.offset) { i, c in Text(c).tag(i) }
                 }
-                .pickerStyle(.segmented).labelsHidden().controlSize(.small)
+                .pickerStyle(.segmented).labelsHidden().sbControlSize(.small)
             }
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
                 ForEach(presets) { p in
                     Button { pick(p.date()) } label: {
-                        Text(p.label).font(.system(size: 11)).lineLimit(1).minimumScaleFactor(0.8)
+                        Text(p.label).font(.sb(11)).lineLimit(1).minimumScaleFactor(0.8)
                             .frame(maxWidth: .infinity).padding(.vertical, 5)
                             .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.07)))
                     }
@@ -179,7 +179,7 @@ struct WhenPanel: View {
             }
             HStack(spacing: 6) {
                 TextField("90m, 3h, fri 5pm", text: $typed)
-                    .textFieldStyle(.plain).font(.system(size: 11.5))
+                    .textFieldStyle(.plain).font(.sb(11.5))
                     .focused($fieldFocused)
                     .inputBox(focused: fieldFocused)
                     .help("Type a time: 90m, 3h, tomorrow 9am, fri 5pm")
@@ -187,34 +187,34 @@ struct WhenPanel: View {
                     // Escape lets go of the keyboard; a second Escape closes the picker
                     .onExitCommand { fieldFocused = false }
                 Button { withAnimation(.easeOut(duration: 0.15)) { showCalendar.toggle() } } label: {
-                    Image(systemName: "calendar").font(.system(size: 12))
+                    Image(systemName: "calendar").font(.sbIcon(12))
                 }
                 .buttonStyle(.borderless).help("Pick on a calendar")
             }
             if !typed.isEmpty {
                 Text(typedDate.map { WhenText.describe($0) } ?? "Not a time I can read yet")
-                    .font(.system(size: 11)).foregroundStyle(typedDate == nil ? .orange : .secondary)
+                    .font(.sb(11)).foregroundStyle(typedDate == nil ? .orange : .secondary)
             }
             if showCalendar {
                 DatePicker("", selection: $custom, in: Date()..., displayedComponents: [.date]).datePickerStyle(.graphical).labelsHidden()
                 HStack {
                     DatePicker("", selection: $custom, displayedComponents: [.hourAndMinute]).labelsHidden().datePickerStyle(.field)
-                    Text(WhenText.describe(custom)).font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(WhenText.describe(custom)).font(.sb(11)).foregroundStyle(.secondary)
                     Spacer()
-                    Button("Set") { pick(custom) }.controlSize(.small).keyboardShortcut(.defaultAction)
+                    Button("Set") { pick(custom) }.sbControlSize(.small).keyboardShortcut(.defaultAction)
                 }
             }
             if !extra.isEmpty {
                 Divider()
                 HStack(spacing: 12) {
                     ForEach(Array(extra.enumerated()), id: \.offset) { _, e in
-                        Button(e.0) { e.1(); dismiss() }.buttonStyle(.link).font(.system(size: 11))
+                        Button(e.0) { e.1(); dismiss() }.buttonStyle(.link).font(.sb(11))
                     }
                 }
             }
         }
         .padding(12)
-        .frame(width: 300)
+        .frame(width: sw(300))
         .onAppear {
             if let i = initial { custom = i }
             NSApp.activate(ignoringOtherApps: true)

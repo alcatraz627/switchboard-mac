@@ -16,9 +16,9 @@ struct PendingMark: View {
 
     var body: some View {
         ZStack {
-            if visible { ProgressView().controlSize(.mini).transition(.opacity) }
+            if visible { ProgressView().sbControlSize(.mini).transition(.opacity) }
         }
-        .frame(width: 18, height: 14)
+        .frame(width: si(18), height: si(14))
         .task(id: since) {
             visible = false
             let wait = max(0, Pending.showAfter - Date().timeIntervalSince(since))
@@ -41,7 +41,7 @@ struct RowFailure: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 9.5))
+                .font(.sbIcon(9.5))
             Text(message)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
@@ -49,7 +49,7 @@ struct RowFailure: View {
                 Button(retryLabel, action: retry).buttonStyle(.link).font(PT.caption)
             }
             Button(action: dismiss) {
-                Image(systemName: "xmark").font(.system(size: 8.5, weight: .semibold))
+                Image(systemName: "xmark").font(.sbIcon(8.5, weight: .semibold))
             }
             .buttonStyle(.borderless)
             .help("Dismiss")
@@ -79,14 +79,14 @@ struct ReadingStatus: View {
                 Text("as of \(age(d))")
                     .foregroundStyle(Date().timeIntervalSince(d) > staleAfter ? AnyShapeStyle(amber) : AnyShapeStyle(.tertiary))
             case .stale(let d, let why):
-                Image(systemName: "exclamationmark.circle").font(.system(size: 9.5)).foregroundStyle(amber)
+                Image(systemName: "exclamationmark.circle").font(.sbIcon(9.5)).foregroundStyle(amber)
                 Text("as of \(age(d)) · couldn't refresh: \(why)").foregroundStyle(amber)
                     .fixedSize(horizontal: false, vertical: true)
             case .failed(let why):
-                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 9.5))
+                Image(systemName: "exclamationmark.triangle.fill").font(.sbIcon(9.5))
                 Text(why).fixedSize(horizontal: false, vertical: true)
             case .unavailable(let why):
-                Image(systemName: "minus.circle").font(.system(size: 9.5)).foregroundStyle(.tertiary)
+                Image(systemName: "minus.circle").font(.sbIcon(9.5)).foregroundStyle(.tertiary)
                 Text(why).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 4)

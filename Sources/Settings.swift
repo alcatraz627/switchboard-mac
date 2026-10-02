@@ -31,8 +31,13 @@ struct SettingsTabView: View {
         let pages = quickPages.filter { hoverAll || matches($0.title) }
         let linger = hoverAll || matches("delay") || matches("away") || matches("linger")
         let folder = matches("notes folder") || matches(NotesStore.dir)
+        let sizes = matches("size") || matches("small") || matches("medium") || matches("large") || matches("zoom")
         let prompts = matches("permission") || matches("prompt") || matches("claude asks") || matches("approvals")
         VStack(alignment: .leading, spacing: PT.gap) {
+            if sizes {
+                group("Size", note: "How big everything is drawn: the panel, the hover card, its pages and the menu bar icon. Text grows most, icons a little less, inputs least.",
+                      rows: [sizeRow])
+            }
             if !orderedTabs.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack {
@@ -50,7 +55,7 @@ struct SettingsTabView: View {
                         let inSpace = orderedTabs.filter { s.tabs.contains($0.id) }
                         if !inSpace.isEmpty {
                             HStack(spacing: 4) {
-                                Image(systemName: s.icon).font(.system(size: 9.5))
+                                Image(systemName: s.icon).font(.sbIcon(9.5))
                                 Text(s.title).font(PT.caption)
                             }
                             .foregroundStyle(.secondary).padding(.leading, 4).padding(.top, 2)
@@ -111,12 +116,24 @@ struct SettingsTabView: View {
                       note: "When on, a prompt Claude Code would ask in the terminal shows under Claude asks in Approvals first. It waits \(PermissionRoute.wait) seconds for your Approve or Deny there, then asks in the terminal as usual.",
                       rows: [promptsRow])
             }
-            if orderedTabs.isEmpty && hover.isEmpty && pages.isEmpty && !linger && !folder && !prompts {
+            if orderedTabs.isEmpty && hover.isEmpty && pages.isEmpty && !linger && !folder && !prompts && !sizes {
                 Text("Nothing in Settings matches \"\(query)\".").font(PT.caption).foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
             }
         }
         .padding(PT.gap)
+    }
+
+    @ObservedObject private var scale = UIScale.shared
+
+    private var sizeRow: SystemRow {
+        var r = SystemRow(label: scale.size.title, state: .ok, note: scale.size.detail, tip: "Small, Medium or Large")
+        r.icon = "textformat.size"
+        r.choices = UISize.allCases.map(\.title)
+        r.selected = UISize.allCases.firstIndex(of: scale.size) ?? 0
+        r.onChoose = { i in scale.size = UISize.allCases[i] }
+        r.key = "settings-size"
+        return r
     }
 
     @State private var promptsOn = PermissionRoute.isOn
@@ -199,8 +216,8 @@ struct SettingsTabView: View {
             } maximumValueLabel: {
                 Text("15 s").font(PT.caption).foregroundStyle(.secondary)
             }
-            .labelsHidden().controlSize(.small)
-            Text("\(Int(store.hoverLinger)) s").font(PT.label.monospacedDigit()).frame(width: 34, alignment: .trailing)
+            .labelsHidden().sbControlSize(.small)
+            Text("\(Int(store.hoverLinger)) s").font(PT.label.monospacedDigit()).frame(width: sw(34), alignment: .trailing)
         }
         .padding(.horizontal, PT.rowH).padding(.vertical, PT.rowV + 2)
         .scrollSteps("settings.linger", inContent: true, stepper: .slider()) { by in

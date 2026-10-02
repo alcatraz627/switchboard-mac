@@ -29,6 +29,8 @@ func argAfter(_ flag: String) -> String? {
 }
 
 let args = CommandLine.arguments
+// headless renders at a chosen size (sm, md, lg) without touching the saved choice
+if let z = argAfter("--size").flatMap(UISize.init(rawValue:)) { UIScale.override = z }
 if args.contains("--version") {
     print(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev")
     exit(0)
@@ -121,7 +123,7 @@ if args.contains("--time-tabs") {
     exit(0)
 }
 if args.contains("--probe-quick") {
-    let r = probeQuickCycle() + "\n" + probePointer().joined(separator: "\n")
+    let r = probeQuickCycle() + "\n" + (probePointer() + probeScale()).joined(separator: "\n")
     print(r)
     exit(r.contains("FAIL") ? 1 : 0)
 }
