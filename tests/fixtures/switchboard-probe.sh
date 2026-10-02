@@ -14,7 +14,7 @@ swiftc -o "$OUT" \
     "$ROOT/Sources/Switchboard.swift" \
     "$ROOT/Sources/Policy.swift" \
     "$ROOT/Sources/AppSupport.swift" "$ROOT/Sources/Catalog.swift" \
-    "$ROOT/Sources/DesignKit.swift" \
+    "$ROOT/Sources/DesignKit.swift" "$ROOT/Sources/Scale.swift" \
     "$ROOT/Sources/Palette.swift" 2>&1 | rg "error:" && { echo "COMPILE FAILED"; exit 1; }
 
 "$OUT"

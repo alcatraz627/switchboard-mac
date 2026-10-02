@@ -98,7 +98,7 @@ final class EditorTextView: NSTextView {
 struct EditorText: NSViewRepresentable {
     @Binding var text: String
     @Binding var focused: Bool
-    var font: NSFont = .systemFont(ofSize: 12)
+    var font: NSFont = .systemFont(ofSize: 12 * UIScale.text)
     var singleLine = false
     var maxHeight: CGFloat = 220
     /// Return in a one-line field: the text before the cursor, and after it.
@@ -214,7 +214,7 @@ struct NoteSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             placeholder(titlePrompt, empty: title.isEmpty, size: 13, weight: .semibold) {
-                EditorText(text: $title, focused: bind(.title), font: .systemFont(ofSize: 13, weight: .semibold),
+                EditorText(text: $title, focused: bind(.title), font: .systemFont(ofSize: 13 * UIScale.text, weight: .semibold),
                            singleLine: true, onReturn: { before, after in
                                let r = InputRules.splitTitle(before: before, after: after, body: text)
                                title = r.title; text = r.body; focus = .body
@@ -223,7 +223,7 @@ struct NoteSheet: View {
             .padding(.horizontal, 8).padding(.top, 7).padding(.bottom, 5)
             Divider().opacity(0.5).padding(.horizontal, 8)
             placeholder(bodyPrompt, empty: text.isEmpty, size: 12, weight: .regular) {
-                EditorText(text: $text, focused: bind(.body), font: .systemFont(ofSize: 12), maxHeight: bodyMax, caretAtStart: true)
+                EditorText(text: $text, focused: bind(.body), font: .systemFont(ofSize: 12 * UIScale.text), maxHeight: bodyMax, caretAtStart: true)
                     .frame(minHeight: 54, alignment: .top)
             }
             .padding(.horizontal, 8).padding(.vertical, 6)

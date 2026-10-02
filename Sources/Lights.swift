@@ -439,6 +439,10 @@ struct BulbRow: View {
                                if e { dim = Double(bulb.dimming); editing = true }
                                else { editing = false; lights.set(bulb, ["dimming=\(Int(dim))"]) }
                            }).sbControlSize(.mini)
+                        // up brightens, down dims, 5% a notch, as every slider in the app turns
+                        .scrollSteps("bulb-dim-" + bulb.mac, inContent: true, stepper: .slider()) { by in
+                            lights.set(bulb, ["dimming=\(Int(min(100, max(10, Double(bulb.dimming) - Double(by) * 5))))"])
+                        }
                     Image(systemName: "thermometer.medium").font(.sbIcon(10)).foregroundStyle(.secondary)
                     Slider(value: Binding(get: { editing ? warm : Double(bulb.temp ?? 2700) }, set: { warm = $0 }),
                            in: 2200...6500,
@@ -446,6 +450,10 @@ struct BulbRow: View {
                                if e { warm = Double(bulb.temp ?? 2700); editing = true }
                                else { editing = false; lights.set(bulb, ["temp=\(Int(warm / 100) * 100)"]) }
                            }).sbControlSize(.mini)
+                        .scrollSteps("bulb-temp-" + bulb.mac, inContent: true, stepper: .slider()) { by in
+                            let t = min(6500, max(2200, Double(bulb.temp ?? 2700) - Double(by) * 200))
+                            lights.set(bulb, ["temp=\(Int(t / 100) * 100)"])
+                        }
                         .help("Warm to cool white")
                 }
                 .padding(.leading, 24)

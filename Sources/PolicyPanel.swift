@@ -705,6 +705,7 @@ struct Card<Content: View>: View {
 struct SystemRowView: View {
     let row: SystemRow
     @ObservedObject var store: PolicyStore
+    @Environment(\.panelSpace) private var panelSpace
     /// A flip asked for and not yet seen by the next probe.
     @State private var pendingFlip: PendingChange<Bool>?
     @State private var failure: String?
@@ -859,7 +860,7 @@ struct SystemRowView: View {
                 .buttonStyle(.borderless)
                 .foregroundStyle(.secondary)
                 .help(TranscriptWindow.isHub(url) ? "Open \(link) in Switchboard's window. Middle-click for the browser." : "Open \(link)")
-                .onMiddleClick("link-" + (row.key ?? row.label), space: ScrollTargets.space) { NSWorkspace.shared.open(url) }
+                .onMiddleClick("link-" + (row.key ?? row.label), space: panelSpace) { NSWorkspace.shared.open(url) }
             }
             control.frame(minWidth: row.showsBadge ? 44 : 0, alignment: .trailing)
         }
@@ -1356,6 +1357,9 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     private var panelMiddle: Any?
     private var pageWatch: AnyCancellable?
     private var countWatch: AnyCancellable?
+    /// A Now page pinned to the desktop shares the hover card's badges; they refresh while it is up.
+    private var deskBadges: [String: AnyCancellable] = [:]
+    private var deskRefresh: Timer?
     /// Switches set to flip back on a timer, in words, for the Now page's badges.
     var appTimedFlips: () -> [String] = { [] }
     /// Services that are down, by name, for the Now page's chips.
@@ -1483,6 +1487,17 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
                 guard let page = QuickPage(rawValue: item.id) else { return nil }
                 let st = QuickState()
                 st.page = page; st.pages = [page]; st.space = item.space; st.onDesk = true
+                if page == .home {
+                    st.badges = self.quick.badges
+                    self.deskBadges[item.key] = self.quick.$badges.sink { [weak st] b in st?.badges = b }
+                    if self.deskRefresh == nil {
+                        self.refreshQuick()
+                        self.deskRefresh = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+                            guard let self, DeskPanels.shared.isPinned(.page, QuickPage.home.rawValue) else { return }
+                            self.refreshQuick()
+                        }
+                    }
+                }
                 return AnyView(QuickCard(state: st, policy: self.store, usage: self.usage, lights: self.lights,
                                          notes: NotesStore.shared, controls: self.controls,
                                          openTab: { [weak self] tab in self?.show(tab: tab) },
@@ -1491,7 +1506,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             case .tab:
                 guard let c = self.concerns.first(where: { $0.id == item.id }) else { return nil }
                 c.refresh()
-                return AnyView(DeskTab(concern: c))
+                return AnyView(DeskTab(concern: c, space: item.space))
             }
         }
         DispatchQueue.main.async { DeskPanels.shared.restore() }

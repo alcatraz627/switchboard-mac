@@ -28,6 +28,9 @@ final class MiddleClickTargets {
             .min { $0.value.frame.width * $0.value.frame.height < $1.value.frame.width * $1.value.frame.height }?.key
     }
 
+    /// Forgets every place in a window space, when its window closes.
+    func removeSpace(_ space: String) { targets = targets.filter { $0.value.space != space } }
+
     /// Runs the place under a middle click in a window, if any; true when one took it.
     @discardableResult
     func handle(_ e: NSEvent, in view: NSView, space: String) -> Bool {
@@ -53,6 +56,15 @@ extension View {
     }
 }
 
+/// The window space a panel tab draws in: "panel" in the popover, its own name in a desk panel.
+private struct PanelSpaceKey: EnvironmentKey { static let defaultValue = ScrollTargets.space }
+extension EnvironmentValues {
+    var panelSpace: String {
+        get { self[PanelSpaceKey.self] }
+        set { self[PanelSpaceKey.self] = newValue }
+    }
+}
+
 /// The window space a card draws in: "quickCard" for the hover card, its own name for each desk panel.
 private struct CardSpaceKey: EnvironmentKey { static let defaultValue = ScrollTargets.cardSpace }
 extension EnvironmentValues {
@@ -67,7 +79,8 @@ final class Reveal: ObservableObject {
     static let shared = Reveal()
     /// The row being revealed and when; a row flashes while this is fresh.
     @Published private(set) var key: String?
-    private(set) var at = Date.distantPast
+    /// Moves on every reveal, so the same row asked for twice in a row flashes twice.
+    @Published private(set) var at = Date.distantPast
     /// How long a revealed row keeps its flash.
     static let flashFor: TimeInterval = 1.6
 
@@ -94,8 +107,8 @@ struct RevealFlash: ViewModifier {
                     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor.opacity(lit ? 0.7 : 0), lineWidth: 1.5))
                     .allowsHitTesting(false)
             )
-            .onChange(of: reveal.key) { k in
-                guard let key, k == key else { return }
+            .onChange(of: reveal.at) { _ in
+                guard let key, reveal.key == key else { return }
                 pulse()
             }
             .onAppear {
@@ -143,7 +156,8 @@ func probePointer() -> [String] {
     // Hub links: stay in Switchboard's window unless asked for the browser.
     let page = URL(string: "http://127.0.0.1:5400/s/abc")!, web = URL(string: "https://github.com/x")!
     check("a hub link stays in the window", !TranscriptNav.opensInBrowser(page, button: 0, command: false, newWindow: false, link: true))
-    check("a middle click on a hub link opens the browser", TranscriptNav.opensInBrowser(page, button: 2, command: false, newWindow: false, link: true))
+    check("a middle click on a hub link opens the browser", TranscriptNav.opensInBrowser(page, button: 4, command: false, newWindow: false, link: true))
+    check("a plain left click stays in the window", !TranscriptNav.opensInBrowser(page, button: 1, command: false, newWindow: false, link: true))
     check("a Command-click does too", TranscriptNav.opensInBrowser(page, button: 0, command: true, newWindow: false, link: true))
     check("a link outside the hub opens the browser", TranscriptNav.opensInBrowser(web, button: 0, command: false, newWindow: false, link: true))
     check("the hub page's own loads stay put", !TranscriptNav.opensInBrowser(page, button: 0, command: false, newWindow: false, link: false))

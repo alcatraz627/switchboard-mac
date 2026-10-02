@@ -323,11 +323,14 @@ struct QuickCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            header
-                .background(GeometryReader { g in
-                    Color.clear.onAppear { state.headerBottom = g.frame(in: .named(state.space)).maxY + 5 }
-                })
-            Divider().padding(.horizontal, -12)
+            // a desk panel names its page in its own title row, so it carries no second header
+            if !state.onDesk {
+                header
+                    .background(GeometryReader { g in
+                        Color.clear.onAppear { state.headerBottom = g.frame(in: .named(state.space)).maxY + 5 }
+                    })
+                Divider().padding(.horizontal, -12)
+            }
             switch state.page {
             case .sessions:
                 // ticks each second so "4s ago" and the waits stay current while it is open
@@ -554,13 +557,15 @@ struct QuickCard: View {
     private var pinned: some View {
         // pinned notes and ones edited in the last two hours are rows; the rest are chips
         let live = notes.live
-        let pins = live.filter { Note.keepsRow(pinned: $0.pinned, modified: $0.modified) }
-        let rest = live.filter { !Note.keepsRow(pinned: $0.pinned, modified: $0.modified) }
+        // one file read per note per draw
+        let row = Dictionary(live.map { ($0.id, Note.keepsRow(pinned: $0.pinned, modified: $0.modified)) }, uniquingKeysWith: { a, _ in a })
+        let pins = live.filter { row[$0.id] == true }
+        let rest = live.filter { row[$0.id] != true }
         return VStack(alignment: .leading, spacing: 7) {
             if pins.isEmpty { empty("No pinned notes. Pin one below or in the Notes tab.") }
             ForEach(pins) { n in
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Image(systemName: n.pinned ? "pin.fill" : "pencil").font(.sbIcon(9.5)).foregroundStyle(.secondary)
+                    Image(systemName: n.pinned ? "pin.fill" : "clock.arrow.circlepath").font(.sbIcon(9.5)).foregroundStyle(.secondary)
                         .help(n.pinned ? "Pinned" : "Edited in the last two hours")
                     Text(n.heading).font(.sb(11.5)).fixedSize(horizontal: false, vertical: true)
                     Spacer()
@@ -607,7 +612,7 @@ struct QuickCard: View {
                 }
                 .help("Scroll to add or take away a minute. Middle-click to open it in Timers.")
                 // the wheel over a timer moves it a minute a notch; a middle click opens it in the tab
-                .scrollSteps("q-timer-" + t.id, card: state.space, stepper: .slider()) { st in timers.nudge(t, minutes: st) }
+                .scrollSteps("q-timer-" + t.id, card: state.space, stepper: .slider()) { st in timers.nudge(t, minutes: -st) }
                 .onMiddleClick("qtimer-" + t.id, space: state.space) { openReveal("timers", "timer-" + t.id) }
             }
             if !timers.recent.isEmpty {
@@ -678,7 +683,7 @@ struct QuickCard: View {
         HStack(spacing: 8) {
             Image(systemName: icon).font(.sbIcon(11)).foregroundStyle(.secondary).frame(width: si(16))
             Slider(value: Binding(get: { Double(value) }, set: { set(Float($0)) }), in: 0...1).sbControlSize(.mini)
-                .scrollSteps("q-level-" + icon, card: state.space, stepper: .slider()) { st in set(sliderStep(value, by: st)) }
+                .scrollSteps("q-level-" + icon, card: state.space, stepper: .slider()) { st in set(sliderStep(value, by: -st)) }
             Text(text).font(.sb(10.5).monospacedDigit()).foregroundStyle(.secondary).frame(width: sw(38), alignment: .trailing)
         }
     }
@@ -886,13 +891,14 @@ struct QuickBulbRow: View {
     @Environment(\.cardSpace) private var cardSpace
     @State private var dim: Double?
     @State private var send: DispatchWorkItem?
+    @State private var settle: DispatchWorkItem?
 
     private var level: Double { dim ?? Double(bulb.dimming) }
     private var busy: Bool { lights.busy.contains(bulb.mac) }
 
     var body: some View {
         HStack(spacing: 8) {
-            Button { lights.set(bulb, ["state=\(bulb.on ? "off" : "on")"]) } label: {
+            Button { if !busy { lights.set(bulb, ["state=\(bulb.on ? "off" : "on")"]) } } label: {
                 HStack(spacing: 7) {
                     Image(systemName: bulb.on ? "lightbulb.fill" : "lightbulb").font(.sbIcon(11))
                         .foregroundStyle(bulb.on ? Color.yellow : Color.secondary).frame(width: si(14))
@@ -910,12 +916,13 @@ struct QuickBulbRow: View {
             if bulb.on {
                 Slider(value: Binding(get: { level }, set: { change($0) }), in: 10...100).sbControlSize(.mini)
                     .frame(width: sc(110))
-                    .scrollSteps("q-bulb-" + bulb.mac, card: cardSpace, stepper: .slider()) { st in change(level + Double(st) * 5) }
+                    .scrollSteps("q-bulb-" + bulb.mac, card: cardSpace, stepper: .slider()) { st in change(level - Double(st) * 5) }
                 Text("\(Int(level.rounded()))%").font(.sb(10.5).monospacedDigit()).foregroundStyle(.secondary)
                     .frame(width: sw(32), alignment: .trailing)
             }
         }
-        .disabled(!bulb.reachable || busy)
+        // a send in flight blocks a second on/off click, never the slider, so a wheel gesture keeps every notch
+        .disabled(!bulb.reachable)
         .opacity(bulb.reachable ? 1 : 0.55)
     }
 
@@ -924,9 +931,13 @@ struct QuickBulbRow: View {
         let v = min(100, max(10, v.rounded()))
         dim = v
         send?.cancel()
+        settle?.cancel()
         let w = DispatchWorkItem { [lights, bulb] in
             lights.set(bulb, ["dimming=\(Int(v))"])
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { dim = nil }
+            // hand the slider back to the bulb's own report once the wheel has rested, not mid-gesture
+            let back = DispatchWorkItem { dim = nil }
+            settle = back
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: back)
         }
         send = w
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: w)

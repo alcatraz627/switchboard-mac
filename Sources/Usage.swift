@@ -407,6 +407,10 @@ struct ZoneSlider: View {
                    })
                 .sbControlSize(.small)
                 .frame(width: sc(108))
+                // up raises the threshold, 5 points a notch, as every slider in the app turns
+                .scrollSteps("usage-threshold-" + label, inContent: true, stepper: .slider()) { by in
+                    value = min(100, max(50, value - by * 5))
+                }
             Text("\(dragging ? Int(draft) : value)%").font(SBStyle.mono).frame(width: sw(36), alignment: .trailing)
         }
         .padding(.horizontal, SBStyle.rowH).padding(.vertical, SBStyle.rowV)

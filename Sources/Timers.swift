@@ -129,7 +129,7 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
     }
 
     /// The last few timers started, newest first, to start again in one click.
-    struct Recent: Codable, Equatable { var label: String; var seconds: TimeInterval; var color: String }
+    struct Recent: Codable, Hashable { var label: String; var seconds: TimeInterval; var color: String }
     static let recentKey = "switchboard.timers.recent"
     @Published private(set) var recent: [Recent] = {
         guard let d = UserDefaults.standard.data(forKey: TimerStore.recentKey) else { return [] }
@@ -266,7 +266,7 @@ struct TimersTabView: View {
                 if !timers.recent.isEmpty {
                     // the last few timers, to start again in one click
                     FlowLayout(spacing: 5) {
-                        ForEach(timers.recent, id: \.label) { r in
+                        ForEach(timers.recent, id: \.self) { r in
                             Button { timers.add(label: r.label, color: r.color, fireAt: Date().addingTimeInterval(r.seconds)) } label: {
                                 HStack(spacing: 4) {
                                     Image(systemName: "arrow.clockwise").font(.sbIcon(9.5))

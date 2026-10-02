@@ -15,10 +15,7 @@ enum BarFont {
     /// User font-size multiplier (Settings → Display Sizing, key `ui.fontScale`,
     /// default 1.0). Read at render time so a change re-renders on the next
     /// refreshLiveRows(); clamped to a sane range.
-    static var scale: CGFloat {
-        let s = UserDefaults.standard.double(forKey: "ui.fontScale")
-        return s > 0 ? min(1.6, max(0.7, CGFloat(s))) : 1.0
-    }
+    static var scale: CGFloat { UIScale.text }   // the one size setting (Scale.swift), not the old ui.fontScale
     /// Scale an arbitrary point size by the user multiplier — for the ad-hoc
     /// sizes in LiveRowView that don't map to a named role.
     static func scaled(_ pt: CGFloat) -> CGFloat { pt * scale }

@@ -52,6 +52,7 @@ final class DeskPanels: NSObject, NSWindowDelegate {
     }
 
     func unpin(_ key: String) {
+        forget(key)
         items.removeAll { $0.key == key }
         save()
         windows[key]?.close()
@@ -85,10 +86,20 @@ final class DeskPanels: NSObject, NSWindowDelegate {
         p.identifier = NSUserInterfaceItemIdentifier(item.key)
         p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         Self.applyLevel(p, onTop: item.onTop)
-        if let f = item.frame, f.count == 4 { p.setFrame(NSRect(x: f[0], y: f[1], width: f[2], height: f[3]), display: false) }
-        else { p.center() }
+        // a saved place on a screen that is no longer connected falls back to the middle of this one
+        if let f = item.frame, f.count == 4,
+           NSScreen.screens.contains(where: { $0.visibleFrame.intersects(NSRect(x: f[0], y: f[1], width: f[2], height: f[3])) }) {
+            p.setFrame(NSRect(x: f[0], y: f[1], width: f[2], height: f[3]), display: false)
+        } else { p.center() }
         windows[item.key] = p
         p.orderFrontRegardless()
+    }
+
+    /// Drops a closed panel's click and wheel places, which its views may not get to remove.
+    private func forget(_ key: String) {
+        guard let item = items.first(where: { $0.key == key }) else { return }
+        MiddleClickTargets.shared.removeSpace(item.space)
+        ScrollTargets.forget(item.space)
     }
 
     /// On the desktop (below every window) or above other windows.
@@ -117,6 +128,7 @@ final class DeskPanels: NSObject, NSWindowDelegate {
     func windowWillClose(_ n: Notification) {
         // the title bar's close button unpins, the same as the panel's own ✕
         guard let w = n.object as? NSWindow, let key = w.identifier?.rawValue, windows[key] != nil else { return }
+        forget(key)
         windows[key] = nil
         items.removeAll { $0.key == key }
         save()
@@ -181,10 +193,14 @@ struct DeskFrame<Content: View>: View {
 /// A panel tab on its own: its sections, scrolling, without the tab bar.
 struct DeskTab: View {
     let concern: SwitchboardConcern
+    let space: String
     var body: some View {
+        // the tab's own window space, so its wheel and middle-click places never mix with the popover's
         ScrollView(.vertical) { concern.content.padding(.bottom, sc(8)) }
+            .scrollContentFrame()
             .frame(width: PT.width, height: min(PT.maxHeight, sw(520)))
-            .coordinateSpace(name: ScrollTargets.space)
+            .coordinateSpace(name: space)
+            .environment(\.panelSpace, space)
     }
 }
 

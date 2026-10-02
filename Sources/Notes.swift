@@ -299,7 +299,10 @@ final class NotesStore: ObservableObject {
         let old = notes.first { $0.id == n.id }
         var problem: String?
         if old?.remindAt != n.remindAt || old?.remindRepeat != n.remindRepeat || old?.title != n.title { problem = syncReminder(&n) }
+        // pinning or tagging is not editing: keep the file's time, which the hover card reads as "last edited"
+        let keepTime = old.map { $0.title == n.title && $0.body == n.body && $0.tags == n.tags } == true ? old?.modified : nil
         guard write(n) else { return }
+        if let t = keepTime { try? FileManager.default.setAttributes([.modificationDate: t], ofItemAtPath: n.path) }
         if let i = notes.firstIndex(where: { $0.id == n.id }) { notes[i] = n }
         // After write, which clears the error line on success.
         if let p = problem { error = p }

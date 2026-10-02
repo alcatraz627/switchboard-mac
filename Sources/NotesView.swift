@@ -37,7 +37,7 @@ struct NoteCompose: View {
                         ZStack(alignment: .leading) {
                             if title.isEmpty { Text("New note").font(PT.label).foregroundStyle(.tertiary).allowsHitTesting(false) }
                             EditorText(text: $title, focused: Binding(get: { focus == .title }, set: { focus = $0 ? .title : nil }),
-                                       font: .systemFont(ofSize: 12), singleLine: true, onReturn: { before, after in
+                                       font: .systemFont(ofSize: 12 * UIScale.text), singleLine: true, onReturn: { before, after in
                                            let r = InputRules.splitTitle(before: before, after: after, body: text)
                                            title = r.title; text = r.body
                                            withAnimation(.easeOut(duration: 0.12)) { expanded = true }

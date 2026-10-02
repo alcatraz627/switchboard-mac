@@ -71,7 +71,8 @@ final class TranscriptNav: NSObject, WKNavigationDelegate, WKUIDelegate {
         let hub = (url.host == "127.0.0.1" || url.host == "localhost") && url.port == 5400
         if url.scheme == "about" || url.scheme == "data" { return false }
         if !hub { return link || newWindow }
-        return button == 2 || command || newWindow
+        // WebKit numbers a middle click 4 (left 1, right 2); 2 is accepted too in case a build follows NSEvent
+        return button == 4 || button == 2 || command || newWindow
     }
 
     private func show(_ web: WKWebView, _ error: Error) {
@@ -193,6 +194,11 @@ enum TranscriptWindow {
 /// Opens a link: a session hub page in Switchboard's own window, anything else in the browser.
 func openLink(_ url: URL) {
     guard TranscriptWindow.isHub(url) else { NSWorkspace.shared.open(url); return }
-    let sid = url.path.hasPrefix("/s/") ? String(url.path.dropFirst(3)).trimmingCharacters(in: CharacterSet(charactersIn: "/")) : ""
-    if sid.isEmpty { TranscriptWindow.showBoard() } else { TranscriptWindow.show(sessionID: sid, title: "Transcript") }
+    // /s/<id>/… (with any fragment) is that session's window, the whole URL kept; anything else on the hub is the board
+    let parts = url.pathComponents
+    if parts.count >= 3, parts[1] == "s" {
+        TranscriptWindow.show(url: url, key: parts[2], title: "Transcript", loading: "Loading the transcript…")
+    } else {
+        TranscriptWindow.showBoard()
+    }
 }

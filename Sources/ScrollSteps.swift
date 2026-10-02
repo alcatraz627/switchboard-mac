@@ -80,10 +80,13 @@ final class ScrollTargets {
     /// the hover card and every desk panel keep separate lists.
     private static var cards: [String: ScrollTargets] = [:]
     static func forSpace(_ space: String) -> ScrollTargets {
+        if space == ScrollTargets.space { return shared }
         if let t = cards[space] { return t }
         let t = ScrollTargets(); cards[space] = t; return t
     }
     static var card: ScrollTargets { forSpace(cardSpace) }
+    /// Drops a closed window's places.
+    static func forget(_ space: String) { if space != ScrollTargets.space { cards[space] = nil } }
     static let stepped = Notification.Name("switchboard.scrollStep")
     static let space = "panel"
     static let cardSpace = "quickCard"
@@ -126,33 +129,56 @@ final class ScrollTargets {
 extension View {
     /// Makes this view a place that takes scroll steps; `act` gets +1 or -1.
     /// `card` names the card window it registers with (the hover card or a desk
-    /// panel); without one it registers with the panel.
+    /// panel); without one it registers with the panel it is drawn in (the
+    /// popover, or a tab pinned as a desk panel).
     func scrollSteps(_ id: String, inContent: Bool = false, card: String? = nil,
                      stepper: @escaping @autoclosure () -> ScrollStepper = .tabs(),
                      _ act: @escaping (Int) -> Void) -> some View {
-        let targets = card.map(ScrollTargets.forSpace) ?? ScrollTargets.shared
-        return background(GeometryReader { g in
-            let f = g.frame(in: .named(card ?? ScrollTargets.space))
-            Color.clear
-                .onAppear { targets.set(id, frame: f, inContent: inContent, stepper: stepper()) }
-                .onChange(of: f) { nf in targets.set(id, frame: nf, inContent: inContent, stepper: stepper()) }
-                .onDisappear { targets.remove(id) }
-        })
-        .onReceive(NotificationCenter.default.publisher(for: ScrollTargets.stepped)) { n in
-            guard n.object as? String == id, let s = n.userInfo?["step"] as? Int else { return }
-            act(s)
-        }
+        modifier(ScrollStepsPlace(id: id, inContent: inContent, card: card, stepper: stepper, act: act))
     }
 
     /// Marks the visible frame of the panel's scrolling content.
-    func scrollContentFrame() -> some View {
-        background(GeometryReader { g in
-            let f = g.frame(in: .named(ScrollTargets.space))
+    func scrollContentFrame() -> some View { modifier(ScrollContentPlace()) }
+}
+
+private struct ScrollStepsPlace: ViewModifier {
+    let id: String, inContent: Bool, card: String?
+    let stepper: () -> ScrollStepper
+    let act: (Int) -> Void
+    @Environment(\.panelSpace) private var panelSpace
+
+    func body(content: Content) -> some View {
+        let space = card ?? panelSpace
+        let targets = ScrollTargets.forSpace(space)
+        // a step is posted under the place's name; the space keeps a desk copy of a tab from answering the popover's
+        let key = space + "|" + id
+        return content.background(GeometryReader { g in
+            let f = g.frame(in: .named(space))
             Color.clear
-                .onAppear { ScrollTargets.shared.contentFrame = f }
-                .onChange(of: f) { nf in ScrollTargets.shared.contentFrame = nf }
+                .onAppear { targets.set(key, frame: f, inContent: inContent, stepper: stepper()) }
+                .onChange(of: f) { nf in targets.set(key, frame: nf, inContent: inContent, stepper: stepper()) }
+                .onDisappear { targets.remove(key) }
+        })
+        .onReceive(NotificationCenter.default.publisher(for: ScrollTargets.stepped)) { n in
+            guard n.object as? String == key, let s = n.userInfo?["step"] as? Int else { return }
+            act(s)
+        }
+    }
+}
+
+private struct ScrollContentPlace: ViewModifier {
+    @Environment(\.panelSpace) private var panelSpace
+    func body(content: Content) -> some View {
+        content.background(GeometryReader { g in
+            let f = g.frame(in: .named(panelSpace))
+            Color.clear
+                .onAppear { ScrollTargets.forSpace(panelSpace).contentFrame = f }
+                .onChange(of: f) { nf in ScrollTargets.forSpace(panelSpace).contentFrame = nf }
         })
     }
+}
+
+extension View {
 }
 
 /// The next item in a list, `by` places along, stopping at either end.
