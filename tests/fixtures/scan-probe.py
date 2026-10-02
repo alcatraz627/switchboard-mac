@@ -104,6 +104,18 @@ def main(argv):
         print(fmt(ns["estimate_cost"](model, ti, to, *extra)))
     elif op == "read_cost":
         print(fmt(ns["read_cost"](int(argv[1]))))
+    elif op == "attention":
+        # now = 10_000 s; a status set 59 min ago still needs you, 61 min ago is idle
+        a = ns["attention_of"]
+        now = 10_000
+        print(" ".join([
+            a("busy", 0, "idle", now),
+            a("shell", (now - 59 * 60) * 1000, "", now),
+            a("shell", (now - 61 * 60) * 1000, "", now),
+            a("idle", None, "", now),
+            a("", None, "tool_use", now),
+            a("", None, "idle", now),
+        ]))
     elif op == "turns_big":
         # A transcript is mostly enormous tool_result lines, so reading only the
         # tail used to report a handful of turns as the whole session's total.

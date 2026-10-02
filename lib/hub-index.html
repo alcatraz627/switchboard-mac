@@ -624,7 +624,7 @@ function durShort(iso) {
 function statusText(s) {
     if (s.state === 'ended') return 'Ended';
     // Claude Code says busy, idle or shell; to the owner that is working or their turn
-    const base = s.state === 'idle' ? 'Your turn' : 'Working';
+    const base = s.parked ? 'Idle' : s.state === 'idle' ? 'Your turn' : 'Working';
     const since = s.status ? durShort(s.status_since) : '';
     return since ? `${base} · ${since}` : base;
 }
@@ -632,7 +632,7 @@ function statusText(s) {
 function statusTip(s) {
     if (s.state === 'ended') return `Ended ${s.ago || ''}`.trim();
     const at = s.status_since ? new Date(s.status_since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-    const what = s.state === 'idle' ? (s.status === 'shell' ? 'Waiting for you (in shell mode)' : 'Waiting for you') : 'Claude is working';
+    const what = s.parked ? 'Idle, still open in its terminal' : s.state === 'idle' ? (s.status === 'shell' ? 'Waiting for you (in shell mode)' : 'Waiting for you') : 'Claude is working';
     return at ? `${what} since ${at}` : what;
 }
 function adaptFeed(d) {
@@ -643,6 +643,8 @@ function adaptFeed(d) {
         // idle and shell are the owner's turn.
         state: s.status ? (s.status === 'busy' ? 'working' : 'idle')
                         : (s.state === 'idle' ? 'idle' : 'working'),
+        // the scanner's shared rule: a turn left unanswered over an hour is parked
+        parked: s.attention === 'idle',
         doing: s.state_detail || DOING[s.state] || (s.state && s.state !== 'idle' ? s.state : 'busy'),
         last_act: relTime(s.last_activity),
         folder: s.cwd_short || baseName(s.cwd),
@@ -965,7 +967,7 @@ function headStatsHTML(live, turn) {
         `<span class="hs-v">${ic(icon)}${esc(String(v))}</span><span class="hs-l">${esc(label)}</span></${st ? 'button' : 'div'}>`;
     return `<div class="hstats">` +
         tile('you', 'hand', turn, 'waiting on you', 'Sessions where Claude finished and waits for you. Click to show only these.', 'you') +
-        tile('work', 'play', live.length - turn, 'working', 'Sessions where Claude is busy. Click to show only these.', 'work') +
+        tile('work', 'play', live.filter(s => s.state !== 'idle').length, 'working', 'Sessions where Claude is busy. Click to show only these.', 'work') +
         tile('ended', 'stop', FEED.recent.length, 'ended recently', 'Sessions that finished recently. Click to show only these.', 'ended') +
         (mailRows.length ? tile('mail' + (mailBad ? ' bad' : ''), 'mail', mailBad ? '?' : mail, 'unread messages',
             mailBad ? 'The ipc broker did not answer for every session, so the total is unknown' : 'Unread ipc messages across the live sessions') : '') +
@@ -1199,12 +1201,13 @@ function sortGroup(arr) {
 /* ---------------- render ---------------- */
 function render() {
     const live = FEED.live;
-    const turn = live.filter(s => s.state === 'idle').length;
+    const turn = live.filter(s => s.state === 'idle' && !s.parked).length;
+    const parked = live.filter(s => s.parked).length;
     const hostEl = document.querySelector('.tb-host'); if (hostEl) hostEl.textContent = FEED.host || '';
     const wasFocused = document.activeElement && document.activeElement.id === 'fq';
     $('#nAll').textContent = live.length + FEED.recent.length;
     $('#nYou').textContent = turn;
-    $('#nWork').textContent = live.length - turn;
+    $('#nWork').textContent = live.length - turn - parked;
     $('#nEnded').textContent = FEED.recent.length;
     const priced = live.filter(s => s.cost_usd != null);
     const spend = priced.reduce((a, s) => a + s.cost_usd, 0);
@@ -1242,8 +1245,9 @@ function renderBoard(q) {
     const pq = parseQ(q);
     const lm = FEED.live.map(s => ({ s, m: matchSession(s, pq) })).filter(x => x.m);
     const rm = FEED.recent.map(s => ({ s, m: matchSession(s, pq) })).filter(x => x.m);
-    const need = sortGroup(lm.filter(x => x.s.state === 'idle'));
+    const need = sortGroup(lm.filter(x => x.s.state === 'idle' && !x.s.parked));
     const work = sortGroup(lm.filter(x => x.s.state !== 'idle'));
+    const idle = sortGroup(lm.filter(x => x.s.parked));
     const ended = sortGroup(rm);
     /* free words the sync pass couldn't answer → scan whole transcripts, on demand */
     let scanning = ftPending > 0;
@@ -1270,9 +1274,10 @@ function renderBoard(q) {
         const on = st => stFilter === 'all' || stFilter === st;
         boardHTML = (on('you') ? group('you', 'Needs you', need, paneHTML) : '') +
             (on('work') ? group('cl', 'Working', work, paneHTML) : '') +
+            (on('all') ? group('', 'Idle', idle, paneHTML) : '') +
             (on('ended') ? group('', 'Ended', ended, endedPaneHTML) : '');
     } else {
-        const liveAll = need.concat(work);
+        const liveAll = need.concat(work, idle);
         if (tbl) {
             boardHTML = (liveAll.length || ended.length)
                 ? `<div class="tbl">${liveAll.map(x => rowHTML(x.s, x.m.hit)).join('')}${ended.map(x => rowHTML(x.s, x.m.hit)).join('')}</div>` : '';

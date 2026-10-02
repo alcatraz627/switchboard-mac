@@ -555,6 +555,7 @@ def sessions_payload():
             "name": inst.get("name", ""),
             "status": inst.get("status", ""),
             "status_since": inst.get("status_since", ""),
+            "attention": inst.get("attention", ""),
             "last_activity": inst.get("last_activity", ""),
             "kind": inst.get("kind", ""),
             "state": (inst.get("session_state") or {}).get("state", ""),

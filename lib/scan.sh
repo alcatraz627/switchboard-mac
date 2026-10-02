@@ -1161,6 +1161,29 @@ def _str_field(sess, key):
     v = sess.get(key) if sess else None
     return v if isinstance(v, str) else ''
 
+# A finished turn nobody has answered for this long is parked, not urgent.
+ATTENTION_IDLE_AFTER_S = 3600
+
+def attention_of(status, status_ms, guess, now=None):
+    """Which of three groups a live session belongs to: working, needs_you or idle.
+
+    The one definition every surface shares (Switchboard's Sessions card, the
+    hub board), so a session reads the same everywhere. Working while Claude
+    Code says busy; needs you once its turn ends; idle when that turn ended
+    over ATTENTION_IDLE_AFTER_S ago and the terminal is still open. Without a
+    session file the transcript-tail guess decides working versus needs you.
+    """
+    import time
+    if status == 'busy':
+        return 'working'
+    if not status:
+        return 'needs_you' if guess in ('', 'idle') else 'working'
+    if isinstance(status_ms, (int, float)) and not isinstance(status_ms, bool) and math.isfinite(status_ms):
+        now = now if now is not None else time.time()
+        if now - status_ms / 1000 >= ATTENTION_IDLE_AFTER_S:
+            return 'idle'
+    return 'needs_you'
+
 def _build_claude_instance(pid, cmdline, provider, sess=None):
     """Build the full live-instance row for one live session.
 
@@ -1287,6 +1310,8 @@ def _build_claude_instance(pid, cmdline, provider, sess=None):
         'name': _str_field(sess, 'name'),
         'status': _str_field(sess, 'status'),
         'status_since': _ms_to_iso((sess or {}).get('statusUpdatedAt')),
+        'attention': attention_of(_str_field(sess, 'status'), (sess or {}).get('statusUpdatedAt'),
+                                  (session_state or {}).get('state', '')),
         'last_activity': _last_activity(sess, session_data['jsonl_path']),
         'ipc': get_ipc_info(session_data['session_id'], quick_mode, cwd),
     }

@@ -635,6 +635,10 @@ else
     t_fail "chapters probe needs node (SKIP-loud: not installed)"
 fi
 t_grep "live rows carry the session file's name/status" lib/hub-server.py '"status_since": inst.get'
+t_eq "one state rule: busy works, a fresh turn needs you, an hour unanswered is idle" \
+     "working needs_you idle needs_you working needs_you" \
+     "$(python3 "$SCAN_PROBE" attention)"
+t_grep "the hub groups by the scanner's state rule" lib/hub-index.html "parked: s.attention === 'idle'"
 t_grep "cards label with the session name"  lib/hub-index.html 'cleanTitle\(s.name\)'
 
 t_section "small truths (R3)"
