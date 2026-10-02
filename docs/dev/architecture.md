@@ -84,7 +84,9 @@ row or tab is hidden, never shown broken.
 | Guards: permission prompts | Claude Code's `~/.claude/settings.json` | row hidden |
 | Guards: push approvals | `.push-approved-<session>` files, live sessions from `~/.claude/sessions` | row hidden |
 | Kanban Board | `~/.claude/scripts/kanban/server.ts`, pm2, bun | row hidden |
-| Session Hub | the claude-instances app's `lib/hub.sh` | row hidden |
+| Session Hub | `hub/lib/hub.sh` in this repo (run under pm2 as `session-hub`) | row hidden |
+| Sessions hover page | `hub/lib/scan.sh --quick`, every 3 s while shown, every 15 s otherwise; fields in `hub/docs/contract.md` | "The session scanner is not installed" |
+| Start at login switches | `~/.pm2/dump.pm2` via `Resources/lib/pm2login.py` | switch disabled, with the reason |
 | ipc Broker | `claude-ipc` on the login PATH | row hidden |
 | Decision Pages | a pm2 process named `decision-pages` | row hidden |
 | Warden, Board sync | their scripts under `~/.claude` | row hidden |

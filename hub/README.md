@@ -381,7 +381,7 @@ own dark/light switch.
 ### File Structure
 
 ```
-~/.claude/widgets/claude-instances/
+switchboard-mac/hub/   (was ~/.claude/widgets/claude-instances/)
 ├── native/                          # The bar, split into 8 files, one swiftc module
 │   ├── main.swift                   # Paths, logging, format helpers, app entry
 │   ├── Models.swift                 # Codable models, enums, small helpers

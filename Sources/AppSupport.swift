@@ -132,9 +132,11 @@ enum Integrations {
     static var guardHooks: Bool { exists(SwitchboardPaths.hooksDir) }
     static var kanbanServer: String { SwitchboardPaths.gccRoot + "/scripts/kanban/server.ts" }
     static var kanban: Bool { exists(kanbanServer) }
-    /// claude-instances' phone-facing session hub, when that app is installed.
+    /// The phone-facing session hub, which lives in this repo's hub/ folder.
+    /// Its old home in ~/.claude/widgets is still tried, for checkouts made before the move.
     static var hubScript: String? {
-        let candidates = [SwitchboardPaths.gccRoot + "/widgets/claude-instances/lib/hub.sh",
+        let candidates = [AppPaths.home + "/Code/Claude/switchboard-mac/hub/lib/hub.sh",
+                          SwitchboardPaths.gccRoot + "/widgets/claude-instances/lib/hub.sh",
                           AppPaths.home + "/Code/Claude/claude-instances/lib/hub.sh"]
         return candidates.first(where: exists)
     }

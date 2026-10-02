@@ -58,14 +58,9 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
     "$BIN" --probe-sessions --scan-file tests/fixtures/scan-sample.json
   check "the sessions quick page renders from a recorded scan" \
     "$BIN" --snapshot-quick "$WORK/quick-sessions.png" --page sessions --scan-file tests/fixtures/scan-sample.json
-  SCANNER="$HOME/.claude/widgets/claude-instances/lib/scan.sh"
-  if [[ -f "$SCANNER" ]]; then
-    bash "$SCANNER" --quick > "$WORK/live-scan.json" 2>/dev/null
-    check "the installed scanner still emits every field the Sessions card reads" \
-      "$BIN" --probe-sessions --scan-file "$WORK/live-scan.json"
-  else
-    skip "the installed scanner's fields (claude-instances not installed)"
-  fi
+  bash hub/lib/scan.sh --quick > "$WORK/live-scan.json" 2>/dev/null
+  check "the hub's scanner still emits every field the Sessions card reads" \
+    "$BIN" --probe-sessions --scan-file "$WORK/live-scan.json"
   check "timers run, go off, extend and clear" "$BIN" --probe-timers-tab
   check "the Queue tab renders" "$BIN" --snapshot "$WORK/queue.png" --tab queue
   check "the time picker renders" "$BIN" --snapshot-when "$WORK/when.png"

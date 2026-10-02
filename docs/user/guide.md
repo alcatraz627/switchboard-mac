@@ -59,6 +59,7 @@ Rest the pointer on the menu bar icon and a small card opens under it. It stays 
 
 | Page | What it shows |
 |---|---|
+| Sessions | Every Claude Code session open on this Mac, first in the order. A strip says how many need you (yellow), are working (green) and are idle (grey), what they have cost so far, and how long ago the list was read. The session that has waited on you longest gets a card with Claude's last words in full. Every other session is one line, grouped Needs you, Working, Idle: click it to read its transcript, or use its three icons to bring its terminal forward, copy its folder, or copy its ipc id. Hover a line for its branch, model, context, tokens, cost, memory, last prompt and focus file. Hub, at the bottom, opens the session hub's board, where past sessions live. A session needs you once Claude finishes its turn; one left unanswered for over an hour counts as idle. The icon in the menu bar shows how many sessions are open |
 | Now | Six shortcuts that open Agents, Hooks, Notes, Timers, Controls and Machine, and under them one row of badges, one for each thing that needs you. A badge opens its tab with the search filled in, so the row it names is in view. With nothing to show it says "Nothing needs you" |
 | Limits | Claude 5h, Claude 7d and Codex 7d, each with its icon, its percentage and its reset time. The per-model and reserve windows stay on the Usage tab |
 | Approvals | The pushes and asks waiting on you, with Approve and Cancel |
@@ -396,7 +397,7 @@ Five sections, with a search field pinned above them . The footer says "Stop and
 | Row | What it does |
 |---|---|
 | Kanban Board | A switch that starts or stops the kanban server (a pm2 process on port 5106). It stays off after a reboot, and this switch is where it comes back. When it is up, a link opens it in the browser. If starting fails, the row says "couldn't switch: the reason". Needs the kanban server file, pm2 and bun |
-| Session Hub | The phone-facing session hub from claude-instances (port 5400). The note says "serving :5400", or "up, address unreachable" when it is running but its phone address no longer answers, or "not running". Clicking restarts it, or stops it when it is up. Restart it after Tailscale reconnects |
+| Session Hub | The phone-facing session hub (port 5400), which lives in this repo's `hub/` folder and runs under pm2. The note says "serving :5400", or "up, address unreachable" when it is running but its phone address no longer answers, or "not running". Clicking restarts it, or stops it when it is up. Restart it after Tailscale reconnects. Its "Start at login" switch, like the ones under Kanban Board and Decision Pages, says whether it comes back after the Mac restarts, read from pm2's saved list |
 | ipc Broker | Whether the cross-session message broker is up. Read-only, since it runs under launchd. Copy copies `claude-ipc -i` |
 | Decision Pages | A switch for the pm2 process `decision-pages` (port 5197) |
 | Warden | The session warden. The switch is your pause: "beats live", "paused by you, deltas held", or the yellow "standing down, usage >90% (auto-resumes)", which is the usage gate and clears by itself. Transcript opens a window with the warden's session (rendered by the session hub, which it starts if it is off). Copy copies `claude-warden open` |
