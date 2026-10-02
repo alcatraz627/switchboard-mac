@@ -657,6 +657,16 @@ struct QuickNeedRow: View {
     @State private var busy: String?
     @State private var failed: String?
 
+    /// The symbol beside each answer, so the buttons read at a glance.
+    static func icon(for label: String) -> String {
+        switch label {
+        case "Approve": return "checkmark"
+        case "Deny": return "hand.raised.slash"
+        case "Cancel": return "xmark"
+        default: return "arrow.right"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -666,7 +676,7 @@ struct QuickNeedRow: View {
                 Spacer(minLength: 4)
                 ForEach(Array(row.buttons.enumerated()), id: \.offset) { _, b in
                     if case .run(let act) = b.kind {
-                        Button(b.label) {
+                        Button {
                             // the same question the tab asks before an action that is easy to regret
                             if let q = b.confirm {
                                 let a = NSAlert(); a.messageText = q
@@ -679,6 +689,8 @@ struct QuickNeedRow: View {
                                 let err = act()
                                 DispatchQueue.main.async { busy = nil; failed = err }
                             }
+                        } label: {
+                            Label(b.label, systemImage: b.icon ?? Self.icon(for: b.label)).labelStyle(.titleAndIcon)
                         }
                         .controlSize(.small).disabled(busy != nil).help(b.help)
                     }
