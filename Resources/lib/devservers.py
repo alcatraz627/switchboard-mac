@@ -99,7 +99,9 @@ def pm2_status():
 
 def servers():
     """Every claim and pin in the ledger, with whether its port is listening."""
-    _, out, _ = run(["bash", PORTS, "list"])
+    code, out, err = run(["bash", PORTS, "list"])
+    if code != 0:
+        raise RuntimeError(f"The port ledger could not be read: {err.strip() or 'ports.sh exited with ' + str(code)}")
     live = listeners()
     procs = pm2_status()
     parents = process_tree()
@@ -173,4 +175,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        # A crash answers in the helper's own shape, never a traceback.
+        print(json.dumps({"ok": False, "error": f"Something went wrong with the dev servers: {e}"}))
+        sys.exit(1)

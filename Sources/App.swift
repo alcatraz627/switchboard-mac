@@ -230,10 +230,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
     }
 
     /// The Machine group each helper script fills.
-    static let helperSection: [String: String] = [
-        "jobs.py": "Schedules", "drives.py": "Drives", "devservers.py": "Dev servers", "dbservices.py": "Databases",
-        "models.py": "Local models", "gitscan.py": "Repos", "wol.py": "Session",
-    ]
+    static let helperSection = HelperNames.section
 
     /// How a helper-backed group should read: nil when its last probe worked.
     func probeStatus(_ name: String) -> ReadingState? {
@@ -271,6 +268,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
 
     private func runSnapshot() {
         snapshotRunning = true
+        policyController?.store.systemRefreshing = true
         snapshotRunsStarted += 1
         dlog("snapshot started")
         let previous = sbSnapshot
@@ -294,8 +292,11 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                     defer { group.leave() }
                     let r = Services.run("/usr/bin/env", ["python3", AppPaths.lib(name)] + args, timeout: timeout)
                     // A probe that failed keeps its last value instead of emptying its group.
-                    guard let v = try? JSONSerialization.jsonObject(with: Data(r.out.utf8)) else {
-                        let why = r.failure ?? "\(name) gave no answer"
+                    // A helper that caught its own crash answers {"ok": false, "error": ...}.
+                    let parsed = try? JSONSerialization.jsonObject(with: Data(r.out.utf8))
+                    let refusal = (parsed as? [String: Any]).flatMap { $0["ok"] as? Bool == false ? ($0["error"] as? String ?? "gave no answer") : nil }
+                    guard let v = parsed, refusal == nil else {
+                        let why = refusal.map { "\(HelperNames.title(name)): " + plainErrorText($0) } ?? r.failure ?? "\(HelperNames.title(name)) gave no answer"
                         dwarn("probe failed, keeping the last value: \(why)")
                         lock.lock(); p.probeFailures[name] = why; lock.unlock()
                         return
@@ -369,7 +370,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                         self.policyController?.store.reloadCatalog(tab, read)
                     }
                 }
-                self.snapshotsDone += 1
+                self.snapshotsDone += 1; self.policyController?.store.systemReadOnce = true
+                self.policyController?.store.systemRefreshing = false
                 if !self.kanbanBusy { self.kanbanUp = kanban }
                 self.refreshPanel(); self.policyController?.updateDot(problems: self.problems())
                 let waiters = self.snapshotWaiters
@@ -522,7 +524,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                                       let up = host.map { Services.probeHTTP("http://\($0):5400/healthz") }
                                           ?? Services.probeHTTP("http://127.0.0.1:5400/healthz")
                                       // A restart waits for the port; the 4 s default killed it midway.
-                                      _ = Services.run("/bin/bash", [hub, up ? "stop" : "restart"], timeout: 15)
+                                      let r = Services.run("/bin/bash", [hub, up ? "stop" : "restart"], timeout: 15)
+                                      self?.reportFlip("Session Hub", r.ok ? nil : (r.failure ?? plainErrorText(r.err, fallback: "the session hub did not \(up ? "stop" : "restart")")))
                                       DispatchQueue.main.async { self?.refreshSnapshot() }
                                   }
                               },
@@ -543,7 +546,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                               onClick: { [weak self] in
                                   // pm2 runs through a login shell: seconds, so never on main.
                                   DispatchQueue.global(qos: .userInitiated).async {
-                                      Services.pm2(dp == "online" ? "stop" : "start", "decision-pages")
+                                      let err = Services.pm2(dp == "online" ? "stop" : "start", "decision-pages")
+                                      self?.reportFlip("Decision Pages", err)
                                       self?.refreshSnapshot()
                                   }
                               },
@@ -556,7 +560,11 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                               badge: !wr ? .off : (s.wardenGated ? .on(menuYellow) : .on(menuGreen)),
                               note: !wr ? "paused by you, deltas held"
                                   : (s.wardenGated ? "standing down, usage >\(s.wardenGatePct)% (auto-resumes)" : "beats live"),
-                              onClick: { [weak self] in Warden.set(running: !wr); self?.refreshSnapshot() },
+                              onClick: { [weak self] in
+                                  Warden.set(running: !wr)
+                                  self?.reportFlip("Warden", Warden.running() == !wr ? nil : "The warden's pause file could not be changed.")
+                                  self?.refreshSnapshot()
+                              },
                               tip: "The session warden. Click toggles YOUR pause. The yellow standing-down state is the usage gate; it clears itself when a window reopens.",
                               buttons: [
                                   RowButton(label: "Transcript", kind: .run({ [weak self] in
@@ -604,7 +612,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                               onClick: { [weak self] in
                                   let on = !(self?.sbSnapshot.boardSync ?? false)
                                   DispatchQueue.global(qos: .userInitiated).async {
-                                      BoardSync.set(on)
+                                      self?.reportFlip("Board sync", BoardSync.change(on))
                                       self?.refreshSnapshot()
                                   }
                               },
@@ -621,7 +629,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             rows.append(SBRow(label: "claude.ai connectors", badge: on ? .on(menuGreen) : .off,
                               note: on ? "load in new sessions" : "off from the next new session",
                               onClick: { [weak self] in
-                                  ContextSwitches.setConnectors(on: !on)
+                                  let ok = ContextSwitches.setConnectors(on: !on)
+                                  self?.reportFlip("claude.ai connectors", ok ? nil : Settings.lastError)
                                   self?.refreshSnapshot()
                               },
                               tip: "Vercel, Linear, Figma, Slack and the other claude.ai connectors. Off keeps their tool names and instructions out of every new session. Sets disableClaudeAiConnectors in ~/.claude/settings.json."))
@@ -630,7 +639,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             rows.append(SBRow(label: "Browser tools", badge: on ? .on(menuGreen) : .off,
                               note: on ? "Playwright, Chrome DevTools" : "off from the next new session",
                               onClick: { [weak self] in
-                                  ContextSwitches.setBrowserTools(on: !on)
+                                  let ok = ContextSwitches.setBrowserTools(on: !on)
+                                  self?.reportFlip("Browser tools", ok ? nil : Settings.lastError)
                                   self?.refreshSnapshot()
                               },
                               tip: "The Playwright and Chrome DevTools plugins, whose browser MCP servers load into every new session. Turning them off also hides their skills."))
@@ -642,7 +652,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
 
     private func togglePrompt(_ flag: SettingsFlag, suppressed: Bool) {
         if suppressed {
-            Settings.write(key: flag.rawValue, value: false)
+            if !Settings.write(key: flag.rawValue, value: false) { warnSettingsRefused() }
             refreshSnapshot()
             return
         }
@@ -654,8 +664,28 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         a.addButton(withTitle: "Cancel")
         NSApp.activate(ignoringOtherApps: true)
         guard a.runModal() == .alertFirstButtonReturn else { return }
-        Settings.write(key: flag.rawValue, value: true)
+        if !Settings.write(key: flag.rawValue, value: true) { warnSettingsRefused() }
         refreshSnapshot()
+    }
+
+    private func warnSettingsRefused() {
+        let a = NSAlert()
+        a.messageText = "That setting was not changed"
+        a.informativeText = Settings.lastError ?? "Claude's settings.json could not be written."
+        a.alertStyle = .informational
+        NSApp.activate(ignoringOtherApps: true)
+        a.runModal()
+    }
+
+    /// A switch click that failed puts its reason on the row (and in the Problems
+    /// list) until the next flip, so "did not turn on" never arrives without a cause.
+    func reportFlip(_ label: String, _ error: String?) {
+        guard let error = error else { return }
+        dwarn("\(label): \(error)")
+        DispatchQueue.main.async { [weak self] in
+            self?.timerFailures[label] = error
+            self?.refreshPanel()
+        }
     }
 
     // ── The Machine tab ──────────────────────────────────────────────────────
@@ -713,7 +743,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             }
             if !rows.isEmpty || st != nil { out.append(SystemGroup(title: title, rows: rows, status: st)) }
         }
-        out.append(SystemGroup(title: "Session", rows: sessionRows().map(convert) + [wakeOnLANRow()]))
+        out.append(SystemGroup(title: "Session", rows: sessionRows().map(convert) + [wakeOnLANRow()], status: probeStatus("wol.py")))
         return out
     }
 
@@ -811,10 +841,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 r.buttons.append(RowButton(label: "Copy", kind: .copy(c), help: "Copy \(c)"))
             }
             if let log = s["log"] as? String {
-                r.buttons.append(RowButton(label: "Open", kind: .run({
-                    DispatchQueue.main.async { NSWorkspace.shared.open(URL(fileURLWithPath: log)) }
-                    return nil
-                }), help: "Open its log"))
+                r.buttons.append(RowButton(label: "Open", kind: .run({ Self.openPath(log, missing: "its log is not there yet") }),
+                                           help: "Open its log"))
             }
             let facts: [(String, String?)] = [("Ports", ports.isEmpty ? nil : ports), ("Data", s["data"] as? String),
                                               ("Log", s["log"] as? String), ("launchd label", label)]
@@ -1060,10 +1088,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                               tip: "\(mount) · \(disk)")
             r.key = "drive-" + mount; r.labelIsName = true
             r.showsBadge = false
-            r.buttons = [RowButton(label: "Finder", kind: .run({
-                DispatchQueue.main.async { NSWorkspace.shared.open(URL(fileURLWithPath: mount)) }
-                return nil
-            }), help: "Open in Finder")]
+            r.buttons = [RowButton(label: "Finder", kind: .run({ Self.openPath(mount, missing: "this drive is no longer mounted") }),
+                                   help: "Open in Finder")]
             if d["ejectable"] as? Bool ?? true {
                 r.buttons.append(RowButton(label: "Eject", kind: .run({ [weak self] in
                     let err = Self.helperError(Services.run("/usr/bin/env", ["python3", script, "eject", disk], timeout: 70))
@@ -1109,10 +1135,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             row.key = "repo-" + path; row.labelIsName = true
             row.showsBadge = false
             row.buttons = [
-                RowButton(label: "Finder", kind: .run({
-                    DispatchQueue.main.async { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
-                    return nil
-                }), help: "Open in Finder"),
+                RowButton(label: "Finder", kind: .run({ Self.openPath(path, missing: "this folder is gone") }),
+                          help: "Open in Finder"),
                 RowButton(label: "Terminal", kind: .copy("cd '\(path.replacingOccurrences(of: "'", with: "'\\''"))'"),
                           help: "Copy a cd to this repository, to paste in your terminal"),
             ]
@@ -1364,7 +1388,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         let exit = (j["last_exit"] as? NSNumber)?.intValue
         let failing = j["failing"] as? Bool ?? false
         let state: SystemRow.State = running ? .on(menuGreen) : failing ? .count(exit ?? 1, menuRed) : .off
-        let status = (j["disabled"] as? Bool ?? false) ? "disabled" : running ? "running" : !loaded ? "not loaded" : failing ? "last run failed (exit \(exit ?? 1))"
+        let status = (j["disabled"] as? Bool ?? false) ? "disabled" : running ? "running" : !loaded ? "not loaded" : failing ? "last run failed"
             : exit == 0 ? "last run ok" : "idle"
         // This app's own agent gets no Start or Stop: Stop would quit the
         // panel mid-click, Start would launch a second copy.
@@ -1404,14 +1428,20 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         let log = j["log"] as? String, plist = j["plist"] as? String
         if log != nil || plist != nil {
             r.buttons.append(RowButton(label: "Open", kind: .run({
-                DispatchQueue.main.async {
-                    if let log = log { NSWorkspace.shared.open(URL(fileURLWithPath: log)) }
-                    else if let plist = plist { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: plist)]) }
-                }
+                if let log = log { return Self.openPath(log, missing: "its log is not there yet") }
+                guard let plist = plist, FileManager.default.fileExists(atPath: plist) else { return "its plist is gone" }
+                DispatchQueue.main.async { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: plist)]) }
                 return nil
             }), help: log != nil ? "Open its log" : "Show its plist in Finder (it keeps no log)"))
         }
         return r
+    }
+
+    /// Open a file or folder, or say in words why there is nothing to open.
+    static func openPath(_ path: String, missing: String) -> String? {
+        guard FileManager.default.fileExists(atPath: path) else { return missing }
+        DispatchQueue.main.async { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+        return nil
     }
 
     /// What a lib helper's `{"ok": …, "error": …}` answer means for a button:
@@ -1424,40 +1454,13 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
               let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else {
             if let why = r.failure { return why }
             let raw = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
-            return raw.isEmpty ? "\(r.name) gave no answer" : raw
+            return raw.isEmpty ? "\(HelperNames.title(r.name)) gave no answer" : plainError(raw)
         }
-        return (obj["ok"] as? Bool ?? false) ? nil : plainError(obj["error"] as? String ?? "\(r.name) refused")
+        return (obj["ok"] as? Bool ?? false) ? nil : plainError(obj["error"] as? String ?? "\(HelperNames.title(r.name)) refused")
     }
 
-    /// A tool's error in words a person reads: colour codes and table borders
-    /// gone, known launchctl, pm2 and permission failures said plainly, and
-    /// otherwise the first line that says something.
-    static func plainError(_ raw: String) -> String {
-        let text = raw.replacingOccurrences(of: #"\u{1B}\[[0-9;]*[A-Za-z]"#, with: "", options: .regularExpression)
-        let known: [(String, String)] = [
-            (#"(?i)bootstrap failed: 5|input/output error"#, "launchd would not load it; it may be loaded already, or its plist is broken"),
-            (#"(?i)bootstrap failed: 37|already (loaded|bootstrapped)"#, "it is loaded already"),
-            (#"(?i)could not find service|no such process|service is disabled"#, "launchd has no running job by that name right now"),
-            (#"(?i)operation not permitted|permission denied|EPERM"#, "macOS did not allow it (permission denied)"),
-            (#"(?i)\[PM2\]\[ERROR\] Process or Namespace (\S+) not found"#, "pm2 has no process named $1"),
-            (#"(?i)command not found: (\S+)"#, "$1 is not installed or not on the PATH"),
-            (#"(?i)(\S+): command not found"#, "$1 is not installed or not on the PATH"),
-        ]
-        for (pattern, plain) in known {
-            // Rewrite only the matched text, so a capture ($1) carries the name through.
-            if let r = text.range(of: pattern, options: .regularExpression) {
-                return String(text[r]).replacingOccurrences(of: pattern, with: plain, options: .regularExpression)
-            }
-        }
-        let boxChars = CharacterSet(charactersIn: "│┌┐└┘├┤┬┴┼─═║╔╗╚╝")
-        // A table (pm2 prints one) carries no reason, so its lines are skipped whole.
-        let line = text.components(separatedBy: "\n")
-            .filter { $0.rangeOfCharacter(from: boxChars) == nil }
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .first { !$0.isEmpty && !$0.hasPrefix("[PM2] ") && $0.rangeOfCharacter(from: .letters) != nil }
-        guard let l = line else { return "it failed without saying why" }
-        return l.count > 160 ? String(l.prefix(157)) + "…" : l
-    }
+    /// A tool's error in words a person reads (see `plainErrorText`).
+    static func plainError(_ raw: String) -> String { plainErrorText(raw) }
 
     // ── Wake-on-LAN ──────────────────────────────────────────────────────────
 
@@ -1467,7 +1470,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var row = SystemRow(
             label: "Wake a device",
             state: targets.isEmpty ? .off : .count(targets.count, menuTeal),
-            note: targets.isEmpty ? "no saved devices" : targets.compactMap { $0["name"] as? String }.joined(separator: ", "),
+            note: targets.isEmpty ? (probeStatus("wol.py") == nil ? "no saved devices" : "could not be read") : targets.compactMap { $0["name"] as? String }.joined(separator: ", "),
             tip: "Send a wake-on-LAN packet to a saved machine on the home network. Click to open.")
         row.key = "wake-a-device"
         row.children = targets.map { t in
@@ -1481,7 +1484,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                     let err = Self.helperError(Services.run("/usr/bin/env", ["python3", wol, "wake", mac, bcast]))
                     dlog("wol: \(name) \(err ?? "sent")")
                     return err
-                }), help: "Send the magic packet. A sleeping machine takes a few seconds to answer."),
+                }), help: "Send the magic packet. A sleeping machine takes a few seconds to answer.", doneTip: "Sent"),
                 RowButton(label: "Forget", kind: .run({ [weak self] in
                     let err = Self.helperError(Services.run("/usr/bin/env", ["python3", wol, "remove", mac]))
                     self?.refreshSnapshot()
@@ -1608,15 +1611,19 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
 
     /// Some switches take seconds (pm2, a login shell), so the check waits
     /// before reading the switch back; a flip that did not land says so on its row.
-    private func verifyTimedFlip(_ key: String, wantOn: Bool, after: TimeInterval = 10) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + after) { [weak self] in
+    private func verifyTimedFlip(_ key: String, wantOn: Bool, after: TimeInterval? = nil) {
+        // The hub restart waits up to 15 s for its port; checking sooner would call it failed early.
+        let wait = after ?? (key == "Session Hub" ? 20 : 10)
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
             self?.refreshSnapshot {
                 guard let self = self, let row = self.systemRow(key) else { return }
                 if row.isOn == wantOn {
                     self.timerFailures[key] = nil
                 } else {
                     let want = wantOn ? "on" : "off"
-                    self.timerFailures[key] = "the timer could not turn it \(want); it is still \(wantOn ? "off" : "on")"
+                    // The switch's own reason, when it gave one, says more than the timer's.
+                    self.timerFailures[key] = self.timerFailures[key]
+                        ?? "the timer could not turn it \(want); it is still \(wantOn ? "off" : "on")"
                     dwarn("timer: \(key) did not turn \(want)")
                 }
                 self.refreshPanel()
@@ -1698,7 +1705,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let r = Services.run("/bin/zsh", ["-lc", cmd], timeout: 20)
             // pm2 prints its table either way; the exit status and the timeout are what count.
-            let why = r.timedOut || !r.launched ? r.failure : (r.ok ? nil : "pm2 could not \(stopping ? "stop" : "start") it (exit \(r.status ?? -1))")
+            let why = r.timedOut || !r.launched ? r.failure
+                : (r.ok ? nil : plainErrorText(r.err, fallback: "pm2 could not \(stopping ? "stop" : "start") it"))
             if let why = why { derr("kanban toggle failed: \(why)") }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                 self?.kanbanError = why
@@ -1769,11 +1777,11 @@ extension SwitchboardApp {
             let names = s.probeFailures.keys.sorted()
             let first = names[0] == "remote.py" ? "remote" : Self.helperSection[names[0]].flatMap { Visibility.groupTab[$0] } ?? "system"
             out.append(Problem(text: "\(names.count == 1 ? "1 source" : "\(names.count) sources") could not be read: "
-                               + names.joined(separator: ", "), tab: first, level: .error))
+                               + names.map { HelperNames.title($0) }.joined(separator: ", "), tab: first, level: .error))
         }
         for j in s.jobs where j["failing"] as? Bool == true {
             let name = (j["name"] as? String) ?? "a job"
-            out.append(Problem(text: "\(name) failed (exit \((j["last_exit"] as? Int).map(String.init) ?? "?"))",
+            out.append(Problem(text: "\(name) failed on its last run",
                                tab: "runtime", level: .error, query: name))
         }
         if !timerFailures.isEmpty {
@@ -1971,8 +1979,18 @@ func probeShell() -> String {
           !bad.ok && bad.status == 3 && bad.failure == "sh: disk is full", bad.failure ?? "nil")
 
     let quiet = Services.run("/bin/sh", ["-c", "exit 4"])
-    check("an error exit with nothing on stderr names the exit code",
-          quiet.failure == "sh stopped with an error (exit 4)", quiet.failure ?? "nil")
+    check("an error exit with nothing on stderr still reads as a sentence, with no exit code",
+          quiet.failure == "sh stopped without saying why", quiet.failure ?? "nil")
+
+    // A helper crash reaches the owner as the group's name and the sentence, never a script name or a traceback line.
+    let crash = Services.run("/bin/sh", ["-c", "echo 'RuntimeError: launchctl list failed: no answer' >&2; exit 1"])
+    var named = crash; named.name = "jobs.py"
+    check("a helper failure names its group and drops the exception class",
+          named.failure == "Schedules: launchctl list failed: no answer", named.failure ?? "nil")
+    var timedOut = ShellResult(name: "wol.py", timeout: 8); timedOut.timedOut = true
+    check("a timed-out helper is named by its group", timedOut.failure == "Session took longer than 8 s and was stopped", timedOut.failure ?? "nil")
+    let refusedOK = Services.run("/bin/sh", ["-c", "echo '{\"ok\": false, \"error\": \"ValueError: bad ip\"}'"])
+    check("a helper's own refusal loses its exception class too", SwitchboardApp.helperError(refusedOK) == "bad ip", SwitchboardApp.helperError(refusedOK) ?? "nil")
 
     let t0 = Date()
     let slow = Services.run("/bin/sleep", ["5"], timeout: 0.5)
@@ -2007,6 +2025,7 @@ func probeShell() -> String {
         ("zsh:1: command not found: pm2", "pm2 is not installed or not on the PATH"),
         ("pm2: command not found", "pm2 is not installed or not on the PATH"),
         ("[PM2] Applying action\n┌────┬──────┐\n│ id │ name │\n", "it failed without saying why"),
+        ("Traceback (most recent call last):\n  File \"x.py\", line 3, in <module>\nOSError: [Errno 28] No space left on device", "[Errno 28] No space left on device"),
         ("", "it failed without saying why"),
     ]
     for (raw, want) in plain {

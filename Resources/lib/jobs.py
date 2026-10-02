@@ -77,7 +77,14 @@ def describe_schedule(p):
 
 def disabled_labels():
     """Labels launchctl disable has switched off (they stay off across logins)."""
-    out = subprocess.run(["launchctl", "print-disabled", f"gui/{UID}"], capture_output=True, text=True).stdout
+    try:
+        r = subprocess.run(["launchctl", "print-disabled", f"gui/{UID}"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise RuntimeError(f"launchctl print-disabled did not answer: {e}")
+    if r.returncode != 0:
+        # Without this a failed read shows every switched-off job as enabled.
+        raise RuntimeError(f"launchctl print-disabled failed: {r.stderr.strip() or r.returncode}")
+    out = r.stdout
     off = set()
     for line in out.splitlines():
         line = line.strip()
@@ -228,4 +235,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        # A crash answers in the helper's own shape, never a traceback.
+        print(json.dumps({"ok": False, "error": f"Something went wrong with the schedules: {e}"}))
+        sys.exit(1)

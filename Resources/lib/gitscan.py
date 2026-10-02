@@ -187,4 +187,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        # A crash answers in the helper's own shape, never a traceback.
+        print(json.dumps({"ok": False, "error": f"Something went wrong with the repositories: {e}"}))
+        sys.exit(1)

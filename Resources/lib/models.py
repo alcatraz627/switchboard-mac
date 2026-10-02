@@ -23,6 +23,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from http.client import HTTPException
 
 SUITE = os.path.expanduser("~/Code/local-models")
 OLLAMA = "http://127.0.0.1:11434"
@@ -33,8 +34,12 @@ PRESSURE = {1: "normal", 2: "warn", 4: "critical"}
 def http(path, body=None, timeout=5):
     req = urllib.request.Request(OLLAMA + path, data=json.dumps(body).encode() if body is not None else None,
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read() or b"{}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read() or b"{}")
+    except (ValueError, HTTPException) as e:
+        # Callers treat OSError as "Ollama did not answer"; a garbled reply is the same to them.
+        raise OSError(f"Ollama sent a reply that could not be read: {e}")
 
 
 def pid_alive(pid):
@@ -193,4 +198,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        # A crash answers in the helper's own shape, never a traceback.
+        print(json.dumps({"ok": False, "error": f"Something went wrong with the local models: {e}"}))
+        sys.exit(1)

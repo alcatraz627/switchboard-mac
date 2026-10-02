@@ -5,7 +5,7 @@
 //
 //   --dump                  print every Machine-tab row
 //   --dump-policy [--scope <dir>]
-//   --snapshot <out.png> [--tab agents|usage|system|home|remote|scopes] [--light] [--scope <dir>] [--expand]
+//   --snapshot <out.png> [--tab <tab id, e.g. agents, rules, notes, controls>] [--light] [--scope <dir>] [--expand]
 //   --probe-timers          exercise the timed-flip engine on Keep Awake
 //   --probe-controls        write volume, mute and brightness back to themselves
 //   --probe-approve         approve a planted push in a scratch folder, never ~/.claude
@@ -126,7 +126,7 @@ if args.contains("--probe-quick") {
     exit(r.contains("FAIL") ? 1 : 0)
 }
 if let out = argAfter("--snapshot-quick") {
-    // One quick page, drawn from the real stores (read only): --page home|limits|approvals|bulbs|notes
+    // One quick page, drawn from the real stores (read only): --page home|limits|approvals|bulbs|notes|timers|controls|models
     let page = QuickPage(rawValue: argAfter("--page") ?? "home") ?? .home
     let policy = PolicyStore()
     policy.setNeeds(NeedsYou.items(), refresh: {})
@@ -152,7 +152,7 @@ if let out = argAfter("--snapshot-quick") {
     // Pages that read on appear are filled first, so the card is measured at its real size.
     let controls = ControlsStore()
     if page == .controls { controls.load(devices: false) }
-    if page == .models { policy.systemGroups = delegate.panelSystemGroupsFresh() }
+    if page == .models { policy.systemGroups = delegate.panelSystemGroupsFresh(); policy.systemReadOnce = true }
     let card = QuickCard(state: state, policy: policy, usage: usage, lights: lights, notes: NotesStore.shared, controls: controls, openTab: { _ in })
     let ok = snapshotCard(AnyView(card), to: out)
     print(ok ? "wrote \(out)" : "snapshot failed")

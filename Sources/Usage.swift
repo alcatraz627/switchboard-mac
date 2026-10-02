@@ -77,8 +77,13 @@ final class UsageStore: ObservableObject {
     static var codexCache = NSString(string: "~/.claude/adapters/codex/state/limits.json").expandingTildeInPath
     static var codexMute = NSString(string: "~/.claude/.no-codex-usage-gate").expandingTildeInPath
 
+    /// Set when a usage file exists but cannot be parsed, so it does not read as "no reading yet".
+    private var claudeUnreadable = false
+    private var codexUnreadable = false
+
     var claudeState: ReadingState {
         if let d = claudeAsOf, !claude.isEmpty { return .fresh(d) }
+        if claudeUnreadable { return .failed("The Claude usage file exists but could not be read (it is not valid JSON).") }
         return .unavailable("No usage reading yet. It arrives with the next statusline render.")
     }
 
@@ -88,6 +93,7 @@ final class UsageStore: ObservableObject {
             return .fresh(d)
         }
         if let e = codexRefreshError { return .failed(e) }
+        if codexUnreadable { return .failed("The Codex usage cache exists but could not be read (it is not valid JSON).") }
         if !FileManager.default.fileExists(atPath: Self.codexGate) {
             return .unavailable("Codex usage needs the Codex adapter in ~/.claude.")
         }
@@ -125,6 +131,12 @@ final class UsageStore: ObservableObject {
         }
         claude = windows.sorted { Self.order($0.id) < Self.order($1.id) }
         claudeAsOf = asOf
+        let fm = FileManager.default
+        claudeUnreadable = windows.isEmpty && (fm.fileExists(atPath: raw) || fm.fileExists(atPath: legacy))
+            && [raw, legacy].allSatisfy { p in
+                guard let d = fm.contents(atPath: p) else { return true }
+                return (try? JSONSerialization.jsonObject(with: d) as? [String: Any]) == nil
+            }
     }
 
     /// five_hour, seven_day, then any per-model window, by name.
@@ -149,8 +161,9 @@ final class UsageStore: ObservableObject {
 
     /// The usage gate's last good reading, as it left it on disk.
     func loadCodexCache() {
-        guard let d = FileManager.default.contents(atPath: Self.codexCache),
-              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return }
+        guard let d = FileManager.default.contents(atPath: Self.codexCache) else { codexUnreadable = false; return }
+        guard let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { codexUnreadable = true; return }
+        codexUnreadable = false
         applyCodex(o, asOf: modified(Self.codexCache) ?? Date())
     }
 
@@ -177,10 +190,14 @@ final class UsageStore: ObservableObject {
                 guard let self = self else { return }
                 self.codexBusySince = nil
                 // The gate prints "PASS<TAB>UNKNOWN: <why>" when it could not read.
-                if let r = verdict.range(of: "UNKNOWN: ") {
-                    let why = verdict[r.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+                if let u = verdict.range(of: "UNKNOWN: ") {
+                    let why = verdict[u.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
                     self.codexRefreshError = why.isEmpty ? "Codex did not answer" : String(why.prefix(140))
                     dwarn("codex usage refresh failed: \(why)")
+                } else if let crash = r.failure, !(r.out.hasPrefix("PASS") || r.out.hasPrefix("GATED")) {
+                    // A crash prints no verdict; the cached numbers would look freshly read.
+                    self.codexRefreshError = String(crash.prefix(140))
+                    dwarn("codex usage refresh failed: \(crash)")
                 } else {
                     self.loadCodexCache()
                 }

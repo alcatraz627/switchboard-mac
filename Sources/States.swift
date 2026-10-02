@@ -1,7 +1,7 @@
 // States.swift
 // How every control and reading in the panel looks while it waits, when it
 // fails, and how old it is. One set of views so all four tabs behave alike.
-// The rules behind them are in docs/design-kit.md, "Pending and failure".
+// The rules behind them are in docs/dev/design-kit.md, "Pending and failure".
 
 import AppKit
 import SwiftUI
@@ -10,6 +10,8 @@ import SwiftUI
 /// than `Pending.showAfter`. Before that it takes the same space, empty.
 struct PendingMark: View {
     let since: Date
+    /// What the spinner's tooltip says; most waits are a save.
+    var help = "Saving…"
     @State private var visible = false
 
     var body: some View {
@@ -23,7 +25,7 @@ struct PendingMark: View {
             try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             withAnimation(.easeIn(duration: 0.15)) { visible = true }
         }
-        .help("Saving…")
+        .help(help)
     }
 }
 

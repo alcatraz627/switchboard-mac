@@ -63,8 +63,13 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   BADLIB="$WORK/badlib"; cp -Rf "$ROOT/Resources/lib" "$BADLIB"
   printf 'import sys\nsys.stderr.write("diskutil is not answering\\n")\nsys.exit(2)\n' > "$BADLIB/drives.py"
   bad_out="$(SWITCHBOARD_LIB="$BADLIB" "$BIN" --dump 2>&1)"
-  [[ "$bad_out" == *"status: failed: drives.py: diskutil is not answering"* ]] \
-    && ok "a failing helper's group says why instead of vanishing" || bad "failing helper not surfaced"
+  [[ "$bad_out" == *"status: failed: Drives: diskutil is not answering"* ]] \
+    && ok "a failing helper's group says why, by its group name, instead of vanishing" || bad "failing helper not surfaced: ${bad_out:0:200}"
+  # A helper that caught its own crash answers {ok: false}; that is a failed read too, not a fresh empty list.
+  printf 'import json,sys\nprint(json.dumps({"ok": False, "error": "ValueError: bad saved address"}))\nsys.exit(1)\n' > "$BADLIB/jobs.py"
+  bad_out="$(SWITCHBOARD_LIB="$BADLIB" "$BIN" --dump 2>&1)"
+  [[ "$bad_out" == *"status: failed: Schedules: bad saved address"* ]] \
+    && ok "a helper's own {ok: false} answer fails its group with a plain sentence" || bad "ok:false answer not surfaced: ${bad_out:0:200}"
   if [[ "${SWITCHBOARD_PROBE_TIMERS:-}" == 1 ]]; then
     check "timed flips on Keep Awake (real power assertion)" "$BIN" --probe-timers
   else
@@ -125,6 +130,19 @@ printf '#!/bin/sh\necho "lsof: cannot read" >&2\nexit 1\n' > "$FAKEBIN/lsof"
 chmod +x "$FAKEBIN/launchctl" "$FAKEBIN/lsof"
 check "jobs.py list fails with the reason when launchctl cannot answer" python3 -c "import subprocess;r=subprocess.run(['python3','Resources/lib/jobs.py','list'],capture_output=True,text=True,env={'PATH':'$FAKEBIN:/usr/bin:/bin'});assert r.returncode==2 and 'Could not connect' in r.stderr, r"
 check "devservers.py list fails with the reason when lsof cannot answer" python3 -c "import subprocess;r=subprocess.run(['python3','Resources/lib/devservers.py','list'],capture_output=True,text=True,timeout=60,env={'PATH':'$FAKEBIN:/usr/bin:/bin','HOME':'$HOME'});assert r.returncode==2 and 'lsof could not' in r.stderr, r"
+# A helper that crashes or cannot ask answers in its own JSON, never a traceback.
+check "jobs.py start answers {ok: false} with a sentence when launchctl cannot answer" python3 -c "import json,subprocess;r=subprocess.run(['python3','Resources/lib/jobs.py','start','com.example.x'],capture_output=True,text=True,env={'PATH':'$FAKEBIN:/usr/bin:/bin'});d=json.loads(r.stdout);assert r.returncode==1 and d['ok'] is False and 'Traceback' not in r.stderr and 'Could not connect' in d['error'], r"
+printf '#!/bin/sh\nif [ "$1" = list ]; then echo "PID\tStatus\tLabel"; exit 0; fi\necho "print-disabled refused" >&2\nexit 5\n' > "$FAKEBIN/launchctl-half"
+mkdir -p "$FAKEBIN/half"; cp -f "$FAKEBIN/launchctl-half" "$FAKEBIN/half/launchctl"; chmod +x "$FAKEBIN/half/launchctl"
+check "jobs.py list fails when launchctl print-disabled cannot answer, not showing every job as enabled" python3 -c "import subprocess;r=subprocess.run(['python3','Resources/lib/jobs.py','list'],capture_output=True,text=True,env={'PATH':'$FAKEBIN/half:/usr/bin:/bin'});assert r.returncode==2 and 'print-disabled' in r.stderr, r"
+PHOME="$WORK/phome"; mkdir -p "$PHOME/.claude/scripts/dev-servers"
+printf '#!/bin/sh\necho "ledger locked" >&2\nexit 3\n' > "$PHOME/.claude/scripts/dev-servers/ports.sh"
+check "devservers.py list fails with the reason when the port ledger cannot be read" python3 -c "import subprocess;r=subprocess.run(['python3','Resources/lib/devservers.py','list'],capture_output=True,text=True,timeout=60,env={'PATH':'/usr/bin:/bin:/usr/sbin','HOME':'$PHOME'});assert r.returncode==2 and 'ledger locked' in r.stderr, r"
+RHOME="$WORK/rhome"; mkdir -p "$RHOME" "$FAKEBIN/csync"
+printf '#!/bin/sh\ncase "$2" in status) echo "{\\"checks\\": []}";; ls) echo "relay unreachable" >&2; exit 3;; esac\n' > "$FAKEBIN/csync/csync"; chmod +x "$FAKEBIN/csync/csync"
+check "remote.py list shows a failed csync ls as a failing check, not an empty host list" python3 -c "import json,subprocess;r=subprocess.run(['python3','Resources/lib/remote.py','list'],capture_output=True,text=True,timeout=60,env={'PATH':'$FAKEBIN/csync:/usr/bin:/bin','HOME':'$RHOME'});d=json.loads(r.stdout);c=[x for x in d['checks'] if x['check']=='csync ls'];assert c and c[0]['ok'] is False and 'relay unreachable' in c[0]['detail'], r.stdout"
+WBAD="$WORK/wiz-bad"; mkdir -p "$WBAD"; echo '{"aa0000000002": 5}' > "$WBAD/wiz-known.json"
+check "wiz.py answers {error} instead of a traceback when its saved addresses are damaged" python3 -c "import json,subprocess;r=subprocess.run(['python3','Resources/lib/wiz.py','discover','--timeout','1'],capture_output=True,text=True,env={'PATH':'/usr/bin:/bin','HOME':'$HOME','SWITCHBOARD_STATE':'$WBAD'});assert r.returncode==1 and 'Traceback' not in r.stderr and json.loads(r.stdout)['error'], r"
 eq "devservers.py start of a name pm2 lacks fails" 1 "$(rc python3 Resources/lib/devservers.py start no-such-server-xyz)"
 check "dbservices.py list emits services" python3 -c "import json,subprocess;d=json.loads(subprocess.run(['python3','Resources/lib/dbservices.py','list'],capture_output=True,text=True,timeout=30).stdout);assert isinstance(d['services'],list)"
 eq "dbservices.py refuses a label outside homebrew.mxcl" 1 "$(rc python3 Resources/lib/dbservices.py stop com.example.not-a-db)"
@@ -150,7 +168,11 @@ eq "a saved device lands in the state folder" "Test box" \
 printf '[{"name": "Kept box", "mac": "02:00' > "$SWITCHBOARD_STATE/wol-targets.json"
 eq "an add refuses to overwrite an unreadable device file" 1 "$(rc python3 Resources/lib/wol.py add "New box" 02:00:00:00:00:03)"
 eq "and the unreadable file is left as it was" '[{"name": "Kept box", "mac": "02:00' "$(cat "$SWITCHBOARD_STATE/wol-targets.json")"
+check "a device list read says the file is unreadable instead of showing no saved devices" python3 -c "import json,subprocess;r=subprocess.run(['python3','Resources/lib/wol.py','list'],capture_output=True,text=True);d=json.loads(r.stdout);assert r.returncode==1 and d['ok'] is False and 'could not be read' in d['error'], r"
 rm -f "$SWITCHBOARD_STATE/wol-targets.json"
+mkdir -p "$WORK/ro-state"; chmod 555 "$WORK/ro-state"
+check "wol.py add answers {ok: false} with a sentence when the state folder cannot be written" python3 -c "import json,subprocess;r=subprocess.run(['python3','Resources/lib/wol.py','add','Box','02:00:00:00:00:09'],capture_output=True,text=True,env={'PATH':'/usr/bin:/bin','HOME':'$HOME','SWITCHBOARD_STATE':'$WORK/ro-state'});d=json.loads(r.stdout);assert r.returncode==1 and d['ok'] is False and 'Traceback' not in r.stderr, r"
+chmod 755 "$WORK/ro-state"
 
 section "state folder adoption (state.py)"
 FAKE="$WORK/fakehome"

@@ -255,20 +255,33 @@ enum Settings {
     /// sibling temp file, and swaps atomically, so an interrupted write cannot
     /// leave a half-file where the config belongs. A timestamped backup is kept
     /// because this is the user's global config, not ours.
+    /// Why the last write was refused, in words, for the row that asked. Nil after a good write.
+    static var lastError: String?
+
     @discardableResult
     static func write(key: String, value: Any) -> Bool {
+        lastError = nil
         let path = SwitchboardPaths.settingsJSON
         // Never invent a config: refuse when the file is absent or unreadable.
         // A valid but empty object is a real config and may be written to, which
         // an isEmpty check alone could not tell apart.
-        guard FileManager.default.contents(atPath: path) != nil else { return false }
-        guard var obj = readObject() else { return false }
+        guard FileManager.default.contents(atPath: path) != nil else {
+            lastError = "Claude's settings.json is missing, so nothing was changed."
+            return false
+        }
+        guard var obj = readObject() else {
+            lastError = "Claude's settings.json is not valid JSON, so it was left alone."
+            return false
+        }
         obj[key] = value
         guard let out = try? JSONSerialization.data(withJSONObject: obj,
                                                     options: [.prettyPrinted, .sortedKeys])
-        else { return false }
+        else { lastError = "That value could not be written to settings.json."; return false }
         let tmp = path + ".tmp-\(getpid())"
-        guard (try? out.write(to: URL(fileURLWithPath: tmp), options: .atomic)) != nil else { return false }
+        guard (try? out.write(to: URL(fileURLWithPath: tmp), options: .atomic)) != nil else {
+            lastError = "settings.json could not be written; the disk may be full or read-only."
+            return false
+        }
 
         // Back up only once the replacement is staged and about to happen, so a
         // write that fails leaves no backup behind.
@@ -282,6 +295,7 @@ enum Settings {
         } catch {
             try? FileManager.default.removeItem(atPath: tmp)
             try? FileManager.default.removeItem(atPath: backup)
+            lastError = "settings.json could not be replaced; it may be locked or read-only."
             return false
         }
     }
@@ -333,7 +347,10 @@ enum ContextSwitches {
     /// entry is written back unchanged.
     @discardableResult
     static func setBrowserTools(on: Bool) -> Bool {
-        guard var plugins = Settings.read()["enabledPlugins"] as? [String: Any] else { return false }
+        guard var plugins = Settings.read()["enabledPlugins"] as? [String: Any] else {
+            Settings.lastError = "No browser plugins are listed in settings.json."
+            return false
+        }
         for p in browserPlugins where plugins[p] != nil { plugins[p] = on }
         return Settings.write(key: "enabledPlugins", value: plugins)
     }
@@ -402,10 +419,13 @@ enum Services {
         return nil
     }
 
-    @discardableResult
-    static func pm2(_ verb: String, _ name: String) -> Bool {
-        _ = shell("/bin/zsh", ["-lc", "pm2 \(verb) \(name)"])
-        return true
+    /// A pm2 start or stop through the login shell. A cold pm2 daemon takes
+    /// seconds, so it gets the same cap as the Kanban switch. Nil when it worked,
+    /// otherwise the reason in plain words.
+    static func pm2(_ verb: String, _ name: String) -> String? {
+        let r = run("/bin/zsh", ["-lc", "pm2 \(verb) \(name) 2>&1"], timeout: 20)
+        if r.timedOut || !r.launched { return r.failure }
+        return r.ok ? nil : plainErrorText(r.out.isEmpty ? r.err : r.out, fallback: "pm2 could not \(verb) \(name)")
     }
 
     /// A command's output only, for callers where an empty answer and a failed
@@ -480,12 +500,14 @@ struct ShellResult {
     var ok: Bool { launched && !timedOut && status == 0 }
 
     var failure: String? {
-        if !launched { return "\(name) could not be started" }
-        if timedOut { return "\(name) took longer than \(Int(timeout)) s and was stopped" }
+        let who = HelperNames.title(name)
+        if !launched { return "\(who) could not be started" }
+        if timedOut { return "\(who) took longer than \(Int(timeout)) s and was stopped" }
         guard let s = status, s != 0 else { return nil }
         let line = err.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
             .last { !$0.isEmpty && !$0.hasPrefix("at ") && !$0.hasPrefix("File \"") }
-        return line.map { "\(name): \($0)" } ?? "\(name) stopped with an error (exit \(s))"
+        // The last line of a traceback is the one that says what broke.
+        return line.map { "\(who): \(plainErrorText($0))" } ?? "\(who) stopped without saying why"
     }
 
     /// The name a person would recognise: the script for `env python3 x.py`,
@@ -562,9 +584,13 @@ enum BoardSync {
     }
 
     @discardableResult
-    static func set(_ on: Bool) -> Bool {
-        guard FileManager.default.fileExists(atPath: cli) else { return false }
-        _ = Services.shell("/bin/bash", [cli, on ? "enable" : "disable"])
-        return true
+    static func set(_ on: Bool) -> Bool { change(on) == nil }
+
+    /// Nil when the sync tool did it, otherwise why it did not.
+    static func change(_ on: Bool) -> String? {
+        guard FileManager.default.fileExists(atPath: cli) else { return "The board sync tool is not installed." }
+        let r = Services.run("/bin/bash", [cli, on ? "enable" : "disable"], timeout: 10)
+        if r.timedOut || !r.launched { return r.failure }
+        return r.ok ? nil : plainErrorText(r.err.isEmpty ? r.out : r.err, fallback: "Board sync could not be switched \(on ? "on" : "off").")
     }
 }

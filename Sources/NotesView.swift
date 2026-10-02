@@ -113,7 +113,9 @@ struct NotesTabView: View {
             if let e = notes.error {
                 ReadingStatus(state: .failed(e)).padding(.horizontal, 4)
             }
-            if notes.live.isEmpty && notes.expired.isEmpty {
+            if !notes.loaded {
+                ReadingStatus(state: .loading).padding(.horizontal, 4)
+            } else if notes.live.isEmpty && notes.expired.isEmpty && notes.error == nil {
                 Text("No notes yet. Type one above and press Enter.").font(PT.caption).foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
             }

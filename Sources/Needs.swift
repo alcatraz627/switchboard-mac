@@ -13,7 +13,7 @@ import AppKit
 import SwiftUI
 
 struct NeedItem: Identifiable {
-    enum Kind { case push, ask, armedApproval }
+    enum Kind { case push, ask, armedApproval, unreadable }
     let id: String            // the file that holds it
     let kind: Kind
     let title: String
@@ -58,10 +58,17 @@ enum NeedsYou {
                 ?? ((try? fm.attributesOfItem(atPath: path)[.creationDate]) as? Date)
         }
         var out: [NeedItem] = []
+        // A hold file that cannot be read still means a session may be waiting; say so rather than show nothing.
+        func unreadable(_ path: String, _ sid: String) -> NeedItem {
+            let name = (path as NSString).lastPathComponent
+            return NeedItem(id: path, kind: .unreadable, title: "A hold in \(name) could not be read",
+                            sessionID: sid, sessionDir: live[sid], since: since([:], path), approveLine: nil, files: [path],
+                            details: [("File", path), ("Session", sid)])
+        }
 
         for f in (try? fm.contentsOfDirectory(atPath: root)) ?? [] where f.hasPrefix(".push-nonce-") {
             let path = root + "/" + f, sid = String(f.dropFirst(".push-nonce-".count))
-            guard let o = json(path), let nonce = o["nonce"] as? String else { continue }
+            guard let o = json(path), let nonce = o["nonce"] as? String else { out.append(unreadable(path, sid)); continue }
             let repo = ((o["target"] as? String) ?? "?") as NSString
             var item = NeedItem(id: path, kind: .push,
                                 title: "Push \(repo.lastPathComponent)",
@@ -80,7 +87,9 @@ enum NeedsYou {
         let askDir = root + "/.policy-ask"
         for f in (try? fm.contentsOfDirectory(atPath: askDir)) ?? [] where f.hasSuffix(".nonce") {
             let path = askDir + "/" + f
-            guard let o = json(path), let nonce = o["nonce"] as? String, let key = o["key"] as? String else { continue }
+            guard let o = json(path), let nonce = o["nonce"] as? String, let key = o["key"] as? String else {
+                out.append(unreadable(path, f.components(separatedBy: "--").first ?? "")); continue
+            }
             // Named <session>--<key>.nonce by guard-policy.sh.
             let sid = f.components(separatedBy: "--").first ?? ""
             let base = String(path.dropLast(".nonce".count))
@@ -213,6 +222,7 @@ enum NeedsYou {
                     ? "approved\(item.approvedAt.map { " " + age($0) } ?? "") · the session was asked to run it; if it is idle, it runs on your next message to it"
                     : where_ + when
             case .armedApproval: note = "typed, never used; the session ended" + when
+            case .unreadable: note = "the file is damaged; an agent may be waiting. Cancel removes it, then ask the session to try again" + when
             }
             var r = SystemRow(label: item.title,
                               state: item.approved ? .ok : item.sessionDir == nil ? .off : .on(menuYellow), note: note,
@@ -315,6 +325,15 @@ func probeApprove() -> String {
               && !fm.fileExists(atPath: dir + "/.policy-ask/" + sid + "--slack.post.approved"))
     }
     check("nothing is left waiting after both cancels", NeedsYou.items().isEmpty)
+
+    // A damaged hold file still shows as a row; silence would read as "nothing waits".
+    fm.createFile(atPath: dir + "/.push-nonce-damaged", contents: Data("{not json".utf8))
+    let damaged = NeedsYou.items()
+    check("a hold file that cannot be read is listed, not skipped",
+          damaged.count == 1 && damaged[0].kind == .unreadable && damaged[0].title.contains(".push-nonce-damaged"),
+          damaged.map(\.title).joined(separator: ", "))
+    check("and it can be cancelled like any other", damaged.first.map { NeedsYou.cancel($0) == nil } ?? false
+          && !fm.fileExists(atPath: dir + "/.push-nonce-damaged"))
 
     // The Approvals tab's sections, and Clear all carrying on past a failure.
     let live = NeedItem(id: "live", kind: .push, title: "Push a", sessionID: "s1", sessionDir: "/tmp",

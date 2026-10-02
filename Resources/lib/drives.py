@@ -26,7 +26,11 @@ def info(target):
 
 def volumes():
     out = []
-    for name in sorted(os.listdir("/Volumes")):
+    try:
+        names = sorted(os.listdir("/Volumes"))
+    except OSError as e:
+        raise RuntimeError(f"The mounted volumes could not be listed: {e.strerror or e}")
+    for name in names:
         path = os.path.join("/Volumes", name)
         # The boot volume shows up here as a symlink to /.
         if os.path.islink(path) or not os.path.ismount(path):
@@ -56,7 +60,11 @@ def main():
     a = sys.argv[1:]
     cmd = a[0] if a else "help"
     if cmd == "list":
-        print(json.dumps(volumes()))
+        try:
+            print(json.dumps(volumes()))
+        except RuntimeError as e:
+            print(str(e), file=sys.stderr)
+            sys.exit(2)
     elif cmd == "eject" and len(a) == 2:
         disk = a[1]
         # Only a whole external disk the list itself reports, never the boot disk.
@@ -85,4 +93,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        # A crash answers in the helper's own shape, never a traceback.
+        print(json.dumps({"ok": False, "error": f"Something went wrong with the drives: {e}"}))
+        sys.exit(1)

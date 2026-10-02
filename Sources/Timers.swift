@@ -26,11 +26,11 @@ struct SBTimer: Codable, Identifiable, Equatable {
 let timerColors: [(String, Color)] = [
     ("blue", Color(nsColor: .systemBlue)), ("indigo", Color(nsColor: .systemIndigo)),
     ("purple", Color(nsColor: .systemPurple)), ("pink", Color(nsColor: .systemPink)),
-    ("teal", Color(nsColor: .systemTeal)), ("cyan", Color(nsColor: .systemCyan)),
+    ("teal", Color(nsColor: .systemTeal)), ("gray", Color(nsColor: .systemGray)),
     ("mint", Color(nsColor: .systemMint)), ("brown", Color(nsColor: .systemBrown)),
 ]
 /// Names saved before the set changed, and where each one lands now.
-let legacyTagColors = ["red": "pink", "orange": "brown", "yellow": "mint", "green": "teal"]
+let legacyTagColors = ["red": "pink", "orange": "brown", "yellow": "mint", "green": "teal", "cyan": "teal"]
 /// A saved colour name as one of the eight, or nil when it is none of them.
 func tagColorName(_ name: String) -> String? {
     let n = legacyTagColors[name] ?? name
@@ -54,11 +54,20 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
     @Published var notificationsOff = false
     private var tick: Timer?
     private var ring: Timer?
+    /// Set when the saved timers could not be read and the list started empty.
+    @Published var loadError: String?
 
     override init() {
         super.init()
-        if let d = UserDefaults.standard.data(forKey: Self.key), let t = try? JSONDecoder().decode([SBTimer].self, from: d) {
-            timers = t
+        if let d = UserDefaults.standard.data(forKey: Self.key) {
+            if let t = try? JSONDecoder().decode([SBTimer].self, from: d) {
+                timers = t
+            } else {
+                // Keep the damaged copy aside: the next save would otherwise overwrite it for good.
+                UserDefaults.standard.set(d, forKey: Self.key + ".unreadable")
+                loadError = "The saved timers could not be read, so the list started empty."
+                dwarn("timers: saved list could not be decoded; kept under \(Self.key).unreadable")
+            }
         }
         if Bundle.main.bundleIdentifier != nil {
             UNUserNotificationCenter.current().delegate = self
@@ -203,6 +212,9 @@ struct TimersTabView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PT.gap) {
+            if let e = timers.loadError {
+                RowFailure(message: e, dismiss: { timers.loadError = nil })
+            }
             // New timer: a name, a colour, then when. Enter in the name opens "when".
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {

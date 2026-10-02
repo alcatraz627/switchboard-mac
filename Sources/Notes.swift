@@ -47,6 +47,20 @@ func probeNotes() -> String {
     s.delete(c)
     check("delete removes the file", !FileManager.default.fileExists(atPath: c.path) && !s.notes.contains { $0.id == c.id })
 
+    // A folder chosen in Settings that has gone missing is reported, never quietly re-created empty.
+    let savedFolder = UserDefaults.standard.string(forKey: NotesStore.folderKey)
+    let gone = NSTemporaryDirectory() + "sb-notes-missing-\(getpid())"
+    UserDefaults.standard.set(gone, forKey: NotesStore.folderKey)
+    let lost = NotesStore()
+    lost.load()
+    check("a missing chosen folder is said to be missing and not created",
+          lost.loaded && lost.notes.isEmpty && lost.error?.contains("is missing") == true && !FileManager.default.fileExists(atPath: gone),
+          lost.error ?? "nil")
+    check("saving into it fails with that sentence and still creates nothing",
+          lost.add("lost note") == nil && lost.error?.contains("is missing") == true && !FileManager.default.fileExists(atPath: gone))
+    if let b = savedFolder { UserDefaults.standard.set(b, forKey: NotesStore.folderKey) } else { UserDefaults.standard.removeObject(forKey: NotesStore.folderKey) }
+    check("a store that has not read yet is not loaded", !NotesStore().loaded)
+
     // Reminders through a stand-in: the permission dialog stays up until answer() runs.
     NotesStore.remindersOff = false
     var status = EKAuthorizationStatus.notDetermined
@@ -57,7 +71,7 @@ func probeNotes() -> String {
                                   save: { n in
                                       if saveFails { throw NSError(domain: "probe", code: 1, userInfo: [NSLocalizedDescriptionKey: "calendar is read-only"]) }
                                       saved.append(n); return "rem-\(saved.count)" },
-                                  remove: { _ in })
+                                  remove: { _ in nil })
     func pump() { RunLoop.current.run(until: Date().addingTimeInterval(0.1)) }
     var r = s.add("Call the bank")!
     r.remindAt = Date().addingTimeInterval(3600)
@@ -87,6 +101,8 @@ func probeNotes() -> String {
     let ud = UserDefaults.standard
     let chosenBefore = ud.string(forKey: NotesStore.folderKey)
     let own = AppPaths.stateDir + "/own-notes"
+    // The owner's own folder exists already; the store never creates a chosen one.
+    try? FileManager.default.createDirectory(atPath: own, withIntermediateDirectories: true)
     ud.set(own, forKey: NotesStore.folderKey)
     try? "# Shopping\n\n- milk\n- eggs\n".write(toFile: NotesStore.dir + "/shopping.md", atomically: true, encoding: .utf8)
     s.load()
@@ -164,6 +180,8 @@ final class NotesStore: ObservableObject {
 
     @Published private(set) var notes: [Note] = []
     @Published var error: String?
+    /// True once the folder has been read, so an empty list can say "No notes yet" and not "still reading".
+    @Published private(set) var loaded = false
 
     /// Where notes are kept: the folder chosen in Settings, or the state folder's notes.
     static let folderKey = "switchboard.notesFolder"
@@ -172,10 +190,18 @@ final class NotesStore: ObservableObject {
         let chosen = UserDefaults.standard.string(forKey: folderKey)
         let d = (chosen?.isEmpty == false ? chosen! : defaultDir)
         // Rows read a note's path on every redraw: a stat, not a create, when it exists.
-        if !FileManager.default.fileExists(atPath: d) {
+        // Only the default folder is ever created: a folder the owner chose that has gone
+        // missing (an unplugged drive) must not be quietly replaced by an empty one.
+        if d == defaultDir && !FileManager.default.fileExists(atPath: d) {
             try? FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true)
         }
         return d
+    }
+    /// A sentence when the folder chosen in Settings is not there, else nil.
+    static var missingFolder: String? {
+        let d = dir
+        guard d != defaultDir, !FileManager.default.fileExists(atPath: d) else { return nil }
+        return "The notes folder \(abbreviateHome(d)) is missing. Is its drive connected? Pick another folder in Settings."
     }
     /// The saved order lives beside the default notes, but never inside a
     /// folder of the owner's own that was chosen in Settings.
@@ -192,22 +218,40 @@ final class NotesStore: ObservableObject {
     func loadInBackground() {
         DispatchQueue.global(qos: .userInitiated).async {
             let read = Self.readAll()
-            DispatchQueue.main.async { self.notes = read }
+            DispatchQueue.main.async { self.apply(read) }
         }
     }
 
-    func load() { notes = Self.readAll() }
+    func load() { apply(Self.readAll()) }
 
-    private static func readAll() -> [Note] {
+    /// Take a finished read; a problem with the folder shows as the tab's error line.
+    private func apply(_ r: (notes: [Note], problem: String?)) {
+        notes = r.notes
+        loaded = true
+        // A read problem clears itself when the next read is clean (a drive plugged back in).
+        if let p = r.problem { readProblem = p; error = p }
+        else if let old = readProblem { readProblem = nil; if error == old { error = nil } }
+    }
+    private var readProblem: String?
+    private static let readProblemTag = "Notes could not be read: "
+
+    private static func readAll() -> (notes: [Note], problem: String?) {
+        if let gone = missingFolder { return ([], gone) }
         let fm = FileManager.default
-        let files = ((try? fm.contentsOfDirectory(atPath: Self.dir)) ?? []).filter { $0.hasSuffix(".md") }
+        let names: [String]
+        do { names = try fm.contentsOfDirectory(atPath: Self.dir) } catch {
+            return ([], readProblemTag + "the folder could not be listed (\(error.localizedDescription)).")
+        }
+        let files = names.filter { $0.hasSuffix(".md") }
+        var skipped = 0
         let read = files.compactMap { f -> Note? in
-            guard let text = try? String(contentsOfFile: Self.dir + "/" + f, encoding: .utf8) else { return nil }
+            guard let text = try? String(contentsOfFile: Self.dir + "/" + f, encoding: .utf8) else { skipped += 1; return nil }
             return Self.parse(id: String(f.dropLast(3)), text)
         }
         let order = (fm.contents(atPath: Self.orderPath).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String] }) ?? []
         // Newest first where the saved order has no place for a note yet.
-        return applyOrder(read.sorted { $0.created > $1.created }, order)
+        let problem = skipped == 0 ? nil : readProblemTag + (skipped == 1 ? "1 file is not readable text." : "\(skipped) files are not readable text.")
+        return (applyOrder(read.sorted { $0.created > $1.created }, order), problem)
     }
 
     /// Live notes in the owner's order, then expired ones.
@@ -258,12 +302,14 @@ final class NotesStore: ObservableObject {
     func delete(_ n: Note) {
         var gone = n
         gone.remindAt = nil
-        _ = syncReminder(&gone)
+        let reminderProblem = syncReminder(&gone)
         do { try FileManager.default.removeItem(atPath: n.path) } catch {
             self.error = "\(n.title) could not be removed: \(error.localizedDescription)"; return
         }
         notes.removeAll { $0.id == n.id }
         saveOrder()
+        // The note is gone either way; a reminder left behind would fire for nothing.
+        if let p = reminderProblem { self.error = "The note was deleted, but its reminder was not removed: \(p)" }
     }
 
     func move(_ dragged: String, to target: String) {
@@ -276,6 +322,7 @@ final class NotesStore: ObservableObject {
     }
 
     private func write(_ n: Note) -> Bool {
+        if let gone = Self.missingFolder { error = gone; return false }
         do {
             try Self.render(n).write(toFile: n.path, atomically: true, encoding: .utf8)
             error = nil
@@ -356,7 +403,9 @@ final class NotesStore: ObservableObject {
     private func syncReminder(_ n: inout Note) -> String? {
         guard !Self.remindersOff else { return nil }
         guard n.remindAt != nil else {
-            if let id = n.reminderID { reminders.remove(id) }
+            guard let id = n.reminderID else { return nil }
+            // Keep the id when removal fails, so the reminder can still be found later.
+            if let why = reminders.remove(id) { return "the reminder could not be removed: \(why)" }
             n.reminderID = nil
             return nil
         }
@@ -396,7 +445,8 @@ struct ReminderBackend {
     var requestAccess: (@escaping (Bool) -> Void) -> Void
     /// Adds or moves the note's one reminder; returns its identifier.
     var save: (Note) throws -> String
-    var remove: (String) -> Void
+    /// Removes a reminder; returns why it could not, or nil (a reminder already gone counts as removed).
+    var remove: (String) -> String?
 
     static func system(_ events: EKEventStore) -> ReminderBackend {
         func existing(_ id: String?) -> EKReminder? { id.flatMap { events.calendarItem(withIdentifier: $0) as? EKReminder } }
@@ -418,6 +468,9 @@ struct ReminderBackend {
                 try events.save(r, commit: true)
                 return r.calendarItemIdentifier
             },
-            remove: { id in if let r = existing(id) { try? events.remove(r, commit: true) } })
+            remove: { id in
+                guard let r = existing(id) else { return nil }
+                do { try events.remove(r, commit: true); return nil } catch { return error.localizedDescription }
+            })
     }
 }

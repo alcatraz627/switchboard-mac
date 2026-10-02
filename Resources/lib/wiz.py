@@ -190,7 +190,12 @@ def discover(timeout):
                           "on": False, "dimming": None, "temp": None, "scene": None,
                           "scene_name": None, "rgb": None, "speed": None})
     # Named bulbs first, then by address, so the list order is stable.
-    bulbs.sort(key=lambda b: (b["name"] == "", b["name"].lower(), tuple(int(x) for x in b["ip"].split("."))))
+    def ip_key(ip):
+        try:
+            return tuple(int(x) for x in ip.split("."))
+        except (ValueError, AttributeError):
+            return (999,)   # a damaged saved address sorts last rather than ending the scan
+    bulbs.sort(key=lambda b: (b["name"] == "", b["name"].lower(), ip_key(b["ip"])))
     return bulbs
 
 
@@ -295,3 +300,5 @@ if __name__ == "__main__":
         # A save that could not be written (disk full, permissions): say so in
         # the helper's own JSON shape instead of a traceback.
         out({"error": f"could not save: {e.strerror or e}"}, 1)
+    except Exception as e:
+        out({"error": f"Something went wrong with the bulbs: {e}"}, 1)

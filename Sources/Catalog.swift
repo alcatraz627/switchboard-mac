@@ -36,16 +36,53 @@ enum Catalog {
     /// One section: its entries as rows, or a failed status when the reader
     /// threw, so a broken source never reads as an empty one.
     static func section(_ title: String, _ read: () throws -> [CatalogEntry]) -> SystemGroup {
+        Thread.current.threadDictionary[skipKey] = nil
         do {
             let entries = try read()
             let rows = entries.map { row($0, key: title) }
+            // Files the reader had to leave out are said so, since a vanished row looks like one never made.
+            let skipped = Thread.current.threadDictionary[skipKey] as? [String] ?? []
             return SystemGroup(title: title, rows: rows,
-                               status: rows.isEmpty ? .unavailable("Nothing here yet.") : nil)
+                               status: !skipped.isEmpty ? .stale(Date(), skippedText(skipped))
+                                   : rows.isEmpty ? .unavailable("Nothing here yet.") : nil)
         } catch let e as CatalogError {
             return SystemGroup(title: title, rows: [], status: .failed(e.message))
         } catch {
             return SystemGroup(title: title, rows: [], status: .failed(error.localizedDescription))
         }
+    }
+
+    // Readers call these while a section reads; the list lives on the reading thread,
+    // so tabs reading at the same time never mix their skipped files.
+    private static let skipKey = "switchboard.catalog.skipped"
+
+    /// Note something the reader had to leave out because it could not be read.
+    static func skip(_ label: String) {
+        let now = skippedNow
+        if !now.contains(label) { Thread.current.threadDictionary[skipKey] = now + [label] }
+    }
+
+    /// What this section's reader has left out so far.
+    static var skippedNow: [String] { Thread.current.threadDictionary[skipKey] as? [String] ?? [] }
+
+    /// A file's text, or nil. A file that exists but cannot be read is noted as skipped.
+    static func readText(_ path: String) -> String? {
+        if let t = try? String(contentsOfFile: path, encoding: .utf8) { return t }
+        if FileManager.default.fileExists(atPath: path) { skip(abbreviateHome(path)) }
+        return nil
+    }
+
+    /// A JSON object file, or nil. A file that exists but is not a JSON object is noted as skipped.
+    static func readObject(_ path: String) -> [String: Any]? {
+        guard let d = FileManager.default.contents(atPath: path) else { return nil }
+        if let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { return o }
+        skip(abbreviateHome(path) + " is not valid JSON")
+        return nil
+    }
+
+    static func skippedText(_ labels: [String]) -> String {
+        let shown = labels.prefix(3).joined(separator: ", ") + (labels.count > 3 ? " and \(labels.count - 3) more" : "")
+        return "\(labels.count == 1 ? "1 item was" : "\(labels.count) items were") left out because it could not be read: \(shown)"
     }
 
     /// A tab's sections, skipping those hidden in Settings without reading them.
@@ -274,6 +311,24 @@ func probeCatalog() -> String {
     let found = Catalog.filter([many], "item 1")
     check("search keeps every match and drops the rest", found.first?.rows.count == 11, "\(found.first?.rows.count ?? 0)")
     check("a section with no match drops out while searching", Catalog.filter([many, empty], "nothing-matches").isEmpty)
+
+    // A file the reader cannot read is named in the section's status instead of vanishing.
+    let unreadable = dir + "/unreadable.md", readable = dir + "/readable.md", brokenJSON = dir + "/broken.json"
+    fm.createFile(atPath: unreadable, contents: Data([0xFF, 0xFE, 0x00, 0xC3, 0x28]))
+    fm.createFile(atPath: readable, contents: Data("fine".utf8))
+    fm.createFile(atPath: brokenJSON, contents: Data("{not json".utf8))
+    let mixed = Catalog.section("Mixed") {
+        _ = Catalog.readObject(brokenJSON)
+        return [unreadable, readable].compactMap { p in Catalog.readText(p).map { CatalogEntry(name: $0, summary: "") } }
+    }
+    if case .stale(_, let why)? = mixed.status {
+        check("a file that cannot be read is named beside the rows that did", mixed.rows.count == 1 && why.contains("unreadable.md") && why.contains("broken.json"), why)
+    } else {
+        check("a file that cannot be read is named beside the rows that did", false, "\(String(describing: mixed.status))")
+    }
+    let clean = Catalog.section("Clean") { [readable].compactMap { p in Catalog.readText(p).map { CatalogEntry(name: $0, summary: "") } } }
+    check("a section whose files all read has no skipped note", clean.status == nil, "\(String(describing: clean.status))")
+    check("a file that is simply absent is not a skipped one", Catalog.readText(dir + "/absent.md") == nil && Catalog.skippedNow.isEmpty)
 
     lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
     return lines.joined(separator: "\n")

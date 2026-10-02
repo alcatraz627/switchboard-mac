@@ -147,7 +147,14 @@ final class ControlsStore: NSObject, ObservableObject, CLLocationManagerDelegate
     /// What did not stick, by control, in plain words.
     @Published var failures: [String: String] = [:]
     @Published var busy: Set<String> = []
+    /// When each busy control started waiting, so its spinner can wait a beat before showing.
+    private(set) var busySince: [String: Date] = [:]
+    /// True once the first read has finished, so an empty control means "none" and not "not read yet".
+    @Published private(set) var loaded = false
     private var location: CLLocationManager?
+
+    private func markBusy(_ key: String) { busySince[key] = Date(); busy.insert(key) }
+    private func clearBusy(_ key: String) { busySince[key] = nil; busy.remove(key) }
 
     /// Read everything. Paired Bluetooth devices ask macOS for Bluetooth
     /// access the first time, so they are read only when the tab is shown.
@@ -163,6 +170,7 @@ final class ControlsStore: NSObject, ObservableObject, CLLocationManagerDelegate
         locationAllowed = [.authorizedAlways, .authorized].contains(CLLocationManager().authorizationStatus)
         btOn = btGetPower() != 0
         if devices, !Visibility.sectionHidden("controls", "Bluetooth") { loadBluetoothDevices() }
+        loaded = true
     }
 
     func loadBluetoothDevices() {
@@ -206,6 +214,7 @@ final class ControlsStore: NSObject, ObservableObject, CLLocationManagerDelegate
 
     func setWiFi(_ on: Bool) {
         failures["wifi"] = nil
+        guard !busy.contains("wifi") else { return }
         guard let wifi = CWWiFiClient.shared().interface() else { return fail("wifi", "This Mac has no Wi-Fi interface to switch.") }
         do {
             try wifi.setPower(on)
@@ -213,7 +222,10 @@ final class ControlsStore: NSObject, ObservableObject, CLLocationManagerDelegate
             return fail("wifi", "Wi-Fi did not turn \(on ? "on" : "off"): \(error.localizedDescription)")
         }
         // The radio reports its new state a moment after it switches; read it back to know it stuck.
+        // The switch stays busy until then, so a second flip cannot land mid-change.
+        markBusy("wifi")
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            self.clearBusy("wifi")
             self.load(devices: false)
             if self.wifiOn != on { self.fail("wifi", "Wi-Fi is still \(on ? "off" : "on").") }
         }
@@ -233,9 +245,12 @@ final class ControlsStore: NSObject, ObservableObject, CLLocationManagerDelegate
 
     func setBluetooth(_ on: Bool) {
         failures["bluetooth"] = nil
+        guard !busy.contains("bluetooth") else { return }
         btSetPower(on ? 1 : 0)
         // The controller takes a moment; read it back to know it stuck.
+        markBusy("bluetooth")
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            self.clearBusy("bluetooth")
             self.btOn = btGetPower() != 0
             if self.btOn != on { self.fail("bluetooth", "Bluetooth is still \(on ? "off" : "on").") }
             if self.btListed { self.loadBluetoothDevices() }
@@ -247,11 +262,11 @@ final class ControlsStore: NSObject, ObservableObject, CLLocationManagerDelegate
         guard let dev = IOBluetoothDevice(addressString: d.id) else {
             return fail(d.id, "\(d.name) is no longer paired with this Mac.")
         }
-        busy.insert(d.id)
+        markBusy(d.id)
         DispatchQueue.global(qos: .userInitiated).async {
             let r = d.connected ? dev.closeConnection() : dev.openConnection()
             DispatchQueue.main.async {
-                self.busy.remove(d.id)
+                self.clearBusy(d.id)
                 if r != kIOReturnSuccess {
                     self.fail(d.id, "\(d.name) did not \(d.connected ? "disconnect" : "connect"). Is it on and nearby?")
                 }
@@ -292,6 +307,9 @@ struct ControlsTabView: View {
                 }
                 failure("output"); failure("volume")
             }
+            if controls.brightness == nil && controls.loaded {
+                section("Display") { unavailable("The built-in display's brightness is not available (no built-in screen, or the lid is closed).") }
+            }
             if let b = controls.brightness {
                 section("Display") {
                     row(icon: "sun.max.fill", title: "Built-in display", caption: nil) { EmptyView() }
@@ -300,6 +318,9 @@ struct ControlsTabView: View {
                            set: { brightDraft = $0; controls.setBrightness($0) }, commit: { _ in brightDraft = nil })
                     failure("brightness")
                 }
+            }
+            if controls.wifiOn == nil && controls.loaded {
+                section("Wi-Fi") { unavailable("This Mac has no Wi-Fi interface, or macOS would not report it.") }
             }
             if let on = controls.wifiOn {
                 section("Wi-Fi") {
@@ -310,10 +331,12 @@ struct ControlsTabView: View {
                             Button("Show name") { controls.askLocation() }.buttonStyle(.link).font(SBStyle.caption)
                                 .help("macOS shows the network name only to apps with Location access")
                         }
+                        if controls.busy.contains("wifi") { PendingMark(since: controls.busySince["wifi"] ?? Date()) }
                         Toggle("", isOn: Binding(get: { on }, set: { new in
                             if !new && !confirm("Turn Wi-Fi off?", "Everything on this Mac that uses the network loses it, including remote sessions.") { return }
                             controls.setWiFi(new)
                         })).toggleStyle(.switch).controlSize(.small).labelsHidden()
+                            .disabled(controls.busy.contains("wifi"))
                     }
                     failure("wifi")
                 }
@@ -322,18 +345,25 @@ struct ControlsTabView: View {
                 section("Bluetooth") {
                     row(icon: "dot.radiowaves.left.and.right", title: "Bluetooth",
                         caption: !on ? "off" : controls.btListed ? "\(controls.btDevices.filter(\.connected).count) connected" : "on") {
+                        if controls.busy.contains("bluetooth") { PendingMark(since: controls.busySince["bluetooth"] ?? Date()) }
                         Toggle("", isOn: Binding(get: { on }, set: { new in
                             if !new && !confirm("Turn Bluetooth off?", "A Bluetooth keyboard, mouse or headphones disconnect at once.") { return }
                             controls.setBluetooth(new)
                         })).toggleStyle(.switch).controlSize(.small).labelsHidden()
+                            .disabled(controls.busy.contains("bluetooth"))
                     }
                     failure("bluetooth")
+                    if on && controls.btListed && controls.btDevices.isEmpty {
+                        Divider().padding(.leading, SBStyle.rowH + 26)
+                        row(icon: "questionmark.circle", title: "No devices shown",
+                            caption: "No paired devices, or Bluetooth access is off for this app in System Settings.", indent: 14) { EmptyView() }
+                    }
                     if on {
                         ForEach(controls.btDevices) { d in
                             Divider().padding(.leading, SBStyle.rowH + 26)
                             row(icon: d.connected ? "checkmark.circle.fill" : "circle", title: d.name,
                                 caption: d.connected ? "connected" : "paired", indent: 14) {
-                                if controls.busy.contains(d.id) { PendingMark(since: Date()) }
+                                if controls.busy.contains(d.id) { PendingMark(since: controls.busySince[d.id] ?? Date()) }
                                 Button { controls.toggleDevice(d) } label: {
                                     Image(systemName: d.connected ? "bolt.horizontal.circle.fill" : "bolt.horizontal.circle")
                                         .font(.system(size: 12)).frame(width: 18, height: 16)
@@ -412,6 +442,10 @@ struct ControlsTabView: View {
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
         .help("Choose the output")
+    }
+
+    private func unavailable(_ why: String) -> some View {
+        ReadingStatus(state: .unavailable(why)).padding(.horizontal, SBStyle.rowH).padding(.vertical, SBStyle.rowV + 2)
     }
 
     @ViewBuilder private func failure(_ key: String) -> some View {

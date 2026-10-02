@@ -554,31 +554,33 @@ struct QuickCard: View {
             }
             HStack(spacing: 8) {
                 if let on = controls.wifiOn {
-                    switchItem(on ? "wifi" : "wifi.slash", "Wi-Fi", on) { new in
+                    switchItem(on ? "wifi" : "wifi.slash", "Wi-Fi", on, busy: controls.busy.contains("wifi")) { new in
                         if !new && !confirmOff("Turn Wi-Fi off?", "Everything on this Mac that uses the network loses it, including remote sessions.") { return }
                         controls.setWiFi(new)
                     }
                 }
                 Spacer(minLength: 6)
                 if let on = controls.btOn {
-                    switchItem("dot.radiowaves.left.and.right", "Bluetooth", on) { new in
+                    switchItem("dot.radiowaves.left.and.right", "Bluetooth", on, busy: controls.busy.contains("bluetooth")) { new in
                         if !new && !confirmOff("Turn Bluetooth off?", "A Bluetooth keyboard, mouse or headphones disconnect at once.") { return }
                         controls.setBluetooth(new)
                     }
                 }
             }
-            if controls.volume == nil && controls.brightness == nil && controls.wifiOn == nil {
-                empty("Reading the controls…")
+            if controls.volume == nil && controls.brightness == nil && controls.wifiOn == nil && controls.btOn == nil {
+                if controls.loaded { empty("This Mac reports no volume, brightness, Wi-Fi or Bluetooth control to switch.") }
+                else { ReadingStatus(state: .loading) }
             }
         }
         .onAppear { controls.load(devices: false) }
     }
 
-    private func switchItem(_ icon: String, _ title: String, _ on: Bool, set: @escaping (Bool) -> Void) -> some View {
+    private func switchItem(_ icon: String, _ title: String, _ on: Bool, busy: Bool = false, set: @escaping (Bool) -> Void) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon).font(.system(size: 11)).foregroundStyle(.secondary)
             Text(title).font(.system(size: 11.5))
             Toggle("", isOn: Binding(get: { on }, set: set)).toggleStyle(.switch).controlSize(.mini).labelsHidden()
+                .disabled(busy)
         }
         .fixedSize()
     }
@@ -605,10 +607,14 @@ struct QuickCard: View {
     private var modelsPage: some View {
         let group = policy.systemGroups.first { $0.title == "Local models" }
         return VStack(alignment: .leading, spacing: 0) {
+            if let st = group?.status {
+                ReadingStatus(state: st, retry: { policy.requestSystemRefresh() })
+            }
             if let g = group, !g.rows.isEmpty {
                 ForEach(g.rows) { r in SystemRowView(row: r, store: policy) }
-            } else {
-                empty("No local models suite on this Mac")
+            } else if group?.status == nil {
+                // A failed read still makes the group, with its status; none at all means not read yet or no suite.
+                if policy.systemReadOnce { empty("No local models suite on this Mac") } else { ReadingStatus(state: .loading) }
             }
         }
     }

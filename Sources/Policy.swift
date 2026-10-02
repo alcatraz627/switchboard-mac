@@ -178,8 +178,7 @@ enum PolicyCLI {
         guard r.code == 0, let data = r.out.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let list = obj["policies"] as? [[String: Any]] else {
-            let msg = r.err.trimmingCharacters(in: .whitespacesAndNewlines)
-            return ([], [], msg.isEmpty ? "Could not read the policy store." : msg)
+            return ([], [], plainErrorText(r.err, fallback: "Could not read the policy store."))
         }
         let now = Date()
         return (list.compactMap { PolicyItem.from($0, now: now) },
@@ -278,6 +277,9 @@ struct RowButton {
     var doing: String? = nil
     /// Asked before running, for an action that is easy to regret.
     var confirm: String? = nil
+    /// For an action that gives no other sign it happened (a packet sent): the
+    /// button shows a check mark with this tooltip for a moment after it succeeds.
+    var doneTip: String? = nil
 }
 
 /// A switch flipped for a while: at `until` it returns to `restoreOn`, unless
@@ -303,9 +305,18 @@ final class PolicyStore: ObservableObject {
     @Published private(set) var items: [PolicyItem] = []
     @Published private(set) var projects: [String] = []
     @Published private(set) var error: String?
+    /// A read of the store is running. The rows shown meanwhile may belong to another scope.
+    @Published private(set) var loading = false
+    /// The scope the rows on screen were read for, and when; nil before the first good read.
+    @Published private(set) var loadedScope: PolicyScope?
+    private(set) var loadedAt: Date?
     @Published private(set) var busyKey: String?
     @Published var now = Date()
     @Published var systemGroups: [SystemGroup] = []
+    /// Whether the Machine snapshot has come back once; until then its tab says it is reading.
+    @Published var systemReadOnce = false
+    /// A Machine snapshot is being read right now (it can take up to a minute and a half).
+    @Published var systemRefreshing = false
     /// The Remote tab's rows (csync hosts), built by the same snapshot.
     @Published var remoteGroups: [SystemGroup] = []
     /// Each list tab's sections (Library, Hooks, Ledger…), by tab id.
@@ -458,16 +469,14 @@ final class PolicyStore: ObservableObject {
     /// that follows it, so the owner sees why a change did not stick.
     func reload(keepError: Bool = false, completion: (() -> Void)? = nil) {
         let scope = self.scope
+        loading = true
         let unresolved = Set(liveDirs()).subtracting(rootCache.keys).subtracting(rootMisses)
         queue.async { [weak self] in
             // Values first, so the rows are current before the scope list is.
             let r = PolicyCLI.load(scope)
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                self.items = r.items
-                self.projects = r.projects
-                if !keepError || r.error != nil { self.error = r.error }
-                self.now = Date()
+                self.applyLoaded(r, for: scope, keepError: keepError)
                 completion?()
             }
             guard !unresolved.isEmpty else { return }
@@ -483,6 +492,23 @@ final class PolicyStore: ObservableObject {
                 self.objectWillChange.send()
             }
         }
+    }
+
+    /// Take a finished read of the store. A failed read keeps the rows already
+    /// shown (they are only stale), unless they were read for another scope, which
+    /// would show one repository's values under another's name.
+    func applyLoaded(_ r: (items: [PolicyItem], projects: [String], error: String?), for scope: PolicyScope, keepError: Bool = false) {
+        loading = false
+        if r.error == nil {
+            items = r.items
+            projects = r.projects
+            loadedScope = scope
+            loadedAt = Date()
+        } else if loadedScope != scope {
+            items = []
+        }
+        if !keepError || r.error != nil { error = r.error }
+        now = Date()
     }
 
     /// Changes sent to pol.sh and not yet confirmed, by policy key. A value
@@ -504,8 +530,7 @@ final class PolicyStore: ObservableObject {
                 guard let self = self else { return }
                 self.busyKey = nil
                 if r.code != 0 {
-                    let msg = r.err.trimmingCharacters(in: .whitespacesAndNewlines)
-                    self.failures[key] = msg.isEmpty ? "Could not save this change." : msg
+                    self.failures[key] = plainErrorText(r.err, fallback: "Could not save this change.")
                     dwarn("policy write failed: \(key): \(self.failures[key]!)")
                 } else {
                     self.failures[key] = nil
@@ -562,6 +587,7 @@ final class PolicyStore: ObservableObject {
         self.items = items
         self.projects = projects
         self.error = error
+        self.loadedScope = scope
         self.now = Date()
     }
 }

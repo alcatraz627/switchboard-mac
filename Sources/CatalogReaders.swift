@@ -29,7 +29,7 @@ enum RulesCatalog {
         try Catalog.markdownFiles(in: gcc + "/rules").compactMap { path -> CatalogEntry? in
             let name = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
             guard name != "README", name != "00-index",
-                  let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+                  let text = Catalog.readText(path) else { return nil }
             let f = Catalog.frontmatter(text)
             let brief = f["brief"] ?? ""
             let scoped = f["paths"].map { !$0.isEmpty } ?? false
@@ -55,7 +55,10 @@ enum RulesCatalog {
             throw CatalogError("\(abbreviateHome(hookDir)) could not be read")
         }
         var wiring: [String: Wiring] = [:]
-        for (event, command) in settingsHooks() {
+        let hookPairs = settingsHooks()
+        // With settings.json unreadable, "no event" would be a guess; the rows say the wiring is unknown instead.
+        let wiringKnown = !Catalog.skippedNow.contains { $0.contains("settings") }
+        for (event, command) in hookPairs {
             for p in scriptPaths(in: command) { wiring[p, default: Wiring()].events.append(event) }
         }
         let orch = gcc + "/scripts/hook-orchestrator"
@@ -90,7 +93,7 @@ enum RulesCatalog {
             else if !events.isEmpty { tag = events.joined(separator: ", ") }
             else if !w.muted.isEmpty { tag = "muted in " + w.muted.joined(separator: ", ") }
             else if let first = w.usedBy.first { tag = "run by " + first + (w.usedBy.count > 1 ? " +\(w.usedBy.count - 1)" : "") }
-            else { tag = "not wired" }
+            else { tag = wiringKnown ? "not wired" : "wiring unknown" }
             var details: [(String, String)] = []
             let about = exists ? Catalog.scriptSummary(path) : ""
             details.append(("What it says it does", exists ? (about.isEmpty ? "No header comment." : about)
@@ -146,8 +149,8 @@ enum RulesCatalog {
     static func settingsHooks() -> [(String, String)] {
         var out: [(String, String)] = []
         for file in ["settings.json", "settings.local.json"] {
-            guard let d = FileManager.default.contents(atPath: gcc + "/" + file),
-                  let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+            // An unreadable settings file would make every hook read as "not wired"; the section says so.
+            guard let o = Catalog.readObject(gcc + "/" + file),
                   let hooks = o["hooks"] as? [String: Any] else { continue }
             for (event, v) in hooks {
                 for block in v as? [[String: Any]] ?? [] {
@@ -253,8 +256,7 @@ enum PluginsCatalog {
             let leaf = (rel as NSString).lastPathComponent
             if walker.level > 4 || ["node_modules", ".git", "build", "dist", ".venv"].contains(leaf) { walker.skipDescendants(); continue }
             guard leaf == ".mcp.json",
-                  let d = FileManager.default.contents(atPath: root + "/" + rel),
-                  let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { continue }
+                  let o = Catalog.readObject(root + "/" + rel) else { continue }
             let dir = root + "/" + (rel as NSString).deletingLastPathComponent
             let approval = mcpjsonApproval(dir)
             out += servers(o["mcpServers"] as? [String: Any] ?? [:], file: root + "/" + rel, project: dir).map { e in
@@ -543,8 +545,7 @@ enum QueueCatalog {
             throw CatalogError("\(abbreviateHome(dir)) could not be read")
         }
         let ranked: [(Bool, CatalogEntry)] = files.filter { $0.hasSuffix(".json") }.compactMap { f in
-            guard let d = FileManager.default.contents(atPath: dir + "/" + f),
-                  let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
+            guard let o = Catalog.readObject(dir + "/" + f) else { return nil }
             // No session recorded (a pm2 resident, say) means nothing to outlive.
             let pid = (o["harness_pid"] as? Int).map { Int32($0) }
             // EPERM means the process exists but belongs to another user: alive.
@@ -628,9 +629,14 @@ enum LedgerCatalog {
         guard let text = try? String(contentsOfFile: path, encoding: .utf8) else {
             throw CatalogError("\(abbreviateHome(path)) could not be read")
         }
-        return text.split(separator: "\n").compactMap {
-            try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+        var bad = 0
+        let rows = text.split(separator: "\n").compactMap { line -> [String: Any]? in
+            let o = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any]
+            if o == nil { bad += 1 }
+            return o
         }
+        if bad > 0 { Catalog.skip("\(bad) line\(bad == 1 ? "" : "s") of \((path as NSString).lastPathComponent)") }
+        return rows
     }
 
     /// Mistakes grouped by pattern: how often, how bad at worst, when last,
@@ -715,7 +721,7 @@ enum LibraryCatalog {
         }
         return folders.compactMap { folder -> CatalogEntry? in
             let path = dir + "/" + folder + "/SKILL.md"
-            guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+            guard let text = Catalog.readText(path) else { return nil }
             let f = Catalog.frontmatter(text)
             let desc = f["description"] ?? ""
             return CatalogEntry(name: "/" + (f["name"] ?? folder), summary: Catalog.firstSentence(desc),
@@ -735,7 +741,7 @@ enum LibraryCatalog {
         let index = parkedIndex(dir + "/INDEX.md")
         return folders.compactMap { folder -> CatalogEntry? in
             let path = dir + "/" + folder + "/SKILL.md"
-            guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+            guard let text = Catalog.readText(path) else { return nil }
             let f = Catalog.frontmatter(text)
             let name = f["name"] ?? folder
             let desc = f["description"] ?? ""
@@ -776,7 +782,7 @@ enum LibraryCatalog {
             for path in files {
                 let name = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
                 guard name != "README", name != "MEMORY",
-                      let text = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
+                      let text = Catalog.readText(path) else { continue }
                 let f = Catalog.frontmatter(text)
                 let about = f["brief"] ?? f["description"] ?? ""
                 var details: [(String, String)] = [("What it is", about.isEmpty ? "No brief in its frontmatter." : about)]
@@ -810,7 +816,7 @@ enum LibraryCatalog {
         return paths.compactMap { path -> CatalogEntry? in
             let file = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
             guard file != "README", file != "BUILD_LOG",
-                  let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+                  let text = Catalog.readText(path) else { return nil }
             let f = Catalog.frontmatter(text)
             let role = f["role"] ?? f["description"] ?? ""
             var details: [(String, String)] = [("Role", role.isEmpty ? "No role in its frontmatter." : role)]

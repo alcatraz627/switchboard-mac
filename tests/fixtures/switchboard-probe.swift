@@ -129,7 +129,9 @@ check("a valid empty config can be written to", Settings.write(key: "effortLevel
 check("and reads back", Settings.effortLevel() == "low")
 try! Data("not json".utf8).write(to: URL(fileURLWithPath: emptyCfg + "/settings.json"))
 check("an unreadable config is still refused", Settings.write(key: "x", value: 1) == false)
+check("and the refusal says why in a sentence", Settings.lastError?.contains("not valid JSON") == true, Settings.lastError ?? "nil")
 SwitchboardPaths.gccRoot = fixture
+check("a good write clears that reason", Settings.write(key: "effortLevel", value: "medium") && Settings.lastError == nil)
 
 // Refuse to invent a config where none exists. The directory must EXIST with the
 // file missing: pointing at a missing directory proves nothing, because the write

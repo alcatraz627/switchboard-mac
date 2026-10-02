@@ -351,12 +351,20 @@ struct PolicyPanel: View {
         }
     }
 
+    @State private var busySince: Date?
+    private var tabBusy: Bool {
+        let readsMachine = current.id == "system" || current.id == "remote" || SystemTabView.groupHome.values.contains(current.id)
+        return store.catalogReading.contains(current.id) || (readsMachine && store.systemRefreshing)
+    }
+
     private var footer: some View {
         HStack(spacing: 6) {
             Image(systemName: current.footerIcon).font(.system(size: 9)).foregroundStyle(.secondary)
             Text(current.footer).font(PT.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
+            // A Machine read can take a minute; the spinner says the click was heard.
+            if let since = busySince { PendingMark(since: since, help: "Reading…") }
             Button { store.expireCatalog(current.id); current.refresh() } label: {
                 Image(systemName: "arrow.clockwise").font(.system(size: 11))
             }
@@ -365,6 +373,7 @@ struct PolicyPanel: View {
         }
         .padding(.horizontal, PT.gap)
         .padding(.vertical, 8)
+        .onChange(of: tabBusy) { busy in busySince = busy ? Date() : nil }
     }
 }
 
@@ -384,7 +393,7 @@ struct AgentsTabView: View {
             // A write's refusal shows on its own row; this line is only for the
             // store itself failing to load.
             if let e = store.error {
-                ReadingStatus(state: store.items.isEmpty ? .failed(e) : .stale(store.now, e),
+                ReadingStatus(state: store.items.isEmpty ? .failed(e) : .stale(store.loadedAt ?? store.now, e),
                               retry: { store.reload() })
                     .padding(.horizontal, 4)
             }
@@ -394,12 +403,17 @@ struct AgentsTabView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 4)
             }
-            if store.items.isEmpty && store.error == nil {
+            // Rows read for another scope are not shown as this one's while the read runs.
+            if store.error == nil && (store.loadedScope != store.scope || (store.loading && store.items.isEmpty)) {
                 ReadingStatus(state: .loading).padding(.horizontal, 4)
+            } else if store.error == nil && store.scopeIsProject && store.visibleItems.isEmpty {
+                Text("Nothing here can be overridden per repository.")
+                    .font(PT.caption).foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
             }
             // Usage thresholds (the *_pct limits) live on the Usage tab, next
             // to the bars they act on.
-            ForEach(store.groups, id: \.name) { g in
+            ForEach(store.loadedScope == store.scope ? store.groups : [], id: \.name) { g in
                 let items = g.items.filter { !($0.group == "Limits" && $0.key.hasSuffix("_pct")) }
                 if !items.isEmpty { PolicyGroupView(name: g.name, items: items, store: store) }
             }
@@ -409,7 +423,7 @@ struct AgentsTabView: View {
                 ForEach(store.systemGroups.filter { SystemTabView.groupHome[$0.title] == "agents" }) { g in
                     VStack(alignment: .leading, spacing: 5) {
                         GroupHeader(name: g.title)
-                        if let st = g.status { ReadingStatus(state: st).padding(.horizontal, 4) }
+                        if let st = g.status { ReadingStatus(state: st, retry: { store.requestSystemRefresh() }).padding(.horizontal, 4) }
                         Card {
                             ForEach(Array(g.rows.enumerated()), id: \.element.id) { i, row in
                                 if i > 0 { Divider().padding(.leading, PT.rowH) }
@@ -535,11 +549,21 @@ struct SystemTabView: View {
         }
     }
 
+    private var retryable: Bool {
+        switch source {
+        case .machine, .remote: return true
+        default: return false
+        }
+    }
+
     /// Words for an empty tab: nothing waiting, no search match, or still reading.
     @ViewBuilder private var emptyLine: some View {
         switch source {
         case .approvals:
             Text("Nothing is waiting on you.").font(PT.caption).foregroundStyle(.secondary)
+        case .catalog(let id) where (store.queries[id] ?? "").isEmpty && !(store.catalogs[id] ?? []).isEmpty
+            && (store.catalogs[id] ?? []).allSatisfy({ store.hiddenSections.contains(id + "::" + $0.title) }):
+            Text("All sections are hidden in Settings.").font(PT.caption).foregroundStyle(.secondary)
         case .catalog(let id) where store.catalogs[id] != nil || !(store.queries[id] ?? "").isEmpty:
             Text("Nothing matches \u{201C}\(store.queries[id] ?? "")\u{201D}.").font(PT.caption).foregroundStyle(.secondary)
         default:
@@ -550,11 +574,14 @@ struct SystemTabView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: PT.gap) {
             if groups.isEmpty { emptyLine.padding(.horizontal, 4) }
+            // the Session group shows at once, so the tab is never empty while the first read runs
+            else if case .machine = source, !store.systemReadOnce { ReadingStatus(state: .loading).padding(.horizontal, 4) }
             ForEach(groups) { g in
                 VStack(alignment: .leading, spacing: 5) {
                     GroupHeader(name: g.title)
                     if let st = g.status {
-                        ReadingStatus(state: st).padding(.horizontal, 4)
+                        // Machine and Remote groups re-read through the snapshot; a list tab's own sections have no retry here.
+                        ReadingStatus(state: st, retry: retryable ? { store.requestSystemRefresh() } : nil).padding(.horizontal, 4)
                     }
                     if !g.rows.isEmpty {
                         Card {
@@ -900,7 +927,7 @@ struct SystemRowView: View {
     private func plainRowButton(_ b: RowButton) -> some View {
         let copied = copiedButton == b.label
         return iconButton(copied ? "checkmark" : (b.icon ?? Self.symbol(for: b.label)),
-                          tip: copied ? "Copied" : (b.help.isEmpty ? b.label : "\(b.label): \(b.help)"),
+                          tip: copied ? (b.doneTip ?? "Copied") : (b.help.isEmpty ? b.label : "\(b.label): \(b.help)"),
                           tint: copied ? Color(nsColor: .systemGreen) : nil) { press(b) }
             .disabled(busyButton != nil)
     }
@@ -950,6 +977,11 @@ struct SystemRowView: View {
                 if let err = err {
                     failure = "Couldn't \(doing): \(err)"
                     dwarn("row button failed: \(doing): \(err)")
+                } else if b.doneTip != nil {
+                    copiedButton = b.label
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        if copiedButton == b.label { copiedButton = nil }
+                    }
                 }
             }
         }

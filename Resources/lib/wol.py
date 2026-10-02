@@ -51,7 +51,7 @@ def load(strict=False):
     except Exception:
         pass
     if strict:
-        out({"error": f"the saved devices file is unreadable, so it was left alone: {TARGETS}"}, 1)
+        out({"ok": False, "error": f"The saved devices file could not be read, so it was left alone: {TARGETS}"}, 1)
     return []
 
 
@@ -77,6 +77,8 @@ def main():
     a = sys.argv[1:]
     cmd = a[0] if a else "help"
     if cmd == "list":
+        if os.path.exists(TARGETS):
+            load(strict=True)
         out(load())
     elif cmd == "add" and len(a) >= 3:
         mac = norm_mac(a[2])
@@ -101,4 +103,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        # A crash answers in the helper's own shape, never a traceback.
+        print(json.dumps({"ok": False, "error": f"Something went wrong with the saved devices: {e}"}))
+        sys.exit(1)

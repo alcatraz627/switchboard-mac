@@ -431,3 +431,55 @@ enum ReadingState: Equatable {
     var isFailure: Bool { if case .failed = self { return true }; return false }
     var canRetry: Bool { if case .unavailable = self { return false }; if case .loading = self { return false }; return true }
 }
+
+// ── Error words ──────────────────────────────────────────────────────────────
+
+/// A tool's error in words a person reads: colour codes and table borders
+/// gone, known launchctl, pm2 and permission failures said plainly, a Python
+/// "SomeError:" prefix dropped, and otherwise the first line that says something.
+func plainErrorText(_ raw: String, fallback: String = "it failed without saying why") -> String {
+    let text = raw.replacingOccurrences(of: #"\u{1B}\[[0-9;]*[A-Za-z]"#, with: "", options: .regularExpression)
+    let known: [(String, String)] = [
+        (#"(?i)bootstrap failed: 5|input/output error"#, "launchd would not load it; it may be loaded already, or its plist is broken"),
+        (#"(?i)bootstrap failed: 37|already (loaded|bootstrapped)"#, "it is loaded already"),
+        (#"(?i)could not find service|no such process|service is disabled"#, "launchd has no running job by that name right now"),
+        (#"(?i)operation not permitted|permission denied|EPERM"#, "macOS did not allow it (permission denied)"),
+        (#"(?i)\[PM2\]\[ERROR\] Process or Namespace (\S+) not found"#, "pm2 has no process named $1"),
+        (#"(?i)command not found: (\S+)"#, "$1 is not installed or not on the PATH"),
+        (#"(?i)(\S+): command not found"#, "$1 is not installed or not on the PATH"),
+    ]
+    for (pattern, plain) in known {
+        // Rewrite only the matched text, so a capture ($1) carries the name through.
+        if let r = text.range(of: pattern, options: .regularExpression) {
+            return String(text[r]).replacingOccurrences(of: pattern, with: plain, options: .regularExpression)
+        }
+    }
+    // A Python traceback ends with the line that says what broke.
+    if let t = text.range(of: "Traceback (most recent call last)") {
+        let last = text[t.lowerBound...].components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.last { !$0.isEmpty }
+        if let l = last, !l.hasPrefix("Traceback") { return plainErrorText(l, fallback: fallback) }
+    }
+    let boxChars = CharacterSet(charactersIn: "│┌┐└┘├┤┬┴┼─═║╔╗╚╝")
+    // A table (pm2 prints one) carries no reason, so its lines are skipped whole.
+    let line = text.components(separatedBy: "\n")
+        .filter { $0.rangeOfCharacter(from: boxChars) == nil }
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .first { !$0.isEmpty && !$0.hasPrefix("[PM2] ") && $0.rangeOfCharacter(from: .letters) != nil }
+    guard var l = line else { return fallback }
+    // A Python exception line reads "RuntimeError: launchctl list failed"; the sentence is what follows.
+    l = l.replacingOccurrences(of: #"^[A-Za-z_.]*(Error|Exception): "#, with: "", options: .regularExpression)
+    return l.count > 160 ? String(l.prefix(157)) + "…" : l
+}
+
+/// The Machine group each helper script fills, so a message can name the
+/// group a person sees instead of the script behind it.
+enum HelperNames {
+    static let section: [String: String] = [
+        "jobs.py": "Schedules", "drives.py": "Drives", "devservers.py": "Dev servers", "dbservices.py": "Databases",
+        "models.py": "Local models", "gitscan.py": "Repos", "wol.py": "Session",
+    ]
+    /// The group for a helper, "Hosts" for the remote one, else the name as given.
+    static func title(_ name: String) -> String {
+        name == "remote.py" ? "Hosts" : section[name] ?? name
+    }
+}

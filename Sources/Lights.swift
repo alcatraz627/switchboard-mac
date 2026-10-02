@@ -71,18 +71,22 @@ enum WizCLI {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         p.arguments = ["python3", script] + args
-        let out = Pipe()
+        let out = Pipe(), errPipe = Pipe()
         p.standardOutput = out
-        p.standardError = FileHandle.nullDevice
-        guard (try? p.run()) != nil else { return (nil, "could not start wiz.py") }
-        var data = Data()
-        let done = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async { data = out.fileHandleForReading.readDataToEndOfFile(); done.signal() }
-        if done.wait(timeout: .now() + timeout) == .timedOut { p.terminate(); return (nil, "wiz.py timed out") }
+        p.standardError = errPipe
+        guard (try? p.run()) != nil else { return (nil, "The bulb helper could not be started.") }
+        var data = Data(), errData = Data()
+        let done = DispatchGroup()
+        done.enter(); DispatchQueue.global().async { data = out.fileHandleForReading.readDataToEndOfFile(); done.leave() }
+        done.enter(); DispatchQueue.global().async { errData = errPipe.fileHandleForReading.readDataToEndOfFile(); done.leave() }
+        if done.wait(timeout: .now() + timeout) == .timedOut { p.terminate(); return (nil, "The bulbs did not answer in time.") }
         p.waitUntilExit()
         let obj = try? JSONSerialization.jsonObject(with: data)
-        if let e = (obj as? [String: Any])?["error"] as? String { return (nil, e) }
-        return (obj, p.terminationStatus == 0 ? nil : "wiz.py failed")
+        if let e = (obj as? [String: Any])?["error"] as? String { return (nil, plainErrorText(e)) }
+        guard p.terminationStatus != 0 else { return (obj, nil) }
+        // A crash prints its reason on stderr; without it the owner only learns that something failed.
+        let why = String(data: errData.suffix(2048), encoding: .utf8).map { plainErrorText($0, fallback: "") } ?? ""
+        return (obj, why.isEmpty ? "The bulb helper stopped without saying why." : why)
     }
 }
 
@@ -107,7 +111,9 @@ final class LightsStore: ObservableObject {
         discovering = true
         scanStarted = Date()
         queue.async { [weak self] in
-            let r = WizCLI.run(["discover"])
+            var r = WizCLI.run(["discover"])
+            // A scan answers with a list; anything else is a fault, not "no bulbs".
+            if r.err == nil, !(r.json is [[String: Any]]) { r.err = "The bulb scan gave an answer that could not be read." }
             let list = (r.json as? [[String: Any]])?.compactMap(Bulb.init) ?? []
             DispatchQueue.main.async {
                 guard let self = self else { return }

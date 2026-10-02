@@ -2,7 +2,7 @@
 // The shared design system for AppKit surfaces: one type scale, text builders,
 // truncation rules, contrast-safe state badges and clickable menu rows. Written
 // once so spacing, alignment and contrast are decided in one place.
-// Guide: docs/design-kit.md.
+// Guide: docs/dev/design-kit.md.
 
 import AppKit
 import Foundation

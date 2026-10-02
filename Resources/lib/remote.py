@@ -35,10 +35,18 @@ def csync(*args, timeout=60):
         r = subprocess.run([CSYNC, "--json", *args], capture_output=True, text=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         return 1, {"error": f"csync {args[0]} took longer than {timeout}s"}
+    tail = (r.stderr or r.stdout).strip()
+    if len(tail) > 300:
+        # Cut at a word, so the sentence does not start mid-word.
+        tail = tail[-300:].split(" ", 1)[-1]
     try:
-        return r.returncode, json.loads(r.stdout or "{}")
+        obj = json.loads(r.stdout or "{}")
     except ValueError:
-        return r.returncode, {"error": (r.stderr or r.stdout).strip()[-300:]}
+        return r.returncode, {"error": tail}
+    # A failing csync that printed no JSON error still said why on stderr.
+    if r.returncode != 0 and isinstance(obj, dict) and not obj.get("error") and tail:
+        obj["error"] = tail
+    return r.returncode, obj
 
 
 SSH_CONFIG = os.path.expanduser("~/.config/csync/ssh_config")
@@ -58,12 +66,18 @@ def state():
     if not CSYNC:
         return {"installed": False, "checks": [], "hosts": []}
     code, st = csync("status", timeout=30)
-    _, ls = csync("ls", timeout=30)
+    ls_code, ls = csync("ls", timeout=30)
     if not isinstance(st.get("checks"), list):
         # Show a broken console as a failing check rather than hiding the row.
         err = st.get("error")
         st["checks"] = [{"check": "csync status", "ok": False, "fix": None,
-                         "detail": (err.get("message") if isinstance(err, dict) else err) or f"exit {code}"}]
+                         "detail": (err.get("message") if isinstance(err, dict) else err) or "csync status failed without saying why"}]
+    if ls_code != 0 or not isinstance(ls.get("hosts") or {}, dict):
+        # Without this a failed host list reads as "no hosts yet".
+        err = ls.get("error")
+        st["checks"] = list(st["checks"]) + [{"check": "csync ls", "ok": False, "fix": None,
+            "detail": (err.get("message") if isinstance(err, dict) else err) or "csync ls failed without saying why"}]
+        ls = {}
     now = time.time()
     hosts = []
     for name, h in (ls.get("hosts") or {}).items():
@@ -142,4 +156,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        # A crash answers in the helper's own shape, never a traceback.
+        print(json.dumps({"ok": False, "error": f"Something went wrong with the remote hosts: {e}"}))
+        sys.exit(1)

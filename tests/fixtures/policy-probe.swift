@@ -126,5 +126,20 @@ t = Date(); store.reload(); settle(t)
 let dump = policyDump(store)
 check("dump names every group", ["Acting as you", "Code", "Deploy", "Models", "Machine", "Limits", "Gates"].allSatisfy { dump.contains("[\($0)]") })
 
+// A failed read keeps the rows it already had; rows read for another scope are dropped instead.
+let rowsBefore = store.items.count
+store.applyLoaded((items: [], projects: [], error: "pol.sh timed out"), for: .global)
+check("a failed read keeps the rows already shown", store.items.count == rowsBefore && rowsBefore > 0, "\(store.items.count) of \(rowsBefore)")
+check("and says why beside them", store.error == "pol.sh timed out")
+store.scope = .project(root)
+store.applyLoaded((items: [], projects: [], error: "pol.sh timed out"), for: .project(root))
+check("a failed read for another scope does not show the old scope's rows", store.items.isEmpty)
+check("a clean read clears the error and the loading flag", {
+    store.applyLoaded((items: [], projects: [], error: nil), for: .project(root))
+    return store.error == nil && !store.loading && store.loadedScope == .project(root)
+}())
+check("a multi-line complaint reads as its first sentence",
+      plainErrorText("key is read-only\n  usage: see the help\n", fallback: "x") == "key is read-only")
+
 print("policy-probe: \(pass) passed, \(fail) failed")
 exit(fail == 0 ? 0 : 1)
