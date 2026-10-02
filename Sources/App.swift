@@ -205,6 +205,11 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         var hubHost: String? = nil
         var brokerUp: Bool? = nil
         var decisionPages: String? = nil
+        /// Whether each pm2 service comes back after a restart, read from pm2's saved list;
+        /// nil when that list could not be read.
+        var atLogin: [String: Bool]? = nil
+        /// pm2's own login agent, without which nothing in its list comes back.
+        var pm2Agent = false
         var wardenRunning: Bool? = nil
         var wardenGated = false
         var wardenGatePct = 90
@@ -347,6 +352,12 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             }
             if servicesShown {
                 s.decisionPages = Services.pm2Status("decision-pages")
+                let r = Services.run("/usr/bin/env", ["python3", AppPaths.lib("pm2login.py"), "get"] + Self.pm2LoginNames, timeout: 8)
+                if let d = r.out.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                   o["ok"] as? Bool == true {
+                    s.atLogin = o["services"] as? [String: Bool]
+                    s.pm2Agent = o["agent"] as? Bool ?? false
+                }
                 s.wardenRunning = Warden.installed() ? Warden.running() : nil
             }
             if s.wardenRunning == true {
@@ -498,6 +509,31 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
     }
 
 
+    /// The pm2 services whose return after a restart the panel can switch.
+    static let pm2LoginNames = ["kanban", "session-hub", "decision-pages"]
+
+    /// The "Start at login" switch under a pm2 service row: what pm2 will really bring
+    /// back after a restart, read from its saved list, changed for this service alone.
+    private func atLoginRow(_ pm2Name: String, title: String) -> SystemRow {
+        let s = sbSnapshot
+        let on = s.atLogin?[pm2Name] ?? false
+        let note = s.atLogin == nil ? "pm2's saved list could not be read"
+            : !s.pm2Agent ? "pm2 itself is not set to start at login" : on ? "comes back after a restart" : "stays off after a restart"
+        var r = SystemRow(label: "Start at login", state: on ? .on(menuGreen) : .off, note: note,
+                          enabled: s.atLogin != nil && s.pm2Agent,
+                          tip: "Whether \(title) starts again by itself after this Mac restarts. Changes only its own entry in pm2's saved list.",
+                          action: { [weak self] in
+                              DispatchQueue.global(qos: .userInitiated).async {
+                                  let err = Self.helperError(Services.run("/usr/bin/env", ["python3", AppPaths.lib("pm2login.py"), "set", pm2Name, on ? "off" : "on"], timeout: 20))
+                                  self?.reportFlip("\(title) at login", err)
+                                  DispatchQueue.main.async { self?.refreshSnapshot() }
+                              }
+                          })
+        r.icon = "power"
+        r.key = "atlogin-" + pm2Name
+        return r
+    }
+
     private func serviceRows() -> [SBRow] {
         let s = sbSnapshot
         var rows: [SBRow] = []
@@ -507,8 +543,9 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                 ?? (kanbanUp == nil ? "probing…" : kanbanUp! ? "serving :5106" : "not running")
             rows.append(SBRow(label: "Kanban Board", badge: kanbanUp == true ? .on(menuGreen) : .off, note: note,
                               enabled: !kanbanBusy, onClick: { [weak self] in self?.toggleKanban() },
-                              tip: "The kanban board server on port 5106. It stays off across reboots; this switch is where it comes back.",
-                              link: kanbanUp == true ? "http://localhost:5106" : nil))
+                              tip: "The kanban board server on port 5106.",
+                              link: kanbanUp == true ? "http://localhost:5106" : nil,
+                              children: [atLoginRow("kanban", title: "the kanban board")]))
         }
 
         if let hub = Integrations.hubScript {
@@ -529,8 +566,9 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                                       DispatchQueue.main.async { self?.refreshSnapshot() }
                                   }
                               },
-                              tip: "claude-instances' phone-facing session hub on port 5400. Restart it after Tailscale reconnects.",
-                              link: s.hubLocal == true ? "http://localhost:5400" : nil))
+                              tip: "The session hub on port 5400: every Claude session's transcript, readable from your phone. Restart it after Tailscale reconnects.",
+                              link: s.hubLocal == true ? "http://localhost:5400" : nil,
+                              children: [atLoginRow("session-hub", title: "the session hub")]))
         }
 
         if let up = s.brokerUp {
@@ -552,7 +590,8 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                                   }
                               },
                               tip: "The decision-page server used for batched human feedback.",
-                              link: dp == "online" ? "http://localhost:5197" : nil))
+                              link: dp == "online" ? "http://localhost:5197" : nil,
+                              children: [atLoginRow("decision-pages", title: "decision pages")]))
         }
 
         if let wr = s.wardenRunning {

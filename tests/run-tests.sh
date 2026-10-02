@@ -186,6 +186,8 @@ mkdir -p "$WORK/ro-state"; chmod 555 "$WORK/ro-state"
 check "wol.py add answers {ok: false} with a sentence when the state folder cannot be written" python3 -c "import json,subprocess;r=subprocess.run(['python3','Resources/lib/wol.py','add','Box','02:00:00:00:00:09'],capture_output=True,text=True,env={'PATH':'/usr/bin:/bin','HOME':'$HOME','SWITCHBOARD_STATE':'$WORK/ro-state'});d=json.loads(r.stdout);assert r.returncode==1 and d['ok'] is False and 'Traceback' not in r.stderr, r"
 chmod 755 "$WORK/ro-state"
 
+check "pm2login.py: start-at-login reads pm2's saved list and changes only its own entry (scratch pm2 folder)" python3 tests/fixtures/pm2login-probe.py
+
 section "state folder adoption (state.py)"
 FAKE="$WORK/fakehome"
 mkdir -p "$FAKE/.claude/widgets"
