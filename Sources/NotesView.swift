@@ -56,8 +56,10 @@ struct NoteCompose: View {
                          expanded ? "Back to one line" : "Open a title and body") {
                         withAnimation(.easeOut(duration: 0.12)) { expanded.toggle() }
                     }
-                    icon("checkmark", "Save (⌘↩)") { save(copyPath: false) }
+                    icon("checkmark", "Save (⌘↩); ⇧⌘↩ saves and pins it") { save(copyPath: false) }
                         .keyboardShortcut(.return, modifiers: .command)
+                    icon("pin", "Save and pin it to the hover card (⇧⌘↩)") { save(copyPath: false, pin: true) }
+                        .keyboardShortcut(.return, modifiers: [.command, .shift])
                     icon("doc.on.clipboard", "Save what is on the clipboard as a note") {
                         guard let s = NSPasteboard.general.string(forType: .string), !s.isEmpty else { show("The clipboard has no text"); return }
                         let before = notes.notes.count
@@ -79,18 +81,19 @@ struct NoteCompose: View {
         }
     }
 
-    private func save(copyPath: Bool) {
+    private func save(copyPath: Bool, pin: Bool = false) {
         let before = notes.notes.count
-        guard let n = notes.add(title: title, body: text, color: color) else {
+        guard var n = notes.add(title: title, body: text, color: color) else {
             if !InputRules.canSave(title: title, body: text) { show("Type a title or a note first") }
             return
         }
         title = ""; text = ""; color = nil
+        if pin { n.pinned = true; notes.update(n) }
         if copyPath {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(n.path, forType: .string)
         }
-        show(notes.notes.count == before ? "Already saved" : copyPath ? "Saved; path copied" : "Saved")
+        show(notes.notes.count == before ? "Already saved" : copyPath ? "Saved; path copied" : pin ? "Saved and pinned" : "Saved")
     }
 
     private func show(_ s: String) {
@@ -125,6 +128,7 @@ struct NotesTabView: View {
                         VStack(spacing: 0) {
                             if i > 0 { Divider().padding(.leading, PT.rowH) }
                             NoteRow(note: n, notes: notes, grip: grip)
+                                .revealFlash("note-" + n.id).id("note-" + n.id)
                         }
                     }
                 }

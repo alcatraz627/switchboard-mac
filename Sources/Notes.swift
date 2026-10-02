@@ -165,6 +165,12 @@ struct Note: Identifiable, Equatable {
     var color: String? = nil
 
     var expired: Bool { expires.map { $0 <= Date() } ?? false }
+    /// When the note's file last changed, which is when it was last edited.
+    var modified: Date? { (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date }
+    /// Pinned, or edited in the last two hours: shown as a row on the hover card, not a chip.
+    static func keepsRow(pinned: Bool, modified: Date?, now: Date = Date()) -> Bool {
+        pinned || (modified.map { now.timeIntervalSince($0) < 2 * 3600 } ?? false)
+    }
     var path: String { NotesStore.dir + "/" + id + ".md" }
     /// Title and body as one text, the way Copy content hands it over.
     var content: String { body.isEmpty ? title : title.isEmpty ? body : title + "\n\n" + body }

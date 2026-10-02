@@ -123,7 +123,7 @@ if args.contains("--time-tabs") {
     exit(0)
 }
 if args.contains("--probe-quick") {
-    let r = probeQuickCycle() + "\n" + (probePointer() + probeScale() + probeDesk()).joined(separator: "\n")
+    let r = probeQuickCycle() + "\n" + (probePointer() + probeScale() + probeDesk() + probeTimerShorthand()).joined(separator: "\n")
     print(r)
     exit(r.contains("FAIL") ? 1 : 0)
 }

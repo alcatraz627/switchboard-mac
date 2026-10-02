@@ -552,14 +552,16 @@ struct QuickCard: View {
 
     // ── Pinned notes ────────────────────────────────────────────────────────
     private var pinned: some View {
+        // pinned notes and ones edited in the last two hours are rows; the rest are chips
         let live = notes.live
-        let pins = live.filter(\.pinned)
-        let rest = live.filter { !$0.pinned }
+        let pins = live.filter { Note.keepsRow(pinned: $0.pinned, modified: $0.modified) }
+        let rest = live.filter { !Note.keepsRow(pinned: $0.pinned, modified: $0.modified) }
         return VStack(alignment: .leading, spacing: 7) {
             if pins.isEmpty { empty("No pinned notes. Pin one below or in the Notes tab.") }
             ForEach(pins) { n in
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Image(systemName: "pin.fill").font(.sbIcon(9.5)).foregroundStyle(.secondary)
+                    Image(systemName: n.pinned ? "pin.fill" : "pencil").font(.sbIcon(9.5)).foregroundStyle(.secondary)
+                        .help(n.pinned ? "Pinned" : "Edited in the last two hours")
                     Text(n.heading).font(.sb(11.5)).fixedSize(horizontal: false, vertical: true)
                     Spacer()
                     Button {
@@ -567,15 +569,17 @@ struct QuickCard: View {
                         NSPasteboard.general.setString(n.content, forType: .string)
                     } label: { Image(systemName: "doc.on.doc").font(.sbIcon(10.5)) }
                         .buttonStyle(.borderless).foregroundStyle(.secondary).help("Copy the note")
-                    Button { var m = n; m.pinned = false; notes.update(m) } label: {
-                        Image(systemName: "pin.slash").font(.sbIcon(10.5))
+                    Button { var m = n; m.pinned.toggle(); notes.update(m) } label: {
+                        Image(systemName: n.pinned ? "pin.slash" : "pin").font(.sbIcon(10.5))
                     }
-                    .buttonStyle(.borderless).foregroundStyle(.secondary).help("Unpin")
+                    .buttonStyle(.borderless).foregroundStyle(.secondary).help(n.pinned ? "Unpin" : "Pin")
                 }
+                .onMiddleClick("qnote-" + n.id, space: state.space) { openReveal("notes", "note-" + n.id) }
             }
             if !rest.isEmpty {
                 ChipFlow(items: rest.map { n in
-                    ChipItem(id: n.id, icon: "pin", text: chipLabel(n.heading), enabled: true, help: "Pin \u{201C}\(n.heading)\u{201D}") {
+                    ChipItem(id: n.id, icon: "pin", text: chipLabel(n.heading), enabled: true, help: "Pin \u{201C}\(n.heading)\u{201D}. Middle-click to open it in Notes.",
+                             middle: { openReveal("notes", "note-" + n.id) }) {
                         var m = n; m.pinned = true; notes.update(m)
                     }
                 }, overflow: { more in
@@ -601,6 +605,18 @@ struct QuickCard: View {
                     Button { timers.remove(t) } label: { Image(systemName: "xmark.circle").font(.sbIcon(11)) }
                         .buttonStyle(.borderless).foregroundStyle(.secondary).help("Stop it")
                 }
+                .help("Scroll to add or take away a minute. Middle-click to open it in Timers.")
+                // the wheel over a timer moves it a minute a notch; a middle click opens it in the tab
+                .scrollSteps("q-timer-" + t.id, card: state.space, stepper: .slider()) { st in timers.nudge(t, minutes: st) }
+                .onMiddleClick("qtimer-" + t.id, space: state.space) { openReveal("timers", "timer-" + t.id) }
+            }
+            if !timers.recent.isEmpty {
+                ChipFlow(items: timers.recent.map { r in
+                    ChipItem(id: "again-" + r.label + "\(r.seconds)", icon: "arrow.clockwise", text: "\(clock(r.seconds)) \(r.label)",
+                             enabled: true, help: "Start \(r.label) again for \(clock(r.seconds))") {
+                        timers.add(label: r.label, color: r.color, fireAt: Date().addingTimeInterval(r.seconds))
+                    }
+                })
             }
         }
     }

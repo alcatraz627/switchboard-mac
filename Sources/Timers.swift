@@ -125,6 +125,31 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
         save()
         askToNotify()
         resume()
+        remember(t)
+    }
+
+    /// The last few timers started, newest first, to start again in one click.
+    struct Recent: Codable, Equatable { var label: String; var seconds: TimeInterval; var color: String }
+    static let recentKey = "switchboard.timers.recent"
+    @Published private(set) var recent: [Recent] = {
+        guard let d = UserDefaults.standard.data(forKey: TimerStore.recentKey) else { return [] }
+        return (try? JSONDecoder().decode([Recent].self, from: d)) ?? []
+    }()
+    private func remember(_ t: SBTimer) {
+        let r = Recent(label: t.label, seconds: t.fireAt.timeIntervalSince(t.start).rounded(), color: t.color)
+        recent = Self.recentList(adding: r, to: recent)
+        if let d = try? JSONEncoder().encode(recent) { UserDefaults.standard.set(d, forKey: Self.recentKey) }
+    }
+    /// Newest first, one entry per label and length, five at most.
+    static func recentList(adding r: Recent, to list: [Recent]) -> [Recent] {
+        Array(([r] + list.filter { !($0.label == r.label && $0.seconds == r.seconds) }).prefix(5))
+    }
+
+    /// Moves a running timer by whole minutes, never closer than five seconds to now.
+    func nudge(_ t: SBTimer, minutes: Int) {
+        guard let i = timers.firstIndex(where: { $0.id == t.id }), timers[i].running else { return }
+        timers[i].fireAt = max(Date().addingTimeInterval(5), timers[i].fireAt.addingTimeInterval(Double(minutes) * 60))
+        save(); resume()
     }
 
     func extend(_ t: SBTimer, by seconds: TimeInterval) {
@@ -218,9 +243,14 @@ struct TimersTabView: View {
             // New timer: a name, a colour, then when. Enter in the name opens "when".
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
-                    TextField("Label", text: $label).textFieldStyle(.plain).font(PT.label)
+                    TextField("Label, or \"25m tea\" to start at once", text: $label).textFieldStyle(.plain).font(PT.label)
                         .focused($focused)
-                        .onSubmit { picking = true }
+                        // "25m tea" starts straight away; a plain name opens the picker
+                        .onSubmit {
+                            if let (sec, name) = TimerShorthand.parse(label) {
+                                timers.add(label: name, color: color ?? "blue", fireAt: Date().addingTimeInterval(sec)); label = ""
+                            } else { picking = true }
+                        }
                         .onExitCommand { focused = false }
                         .inputBox(focused: focused)
                     WhenButton(title: "Start a timer for", presets: WhenPreset.timer,
@@ -233,6 +263,22 @@ struct TimersTabView: View {
                     .help("Pick how long; the timer starts at once (Enter in the label opens this)")
                 }
                 ColorBalls(selection: $color)
+                if !timers.recent.isEmpty {
+                    // the last few timers, to start again in one click
+                    FlowLayout(spacing: 5) {
+                        ForEach(timers.recent, id: \.label) { r in
+                            Button { timers.add(label: r.label, color: r.color, fireAt: Date().addingTimeInterval(r.seconds)) } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.clockwise").font(.sbIcon(9.5))
+                                    Text("\(clock(r.seconds)) \(r.label)").font(.sb(10.5))
+                                }
+                                .padding(.horizontal, 7).padding(.vertical, 3)
+                                .background(Capsule().fill(timerColor(r.color).opacity(0.2)))
+                            }
+                            .buttonStyle(.plain).help("Start \(r.label) again for \(clock(r.seconds))")
+                        }
+                    }
+                }
             }
             .padding(.horizontal, 4)
             .onAppear {
@@ -260,6 +306,7 @@ struct TimersTabView: View {
                         VStack(spacing: 0) {
                             if i > 0 { Divider().padding(.leading, PT.rowH) }
                             TimerRow(timer: t, timers: timers, grip: grip)
+                                .revealFlash("timer-" + t.id).id("timer-" + t.id)
                         }
                     }
                 }
@@ -390,4 +437,54 @@ func probeTimers() -> String {
 func clock(_ seconds: TimeInterval) -> String {
     let s = max(0, Int(seconds.rounded(.up)))
     return s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60) : String(format: "%d:%02d", s / 60, s % 60)
+}
+
+/// A timer typed in one go: "25m tea", "tea 25m", "1h30 review", "90s". The
+/// length can come first or last; whatever is left is the label.
+enum TimerShorthand {
+    static func parse(_ text: String) -> (seconds: TimeInterval, label: String)? {
+        var words = text.split(separator: " ").map(String.init)
+        guard !words.isEmpty else { return nil }
+        for at in [0, words.count - 1] {
+            if let s = seconds(words[at]) {
+                words.remove(at: at)
+                return (s, words.joined(separator: " "))
+            }
+        }
+        return nil
+    }
+
+    /// "25m", "1h", "1h30", "1h30m", "90s", "2h15m"; a bare number is not a length.
+    static func seconds(_ w: String) -> TimeInterval? {
+        // minutes may drop their "m" only after hours ("1h30"); otherwise "90s" would read as 9 minutes and 0 seconds
+        let re = try! NSRegularExpression(pattern: #"^(?:(\d+)h(?:(\d+)m?)?|(\d+)m)?(?:(\d+)s)?$"#)
+        let lower = w.lowercased()
+        guard lower.rangeOfCharacter(from: CharacterSet(charactersIn: "hms")) != nil,
+              let m = re.firstMatch(in: lower, range: NSRange(lower.startIndex..., in: lower)) else { return nil }
+        func n(_ i: Int) -> Double { Range(m.range(at: i), in: lower).flatMap { Double(lower[$0]) } ?? 0 }
+        let total = n(1) * 3600 + (n(2) + n(3)) * 60 + n(4)
+        return total > 0 ? total : nil
+    }
+}
+
+/// The timer rules without starting one.
+func probeTimerShorthand() -> [String] {
+    var lines: [String] = []
+    func check(_ name: String, _ ok: Bool, _ got: String = "") {
+        lines.append("\(ok ? "ok  " : "FAIL") \(name)\(ok || got.isEmpty ? "" : " (got: \(got))")")
+    }
+    func p(_ s: String) -> String { TimerShorthand.parse(s).map { "\(Int($0.seconds)) \($0.label)" } ?? "nil" }
+    check("25m tea starts 25 minutes named tea", p("25m tea") == "1500 tea", p("25m tea"))
+    check("the length can come last", p("tea 25m") == "1500 tea", p("tea 25m"))
+    check("1h30 review is an hour and a half", p("1h30 review") == "5400 review", p("1h30 review"))
+    check("90s alone has no label", p("90s") == "90 ", p("90s"))
+    check("a bare number is not a length", p("call 5") == "nil" && p("tea") == "nil", p("call 5"))
+    let r = TimerStore.Recent(label: "tea", seconds: 300, color: "blue")
+    let list = TimerStore.recentList(adding: r, to: [r, TimerStore.Recent(label: "x", seconds: 60, color: "red")])
+    check("starting the same timer again does not list it twice", list.count == 2 && list.first == r)
+    let now = Date(timeIntervalSince1970: 50_000)
+    check("a note edited an hour ago stays a row on the hover card", Note.keepsRow(pinned: false, modified: now.addingTimeInterval(-3600), now: now))
+    check("one edited three hours ago becomes a chip", !Note.keepsRow(pinned: false, modified: now.addingTimeInterval(-3 * 3600), now: now))
+    check("a pinned note is always a row", Note.keepsRow(pinned: true, modified: nil, now: now))
+    return lines
 }
