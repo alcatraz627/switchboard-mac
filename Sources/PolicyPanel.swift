@@ -243,6 +243,13 @@ struct PolicyPanel: View {
                 Spacer(minLength: 8)
                 Text(current.subtitle).font(PT.caption).foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
+                if !unbounded {
+                    Button { DeskPanels.shared.pin(.tab, current.id) } label: {
+                        Image(systemName: "pin.square").font(.sbIcon(12, weight: .medium))
+                    }
+                    .buttonStyle(.borderless).foregroundStyle(.secondary)
+                    .help("Pin \(current.title) to the desktop as a panel that stays up")
+                }
                 ForEach(shown.filter { Visibility.space(of: $0.id) == nil }) { c in headerButton(c) }
             }
             spaceBar
@@ -1415,7 +1422,8 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
                                      self?.store.queries[tab] = q
                                      self?.peek?.hide(); self?.show(tab: tab)
                                  },
-                                 openReveal: { [weak self] tab, key in self?.reveal(tab: tab, key: key) })
+                                 openReveal: { [weak self] tab, key in self?.reveal(tab: tab, key: key) },
+                                 pin: { page in DeskPanels.shared.pin(.page, page.rawValue) })
             peek = HoverPeek(button: b, state: quick, card: AnyView(ScaledRoot { card }),
                              refresh: { [weak self] in self?.refreshQuick() },
                              panelOpen: { [weak self] in self?.popover.isShown ?? false })
@@ -1462,6 +1470,31 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             guard let self, self.popover.isShown, let v = self.popover.contentViewController?.view, e.window === v.window else { return e }
             return MiddleClickTargets.shared.handle(e, in: v, space: ScrollTargets.space) ? nil : e
         }
+
+        // Desk panels draw from the same stores as the hover card and the panel.
+        DeskPanels.shared.title = { [weak self] item in
+            item.kind == .page ? (QuickPage(rawValue: item.id)?.title ?? item.id)
+                : (self?.concerns.first { $0.id == item.id }?.title ?? item.id)
+        }
+        DeskPanels.shared.content = { [weak self] item in
+            guard let self else { return nil }
+            switch item.kind {
+            case .page:
+                guard let page = QuickPage(rawValue: item.id) else { return nil }
+                let st = QuickState()
+                st.page = page; st.pages = [page]; st.space = item.space; st.onDesk = true
+                return AnyView(QuickCard(state: st, policy: self.store, usage: self.usage, lights: self.lights,
+                                         notes: NotesStore.shared, controls: self.controls,
+                                         openTab: { [weak self] tab in self?.show(tab: tab) },
+                                         openSearch: { [weak self] tab, q in self?.store.queries[tab] = q; self?.show(tab: tab) },
+                                         openReveal: { [weak self] tab, key in self?.reveal(tab: tab, key: key) }))
+            case .tab:
+                guard let c = self.concerns.first(where: { $0.id == item.id }) else { return nil }
+                c.refresh()
+                return AnyView(DeskTab(concern: c))
+            }
+        }
+        DispatchQueue.main.async { DeskPanels.shared.restore() }
 
         // Pay the first-open costs now, not on the owner's click: load the
         // values and lay out the view once while nobody is waiting.

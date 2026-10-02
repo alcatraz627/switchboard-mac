@@ -275,6 +275,7 @@ enum SessionActions {
 struct SessionsPage: View {
     @ObservedObject var store: SessionsStore
     var now: Date = Date()
+    @Environment(\.cardSpace) private var cardSpace
     @State private var opening: String?
     @State private var failed: String?
 
@@ -294,7 +295,7 @@ struct SessionsPage: View {
                 strip(list)
                 if let h = hero {
                     HeroCard(session: h, now: now) { open(h) }
-                        .onMiddleClick("shero-" + h.id, space: ScrollTargets.cardSpace) { openInBrowser(h) }
+                        .onMiddleClick("shero-" + h.id, space: cardSpace) { openInBrowser(h) }
                 }
                 ForEach([Attention.needsYou, .working, .idle], id: \.self) { a in
                     let group = rest.filter { $0.attention == a }
@@ -303,7 +304,7 @@ struct SessionsPage: View {
                             Text(groupTitle(a)).font(.sb(10, weight: .semibold)).foregroundStyle(.tertiary)
                             ForEach(group) { s in
                                 SessionRow(session: s, now: now, busy: opening == s.id) { open(s) }
-                                    .onMiddleClick("srow-" + s.id, space: ScrollTargets.cardSpace) { openInBrowser(s) }
+                                    .onMiddleClick("srow-" + s.id, space: cardSpace) { openInBrowser(s) }
                             }
                         }
                     }
@@ -320,12 +321,13 @@ struct SessionsPage: View {
                 } label: { Label("Hub", systemImage: "rectangle.grid.2x2") }
                     .buttonStyle(.borderless).font(.sb(11.5))
                     .help("Open the session hub's board: every session, past ones too, with search. Middle-click to open it in the browser.")
-                    .onMiddleClick("shub", space: ScrollTargets.cardSpace) { failed = nil; SessionActions.openHub(inBrowser: true) { failed = $0 } }
+                    .onMiddleClick("shub", space: cardSpace) { failed = nil; SessionActions.openHub(inBrowser: true) { failed = $0 } }
                 Spacer()
             }
         }
-        .onAppear { store.watching = true }
-        .onDisappear { store.watching = false }
+        // the hover card reads every 3 s while open; a desk panel stays up, so it keeps the calmer 15 s pace
+        .onAppear { if cardSpace == ScrollTargets.cardSpace { store.watching = true } }
+        .onDisappear { if cardSpace == ScrollTargets.cardSpace { store.watching = false } }
     }
 
     private func groupTitle(_ a: Attention) -> String {

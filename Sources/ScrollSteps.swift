@@ -76,8 +76,14 @@ extension ScrollStepper.Phase {
 /// content, so one scrolled out of sight under the header never catches a scroll.
 final class ScrollTargets {
     static let shared = ScrollTargets()
-    /// The hover card's own places (its sliders), in the card's window.
-    static let card = ScrollTargets()
+    /// Each card window's own places (its sliders), by the card's space name:
+    /// the hover card and every desk panel keep separate lists.
+    private static var cards: [String: ScrollTargets] = [:]
+    static func forSpace(_ space: String) -> ScrollTargets {
+        if let t = cards[space] { return t }
+        let t = ScrollTargets(); cards[space] = t; return t
+    }
+    static var card: ScrollTargets { forSpace(cardSpace) }
     static let stepped = Notification.Name("switchboard.scrollStep")
     static let space = "panel"
     static let cardSpace = "quickCard"
@@ -119,13 +125,14 @@ final class ScrollTargets {
 
 extension View {
     /// Makes this view a place that takes scroll steps; `act` gets +1 or -1.
-    /// `onCard` registers it with the hover card instead of the panel.
-    func scrollSteps(_ id: String, inContent: Bool = false, onCard: Bool = false,
+    /// `card` names the card window it registers with (the hover card or a desk
+    /// panel); without one it registers with the panel.
+    func scrollSteps(_ id: String, inContent: Bool = false, card: String? = nil,
                      stepper: @escaping @autoclosure () -> ScrollStepper = .tabs(),
                      _ act: @escaping (Int) -> Void) -> some View {
-        let targets = onCard ? ScrollTargets.card : ScrollTargets.shared
+        let targets = card.map(ScrollTargets.forSpace) ?? ScrollTargets.shared
         return background(GeometryReader { g in
-            let f = g.frame(in: .named(onCard ? ScrollTargets.cardSpace : ScrollTargets.space))
+            let f = g.frame(in: .named(card ?? ScrollTargets.space))
             Color.clear
                 .onAppear { targets.set(id, frame: f, inContent: inContent, stepper: stepper()) }
                 .onChange(of: f) { nf in targets.set(id, frame: nf, inContent: inContent, stepper: stepper()) }

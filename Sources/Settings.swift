@@ -97,6 +97,10 @@ struct SettingsTabView: View {
                     }
                 }
             }
+            if hoverAll || matches("approvals") || matches("waiting") {
+                group("Under every page", note: "What waits on you as a small card under whichever hover page is showing, one line each, with a button to the Approvals page.",
+                      rows: [approvalsCardRow])
+            }
             if linger {
                 VStack(alignment: .leading, spacing: 5) {
                     GroupHeader(name: "Mouse-away delay")
@@ -125,6 +129,15 @@ struct SettingsTabView: View {
     }
 
     @ObservedObject private var scale = UIScale.shared
+
+    private var approvalsCardRow: SystemRow {
+        var r = SystemRow(label: "Show what waits under every page", state: store.approvalsUnderEveryPage ? .on(menuGreen) : .off,
+                          note: store.approvalsUnderEveryPage ? "on" : "off", tip: "",
+                          action: { store.approvalsUnderEveryPage.toggle() })
+        r.icon = "hand.raised"
+        r.key = "settings-approvals-card"
+        return r
+    }
 
     private var sizeRow: SystemRow {
         var r = SystemRow(label: scale.size.title, state: .ok, note: scale.size.detail, tip: "Small, Medium or Large")

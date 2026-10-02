@@ -350,6 +350,11 @@ final class PolicyStore: ObservableObject {
         didSet { UserDefaults.standard.set(Array(hiddenQuickPages).sorted(), forKey: Self.quickHiddenKey) }
     }
     /// How long the hover card stays after the pointer leaves, in whole seconds from 1 to 15.
+    /// Show what waits on the owner as a small card under every hover page.
+    static let approvalsCardKey = "switchboard.approvalsUnderEveryPage"
+    @Published var approvalsUnderEveryPage: Bool = UserDefaults.standard.bool(forKey: PolicyStore.approvalsCardKey) {
+        didSet { UserDefaults.standard.set(approvalsUnderEveryPage, forKey: Self.approvalsCardKey) }
+    }
     static let hoverLingerKey = "switchboard.hoverLinger"
     static let hoverLingerRange: ClosedRange<Double> = 1...15
     static func clampedLinger(_ v: Double) -> Double {

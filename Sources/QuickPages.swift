@@ -234,6 +234,10 @@ final class QuickState: ObservableObject {
     /// scrolling above this line turns pages.
     var headerBottom: CGFloat = 34
     @Published var badges: [StatusBadge] = []
+    /// The window space this card draws in; each desk panel has its own.
+    var space = ScrollTargets.cardSpace
+    /// A desk panel: it stays on screen, so it refreshes at a calmer pace than the hover card.
+    var onDesk = false
 }
 
 /// One standard badge for something that needs the owner, coloured by how
@@ -314,12 +318,14 @@ struct QuickCard: View {
     var openSearch: (String, String) -> Void = { _, _ in }
     /// Opens a tab and lands on one row there, flashing it.
     var openReveal: (String, String) -> Void = { _, _ in }
+    /// Pins a page to the desktop as a desk panel.
+    var pin: ((QuickPage) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
                 .background(GeometryReader { g in
-                    Color.clear.onAppear { state.headerBottom = g.frame(in: .named("quickCard")).maxY + 5 }
+                    Color.clear.onAppear { state.headerBottom = g.frame(in: .named(state.space)).maxY + 5 }
                 })
             Divider().padding(.horizontal, -12)
             switch state.page {
@@ -335,20 +341,33 @@ struct QuickCard: View {
             case .controls: controlsPage
             case .models: modelsPage
             }
+            if policy.approvalsUnderEveryPage && state.page != .approvals && state.pages.contains(.approvals) {
+                Divider().padding(.horizontal, -12)
+                approvalsCard
+            }
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
         .frame(width: sw(320), alignment: .leading)
         .background(GlassBackground())
-        .coordinateSpace(name: "quickCard")
+        .coordinateSpace(name: state.space)
+        .environment(\.cardSpace, state.space)
     }
 
     /// One pill per page, the panel's tab grammar in small: an icon each, the
     /// current one also named, a click or its number key goes there.
     private var header: some View {
         HStack(spacing: 4) {
-            // the current page is named when the row has room; with many pages on, every pill is an icon
-            ViewThatFits(in: .horizontal) { pills(named: true); pills(named: false) }
+            // the current page is named when the row has room; with many pages on, every pill is an icon.
+            // A desk panel shows one page and names it in its own title row, so it needs no pills.
+            if !state.onDesk { ViewThatFits(in: .horizontal) { pills(named: true); pills(named: false) } }
             Spacer(minLength: 4)
+            if let pin, !state.onDesk {
+                Button { pin(state.page) } label: {
+                    Image(systemName: "pin.square").font(.sbIcon(12, weight: .medium))
+                }
+                .buttonStyle(.borderless).foregroundStyle(.secondary)
+                .help("Pin \(state.page.title) to the desktop as a panel that stays up")
+            }
             if let tab = state.page.tab {
                 Button { openTab(tab) } label: {
                     Image(systemName: "arrow.up.forward.app").font(.sbIcon(12, weight: .medium))
@@ -414,7 +433,7 @@ struct QuickCard: View {
                             else if let t = b.tab { if let q = b.query { openSearch(t, q) } else { openTab(t) } }
                         }
                         // a middle click always goes to the full tab, even for a badge that opens a hover page
-                        .onMiddleClick("badge-" + b.id, space: ScrollTargets.cardSpace) {
+                        .onMiddleClick("badge-" + b.id, space: state.space) {
                             if let t = b.tab ?? b.opens?.tab { if let q = b.query { openSearch(t, q) } else { openTab(t) } }
                         }
                     }
@@ -466,12 +485,41 @@ struct QuickCard: View {
                 Text(title).font(.sb(10, weight: .semibold)).foregroundStyle(.tertiary)
                 ForEach(rows) { r in
                     QuickNeedRow(row: r, waiting: title == "Pushes" || title == "Policy asks" || title == "Claude asks")
-                        .onMiddleClick("qneed-" + (r.key ?? r.label), space: ScrollTargets.cardSpace) {
+                        .onMiddleClick("qneed-" + (r.key ?? r.label), space: state.space) {
                             openReveal("approvals", r.key ?? r.label)
                         }
                 }
             }
             if total > 5 { more(total - 5, tab: "approvals") }
+        }
+    }
+
+    // ── What waits, under every page ────────────────────────────────────────
+    /// One line per push, ask or Claude prompt waiting on the owner; the button
+    /// in its title bar goes to the Approvals page with the full rows and buttons.
+    private var approvalsCard: some View {
+        // only what a live session waits on; leftovers from ended sessions stay on the Approvals page
+        let live: Set<String> = ["Pushes", "Policy asks", "Claude asks"]
+        let rows = policy.needGroups.filter { live.contains($0.title) }.flatMap { g in g.rows.filter { !$0.buttons.isEmpty } }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "hand.raised").font(.sbIcon(10, weight: .semibold))
+                    .foregroundStyle(rows.isEmpty ? Color.secondary : Color(nsColor: menuYellow))
+                Text(rows.isEmpty ? "Nothing waits on you" : "Waiting on you · \(rows.count)")
+                    .font(.sb(10.5, weight: .semibold)).foregroundStyle(rows.isEmpty ? .tertiary : .secondary)
+                Spacer()
+                Button { state.page = .approvals } label: {
+                    Image(systemName: "arrow.right.circle").font(.sbIcon(11, weight: .medium))
+                }
+                .buttonStyle(.borderless).foregroundStyle(.secondary).help("Open the Approvals page")
+            }
+            ForEach(Array(rows.prefix(4))) { r in
+                Text(r.label).font(.sb(11)).fixedSize(horizontal: false, vertical: true)
+                    .onMiddleClick("acard-" + (r.key ?? r.label), space: state.space) { openReveal("approvals", r.key ?? r.label) }
+            }
+            if rows.count > 4 {
+                Button { state.page = .approvals } label: { Text("\(rows.count - 4) more").font(.sb(10.5)) }.buttonStyle(.link)
+            }
         }
     }
 
@@ -485,7 +533,7 @@ struct QuickCard: View {
             if lights.bulbs.isEmpty { empty(lights.discovering ? "Looking for bulbs…" : "No bulbs found") }
             ForEach(rows) { b in
                 QuickBulbRow(bulb: b, lights: lights, lastOn: lights.lastOn[b.mac])
-                    .onMiddleClick("qbulb-" + b.mac, space: ScrollTargets.cardSpace) { openReveal("home", BulbRow.revealKey(b.mac)) }
+                    .onMiddleClick("qbulb-" + b.mac, space: state.space) { openReveal("home", BulbRow.revealKey(b.mac)) }
             }
             if !chips.isEmpty {
                 ChipFlow(items: chips.map { b in
@@ -614,7 +662,7 @@ struct QuickCard: View {
         HStack(spacing: 8) {
             Image(systemName: icon).font(.sbIcon(11)).foregroundStyle(.secondary).frame(width: si(16))
             Slider(value: Binding(get: { Double(value) }, set: { set(Float($0)) }), in: 0...1).sbControlSize(.mini)
-                .scrollSteps("q-level-" + icon, onCard: true, stepper: .slider()) { st in set(sliderStep(value, by: st)) }
+                .scrollSteps("q-level-" + icon, card: state.space, stepper: .slider()) { st in set(sliderStep(value, by: st)) }
             Text(text).font(.sb(10.5).monospacedDigit()).foregroundStyle(.secondary).frame(width: sw(38), alignment: .trailing)
         }
     }
@@ -806,8 +854,9 @@ struct FlowLayout: Layout {
 struct MiddleClickIfAny: ViewModifier {
     let id: String
     let act: (() -> Void)?
+    @Environment(\.cardSpace) private var cardSpace
     func body(content: Content) -> some View {
-        if let act { content.onMiddleClick(id, space: ScrollTargets.cardSpace, act) } else { content }
+        if let act { content.onMiddleClick(id, space: cardSpace, act) } else { content }
     }
 }
 
@@ -818,6 +867,7 @@ struct QuickBulbRow: View {
     let bulb: Bulb
     @ObservedObject var lights: LightsStore
     let lastOn: Date?
+    @Environment(\.cardSpace) private var cardSpace
     @State private var dim: Double?
     @State private var send: DispatchWorkItem?
 
@@ -844,7 +894,7 @@ struct QuickBulbRow: View {
             if bulb.on {
                 Slider(value: Binding(get: { level }, set: { change($0) }), in: 10...100).sbControlSize(.mini)
                     .frame(width: sc(110))
-                    .scrollSteps("q-bulb-" + bulb.mac, onCard: true, stepper: .slider()) { st in change(level + Double(st) * 5) }
+                    .scrollSteps("q-bulb-" + bulb.mac, card: cardSpace, stepper: .slider()) { st in change(level + Double(st) * 5) }
                 Text("\(Int(level.rounded()))%").font(.sb(10.5).monospacedDigit()).foregroundStyle(.secondary)
                     .frame(width: sw(32), alignment: .trailing)
             }

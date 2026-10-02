@@ -16,10 +16,11 @@ final class MiddleClickTargets {
     struct Target { var frame: CGRect; var space: String; var act: () -> Void }
     private(set) var targets: [String: Target] = [:]
 
+    // keyed by window space and name, so the same row drawn in two windows keeps two places
     func set(_ id: String, frame: CGRect, space: String, act: @escaping () -> Void) {
-        targets[id] = Target(frame: frame, space: space, act: act)
+        targets[space + "|" + id] = Target(frame: frame, space: space, act: act)
     }
-    func remove(_ id: String) { targets[id] = nil }
+    func remove(_ id: String, space: String) { targets[space + "|" + id] = nil }
 
     /// The place under a point in a space; the smallest wins, so a chip inside a row beats the row.
     func target(in space: String, at p: CGPoint) -> String? {
@@ -47,8 +48,17 @@ extension View {
             Color.clear
                 .onAppear { MiddleClickTargets.shared.set(id, frame: f, space: space, act: act) }
                 .onChange(of: f) { nf in MiddleClickTargets.shared.set(id, frame: nf, space: space, act: act) }
-                .onDisappear { MiddleClickTargets.shared.remove(id) }
+                .onDisappear { MiddleClickTargets.shared.remove(id, space: space) }
         })
+    }
+}
+
+/// The window space a card draws in: "quickCard" for the hover card, its own name for each desk panel.
+private struct CardSpaceKey: EnvironmentKey { static let defaultValue = ScrollTargets.cardSpace }
+extension EnvironmentValues {
+    var cardSpace: String {
+        get { self[CardSpaceKey.self] }
+        set { self[CardSpaceKey.self] = newValue }
     }
 }
 
@@ -118,10 +128,13 @@ func probePointer() -> [String] {
     t.set("row", frame: CGRect(x: 0, y: 0, width: 300, height: 30), space: "card") { hit = "row" }
     t.set("chip", frame: CGRect(x: 200, y: 5, width: 60, height: 20), space: "card") { hit = "chip" }
     t.set("other", frame: CGRect(x: 0, y: 0, width: 300, height: 30), space: "panel") { hit = "other" }
-    check("a middle click finds the place under it", t.target(in: "card", at: CGPoint(x: 10, y: 10)) == "row")
-    check("a chip inside a row wins over the row", t.target(in: "card", at: CGPoint(x: 210, y: 10)) == "chip")
+    check("a middle click finds the place under it", t.target(in: "card", at: CGPoint(x: 10, y: 10)) == "card|row")
+    check("a chip inside a row wins over the row", t.target(in: "card", at: CGPoint(x: 210, y: 10)) == "card|chip")
     check("a place in another window does not catch it", t.target(in: "card", at: CGPoint(x: 10, y: 40)) == nil)
-    t.targets["row"]?.act()
+    t.set("row", frame: CGRect(x: 0, y: 0, width: 50, height: 10), space: "desk-1") { hit = "desk" }
+    check("the same row in a second window keeps its own place",
+          t.target(in: "card", at: CGPoint(x: 10, y: 5)) == "card|row" && t.target(in: "desk-1", at: CGPoint(x: 10, y: 5)) == "desk-1|row")
+    t.targets["card|row"]?.act()
     check("its action runs", hit == "row", hit)
     let r = Reveal()
     r.show("bulb-1")

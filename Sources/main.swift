@@ -123,7 +123,7 @@ if args.contains("--time-tabs") {
     exit(0)
 }
 if args.contains("--probe-quick") {
-    let r = probeQuickCycle() + "\n" + (probePointer() + probeScale()).joined(separator: "\n")
+    let r = probeQuickCycle() + "\n" + (probePointer() + probeScale() + probeDesk()).joined(separator: "\n")
     print(r)
     exit(r.contains("FAIL") ? 1 : 0)
 }
@@ -166,8 +166,14 @@ if let out = argAfter("--snapshot-quick") {
         else if let s = Integrations.scanScript { SessionsStore.shared.show(Data(Services.run("/bin/bash", [s, "--quick"], timeout: 10).out.utf8)) }
         else { SessionsStore.shared.show(Data("{\"live\": []}".utf8)) }
     }
+    // --desk draws the page as a desk panel would show it
+    if args.contains("--approvals-card") { policy.approvalsUnderEveryPage = true }
+    let desk = args.contains("--desk")
+    if desk { state.pages = [page]; state.onDesk = true; state.space = DeskItem(kind: .page, id: page.rawValue).space }
     let card = QuickCard(state: state, policy: policy, usage: usage, lights: lights, notes: NotesStore.shared, controls: controls, openTab: { _ in })
-    let ok = snapshotCard(AnyView(card), to: out)
+    let shown = desk ? AnyView(DeskFrame(item: DeskItem(kind: .page, id: page.rawValue), title: page.title, toggleTop: {}, close: {}) { card })
+                     : AnyView(card)
+    let ok = snapshotCard(shown, to: out)
     print(ok ? "wrote \(out)" : "snapshot failed")
     exit(ok ? 0 : 1)
 }
