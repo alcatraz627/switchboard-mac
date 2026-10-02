@@ -230,6 +230,7 @@ enum Icons {
         "Personas": "theatermasks",
         "Scripts": "terminal",
         "Mistakes": "exclamationmark.bubble",
+        "Checkpoints": "bookmark",
         "Open proposals": "lightbulb",
         "Closed proposals": "archivebox",
         "Scheduled": "clock",
@@ -341,7 +342,7 @@ enum Visibility {
     static let sections: [String: [String]] = [
         "usage": ["Claude", "Codex"],
         "rules": ["Guards", "Rules", "Hook scripts"],
-        "ledger": ["Mistakes", "Open proposals", "Closed proposals"],
+        "ledger": ["Mistakes", "Open proposals", "Closed proposals", "Checkpoints"],
         "queue": ["Scheduled", "Cron duties", "Deploy queue", "Open proposals"],
         "library": ["Skills", "Parked skills", "Knowledge", "Personas", "Scripts"],
         "runtime": ["Services", "Databases", "Dev servers", "Local models", "Schedules"],
@@ -364,11 +365,11 @@ enum Visibility {
 /// What the hover preview on the menu bar icon can carry. The owner picks in
 /// Settings; the defaults keep it to the three that change what you do next.
 enum HoverItem: String, CaseIterable {
-    case limits, approvals, problems, timers, services, iconDot
+    // Claude limits have their own hover page; a saved "limits" is dropped on read
+    case approvals, problems, timers, services, iconDot
 
     var title: String {
         switch self {
-        case .limits: return "Claude limits"
         case .approvals: return "Waiting on you"
         case .problems: return "Problems"
         case .timers: return "Running timers"
@@ -379,7 +380,6 @@ enum HoverItem: String, CaseIterable {
 
     var detail: String {
         switch self {
-        case .limits: return "the 5-hour and weekly bars, coloured by your warn and danger zones"
         case .approvals: return "how many pushes and asks wait, and the oldest"
         case .problems: return "sources that failed to read, failing jobs, hooks with no event"
         case .timers: return "up to two running timers, timed flips such as Keep Awake, and the next note reminder"
@@ -389,7 +389,7 @@ enum HoverItem: String, CaseIterable {
     }
 
     static let key = "switchboard.hoverItems"
-    static let defaults: Set<HoverItem> = [.limits, .approvals, .problems, .timers]
+    static let defaults: Set<HoverItem> = [.approvals, .problems, .timers]
 
     static var chosen: Set<HoverItem> {
         guard let raw = UserDefaults.standard.stringArray(forKey: key) else { return defaults }

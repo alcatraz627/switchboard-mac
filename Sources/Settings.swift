@@ -25,10 +25,9 @@ struct SettingsTabView: View {
     }
 
     var body: some View {
-        // Claude limits have their own hover page now, so they are a page below, not a Now item
         // a search for "hover" (what the hover card's settings button opens) shows all of the hover's settings
         let hoverAll = matches("hover")
-        let hover = HoverItem.allCases.filter { $0 != .limits && (hoverAll || matches($0.title) || matches($0.detail)) }
+        let hover = HoverItem.allCases.filter { hoverAll || matches($0.title) || matches($0.detail) }
         let pages = quickPages.filter { hoverAll || matches($0.title) }
         let linger = hoverAll || matches("delay") || matches("away") || matches("linger")
         let folder = matches("notes folder") || matches(NotesStore.dir)

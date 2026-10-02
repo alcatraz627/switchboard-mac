@@ -410,6 +410,39 @@ enum PluginsCatalog {
 
 /// Checks that secrets in MCP server arguments never reach the panel, and
 /// that ordinary arguments pass untouched. Run by --probe-catalog.
+/// The Ledger's Checkpoints section, read from a scratch index: core-dumps
+/// only, newest first, one row per file, and a gone file says so.
+func probeCheckpoints() -> [String] {
+    var lines: [String] = []
+    func check(_ name: String, _ ok: Bool, _ got: String = "") {
+        lines.append("\(ok ? "ok  " : "FAIL") \(name)\(ok || got.isEmpty ? "" : " (got: \(got))")")
+    }
+    let fm = FileManager.default
+    let dir = NSTemporaryDirectory() + "sb-checkpoint-probe-\(getpid())"
+    try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(atPath: dir) }
+    let cpA = dir + "/_a.claude.md", cpB = dir + "/_b.claude.md"
+    fm.createFile(atPath: cpA, contents: Data("a".utf8)); fm.createFile(atPath: cpB, contents: Data("b".utf8))
+    let idx = dir + "/index.jsonl"
+    let entries = [
+        #"{"ts":"2026-10-01T08:00:00Z","project_root":"/x/alpha","checkpoint_path":"\#(cpA)","name":"a-old","summary":"First write.","kind":"core-dump"}"#,
+        #"{"ts":"2026-10-01T09:00:00Z","project_root":"/x/beta","checkpoint_path":"\#(cpB)","name":"b","summary":"Beta work.","kind":"core-dump"}"#,
+        #"{"ts":"2026-10-01T10:00:00Z","project_root":"/x/alpha","checkpoint_path":"\#(cpA)","name":"a-new","summary":"Rewritten.","kind":"core-dump"}"#,
+        #"{"ts":"2026-10-01T11:00:00Z","project_root":"/x/alpha","checkpoint_path":"\#(dir)/_end.claude.md","name":"end","summary":"Auto session-end","kind":"session-end"}"#,
+        #"{"ts":"2026-10-01T07:00:00Z","project_root":"/x/gone","checkpoint_path":"\#(dir)/_gone.claude.md","name":"gone","summary":"Old.","kind":"core-dump"}"#,
+    ]
+    fm.createFile(atPath: idx, contents: Data(entries.joined(separator: "\n").utf8))
+    let cps = (try? LedgerCatalog.checkpoints(index: idx)) ?? []
+    check("checkpoints come newest first, one per file, without session-end snapshots",
+          cps.map(\.name) == ["a-new", "b", "gone"], cps.map(\.name).joined(separator: ","))
+    check("a checkpoint offers its /catchup line to copy",
+          cps.first?.actions.first.map { if case .copy(let s) = $0.kind { return s == "/catchup at \(cpA)" }; return false } ?? false)
+    check("a checkpoint whose file is gone says so and offers nothing to copy",
+          cps.last?.tag?.contains("file gone") == true && cps.last?.actions.isEmpty == true)
+    check("the list stops at its limit", ((try? LedgerCatalog.checkpoints(limit: 1, index: idx)) ?? []).count == 1)
+    return lines
+}
+
 func probeRedaction() -> [String] {
     let cases: [(String, String)] = [
         ("postgresql://admin:hunter2@db.local:5432/app", "postgresql://•••@db.local:5432/app"),
@@ -554,7 +587,40 @@ enum LedgerCatalog {
         func part(_ open: Bool) -> () throws -> [CatalogEntry] {
             { try props().filter { ($0.tag?.hasPrefix("open") ?? false) == open } }
         }
-        return Catalog.sections("ledger", [("Mistakes", mistakes), ("Open proposals", part(true)), ("Closed proposals", part(false))])
+        return Catalog.sections("ledger", [("Mistakes", mistakes), ("Open proposals", part(true)), ("Closed proposals", part(false)),
+                                           ("Checkpoints", { try checkpoints() })])
+    }
+
+    /// The last checkpoints written by /core-dump, newest first, each with the
+    /// /catchup line that resumes it. Automatic session-end and pre-compaction
+    /// snapshots are left out: they carry no summary to resume from.
+    static func checkpoints(limit: Int = 20, index: String = gcc + "/checkpoints/index.jsonl") throws -> [CatalogEntry] {
+        let rows = try jsonLines(index)
+            .filter { !["session-end", "precompact"].contains(($0["kind"] as? String) ?? "") }
+            .sorted { (($0["ts"] as? String) ?? "") > (($1["ts"] as? String) ?? "") }
+        var seen = Set<String>(), out: [CatalogEntry] = []
+        let iso = ISO8601DateFormatter(), shown = DateFormatter()
+        shown.dateFormat = "d MMM, h:mm a"
+        for c in rows {
+            // the index logs every write; a file rewritten later shows once, at its newest
+            guard let path = c["checkpoint_path"] as? String, seen.insert(path).inserted else { continue }
+            let root = (c["project_root"] as? String) ?? ""
+            let project = (root as NSString).lastPathComponent
+            let when = (c["ts"] as? String).flatMap(iso.date(from:)).map(shown.string(from:)) ?? ""
+            let summary = (c["summary"] as? String) ?? ""
+            let exists = FileManager.default.fileExists(atPath: path)
+            let resume = "/catchup at \(path)"
+            var details: [(String, String)] = []
+            if !summary.isEmpty { details.append(("Where it stopped", summary)) }
+            details.append(("Project", abbreviateHome(root)))
+            details.append(("Resume with", exists ? resume : "The file is gone; it cannot be resumed."))
+            out.append(CatalogEntry(name: (c["name"] as? String) ?? (path as NSString).lastPathComponent,
+                                    summary: Catalog.firstSentence(summary), details: details, path: exists ? path : nil,
+                                    tag: [project, when].filter { !$0.isEmpty }.joined(separator: " · ") + (exists ? "" : " · file gone"),
+                                    actions: exists ? [RowButton(label: "Copy", kind: .copy(resume), help: "Copy: \(resume)")] : []))
+            if out.count == limit { break }
+        }
+        return out
     }
 
     /// One JSON object per line; a line that does not parse is skipped.
