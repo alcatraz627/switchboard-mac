@@ -104,6 +104,9 @@ def main(argv):
         print(fmt(ns["estimate_cost"](model, ti, to, *extra)))
     elif op == "read_cost":
         print(fmt(ns["read_cost"](int(argv[1]))))
+    elif op == "last_paragraph":
+        lp = ns["_last_paragraph"]
+        print(" | ".join([lp("Did X.\n\nShould I push?"), lp("One\nline wraps"), lp("Ask?\n\n```\ncode\n```"), lp("") or "-"]))
     elif op == "attention":
         # now = 10_000 s; a status set 59 min ago still needs you, 61 min ago is idle
         a = ns["attention_of"]

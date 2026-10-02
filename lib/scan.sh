@@ -353,7 +353,7 @@ def read_transcript(filepath):
     out = {'model': 'unknown', 'input_tokens': 0, 'output_tokens': 0,
            'cache_read': 0, 'cache_create': 0, 'turns': 0, 'tool_calls': 0,
            'permission_mode': '', 'last_tool': None, 'last_prompt': '',
-           'tail': []}
+           'last_reply': '', 'tail': []}
     tail = collections.deque(maxlen=3)
     last_tool_ts = ''
     usage_by_msg = {}
@@ -392,7 +392,13 @@ def read_transcript(filepath):
                     if not isinstance(content, list):
                         continue
                     for block in content:
-                        if not isinstance(block, dict) or block.get('type') != 'tool_use':
+                        if not isinstance(block, dict):
+                            continue
+                        if block.get('type') == 'text' and not obj.get('isSidechain'):
+                            reply = _last_paragraph(block.get('text', ''))
+                            if reply:
+                                out['last_reply'] = reply
+                        if block.get('type') != 'tool_use':
                             continue
                         out['tool_calls'] += 1
                         if obj.get('isSidechain'):
@@ -1161,6 +1167,14 @@ def _str_field(sess, key):
     v = sess.get(key) if sess else None
     return v if isinstance(v, str) else ''
 
+def _last_paragraph(text):
+    """The closing paragraph of a reply, whole: where Claude asks or says what is next."""
+    if not isinstance(text, str):
+        return ''
+    paras = [' '.join(p.split()) for p in re.split(r'\n\s*\n', text)]
+    paras = [p for p in paras if p and not p.startswith('```')]
+    return paras[-1] if paras else ''
+
 # A finished turn nobody has answered for this long is parked, not urgent.
 ATTENTION_IDLE_AFTER_S = 3600
 
@@ -1286,6 +1300,7 @@ def _build_claude_instance(pid, cmdline, provider, sess=None):
         'git_branch': branch,
         'git_modified': modified_files,
         'last_prompt': last_prompt,
+        'last_reply': session_data.get('last_reply', ''),
         'permission_mode': perm_mode or '',
         'last_tool': last_tool_info,
         'statusline': {
