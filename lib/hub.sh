@@ -8,6 +8,11 @@
 #   bash lib/hub.sh status    is it running? where is it bound?
 #   bash lib/hub.sh url        just print the phone URL
 #
+# With pm2 installed the hub runs under it as "session-hub" (port 5400), like
+# the kanban board: pm2 restarts it if it dies, and Switchboard's Start at
+# login switch decides whether it comes back after a reboot. Without pm2 it is
+# a plain background process, as before.
+#
 # It binds to this Mac's Tailscale address when Tailscale is up, so it is NOT
 # reachable from a public/coffee-shop network. With Tailscale down it falls
 # back to localhost and is only reachable from this machine.
@@ -29,9 +34,30 @@ fi
 
 c_dim=$'\033[2m'; c_grn=$'\033[32m'; c_yel=$'\033[33m'; c_cyn=$'\033[36m'; c_rst=$'\033[0m'
 
+PM2_NAME="session-hub"; [[ "$PORT" != "5400" ]] && PM2_NAME="session-hub-${PORT}"
+# pm2 lives on the login PATH, which a GUI caller (Switchboard) does not inherit.
+PM2="$(command -v pm2 || true)"
+[[ -z "$PM2" && -x /opt/homebrew/bin/pm2 ]] && PM2=/opt/homebrew/bin/pm2
+[[ "${CLAUDE_HUB_NO_PM2:-}" == "1" ]] && PM2=""
+
+# The hub's pid as pm2 sees it; empty when pm2 does not run it.
+pm2_pid() {
+    local p; p="$("$PM2" pid "$PM2_NAME" 2>/dev/null | tail -1)"
+    [[ "$p" =~ ^[0-9]+$ && "$p" != "0" ]] && echo "$p"
+}
+pm2_known() { "$PM2" describe "$PM2_NAME" >/dev/null 2>&1; }
+
 resolved_host() { python3 "$SERVER" --print-host --port "$PORT" 2>/dev/null || echo "127.0.0.1"; }
 
+current_pid() {
+    if [[ -n "$PM2" ]]; then
+        local p; p="$(pm2_pid)"; [[ -n "$p" ]] && { echo "$p"; return; }
+    fi
+    [[ -f "$PID_FILE" ]] && cat "$PID_FILE" 2>/dev/null
+}
+
 is_running() {
+    if [[ -n "$PM2" && -n "$(pm2_pid)" ]]; then return 0; fi
     [[ -f "$PID_FILE" ]] || return 1
     local pid; pid="$(cat "$PID_FILE" 2>/dev/null || echo)"
     [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
@@ -51,13 +77,25 @@ print_url() {
 
 cmd_start() {
     if is_running; then
-        echo "${c_grn}hub already running${c_rst} (pid $(cat "$PID_FILE"))"
+        echo "${c_grn}hub already running${c_rst} (pid $(current_pid))"
         print_url; return 0
     fi
-    nohup python3 "$SERVER" --port "$PORT" >"$LOG" 2>&1 &
-    local pid=$!
-    echo "$pid" > "$PID_FILE"
-    disown 2>/dev/null || true
+    local pid
+    if [[ -n "$PM2" ]]; then
+        if pm2_known; then
+            "$PM2" start "$PM2_NAME" >/dev/null 2>&1
+        else
+            "$PM2" start "$SERVER" --name "$PM2_NAME" --interpreter python3 \
+                --output "$LOG" --error "$LOG" -- --port "$PORT" >/dev/null 2>&1
+        fi
+        for _ in $(seq 1 30); do pid="$(pm2_pid)"; [[ -n "$pid" ]] && break; sleep 0.1; done
+        [[ -z "$pid" ]] && pid=0
+    else
+        nohup python3 "$SERVER" --port "$PORT" >"$LOG" 2>&1 &
+        pid=$!
+        echo "$pid" > "$PID_FILE"
+        disown 2>/dev/null || true
+    fi
     # Wait until OUR pid is the one listening. `nc -z` only proves somebody is:
     # when a stale hub already held the port, this one died on "address in use"
     # while nc succeeded instantly against the old one, and the start was
@@ -93,19 +131,28 @@ cmd_start() {
 }
 
 cmd_stop() {
-    if ! is_running; then echo "hub not running"; rm -f "$PID_FILE"; return 0; fi
-    local pid; pid="$(cat "$PID_FILE")"
-    kill "$pid" 2>/dev/null || true
-    for _ in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
-    kill -9 "$pid" 2>/dev/null || true
-    rm -f "$PID_FILE"
-    echo "hub stopped"
+    local stopped=""
+    if [[ -n "$PM2" && -n "$(pm2_pid)" ]]; then
+        "$PM2" stop "$PM2_NAME" >/dev/null 2>&1 && stopped=1
+    fi
+    # A hub started before pm2 ran it is a plain process with a pidfile.
+    if [[ -f "$PID_FILE" ]]; then
+        local pid; pid="$(cat "$PID_FILE" 2>/dev/null || echo)"
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+            for _ in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+            kill -9 "$pid" 2>/dev/null || true
+            stopped=1
+        fi
+        rm -f "$PID_FILE"
+    fi
+    if [[ -n "$stopped" ]]; then echo "hub stopped"; else echo "hub not running"; fi
 }
 
 cmd_status() {
     if is_running; then
         local host; host="$(resolved_host)"
-        echo "${c_grn}● running${c_rst} (pid $(cat "$PID_FILE")) bound to ${host}:${PORT}"
+        echo "${c_grn}● running${c_rst} (pid $(current_pid)${PM2:+, pm2 $PM2_NAME}) bound to ${host}:${PORT}"
         print_url
     else
         echo "${c_dim}○ not running${c_rst}"
