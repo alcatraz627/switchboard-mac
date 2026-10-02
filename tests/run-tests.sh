@@ -54,6 +54,18 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   for p in home limits approvals bulbs notes timers controls models; do
     check "the $p quick page renders" env SWITCHBOARD_STATE="$WORK/notes-state" "$BIN" --snapshot-quick "$WORK/quick-$p.png" --page "$p"
   done
+  check "sessions: grouping, order, hero, a gone session drops out, a recorded scan carries every used field" \
+    "$BIN" --probe-sessions --scan-file tests/fixtures/scan-sample.json
+  check "the sessions quick page renders from a recorded scan" \
+    "$BIN" --snapshot-quick "$WORK/quick-sessions.png" --page sessions --scan-file tests/fixtures/scan-sample.json
+  SCANNER="$HOME/.claude/widgets/claude-instances/lib/scan.sh"
+  if [[ -f "$SCANNER" ]]; then
+    bash "$SCANNER" --quick > "$WORK/live-scan.json" 2>/dev/null
+    check "the installed scanner still emits every field the Sessions card reads" \
+      "$BIN" --probe-sessions --scan-file "$WORK/live-scan.json"
+  else
+    skip "the installed scanner's fields (claude-instances not installed)"
+  fi
   check "timers run, go off, extend and clear" "$BIN" --probe-timers-tab
   check "the Queue tab renders" "$BIN" --snapshot "$WORK/queue.png" --tab queue
   check "the time picker renders" "$BIN" --snapshot-when "$WORK/when.png"

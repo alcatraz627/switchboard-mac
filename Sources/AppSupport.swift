@@ -138,6 +138,22 @@ enum Integrations {
                           AppPaths.home + "/Code/Claude/claude-instances/lib/hub.sh"]
         return candidates.first(where: exists)
     }
+    /// The scanner beside the hub, which lists the open Claude sessions for the Sessions card.
+    static var scanScript: String? {
+        hubScript.map { ($0 as NSString).deletingLastPathComponent + "/scan.sh" }.flatMap { exists($0) ? $0 : nil }
+    }
+    /// Starts the session hub when it is off and waits for it to answer; nil once it is up,
+    /// else why not. Call it off the main thread: a cold start takes a few seconds.
+    static func startHubIfDown() -> String? {
+        if Services.probeHTTP("http://127.0.0.1:5400/healthz") { return nil }
+        guard let hub = hubScript else { return "the session hub is not installed" }
+        _ = Services.shell("/bin/bash", [hub, "restart"], timeout: 15)
+        for _ in 0..<20 {
+            Thread.sleep(forTimeInterval: 0.4)
+            if Services.probeHTTP("http://127.0.0.1:5400/healthz") { return nil }
+        }
+        return "the session hub did not start"
+    }
     static var usageGate: String { SwitchboardPaths.gccRoot + "/scripts/cron/usage-gate.sh" }
     static var ipcBroker: Bool {
         !Services.shell("/bin/zsh", ["-lc", "command -v claude-ipc"]).isEmpty

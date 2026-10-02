@@ -82,6 +82,7 @@ cat > "$STAGE/Contents/Info.plist" <<EOF
   <key>NSLocationWhenInUseUsageDescription</key><string>macOS shows the name of your Wi-Fi network only to apps with Location access. Switchboard uses it for that name and nothing else.</string>
   <key>NSRemindersFullAccessUsageDescription</key><string>A note can carry a reminder. Switchboard adds it to Reminders and removes it when you clear it, and touches no other reminder.</string>
   <key>NSRemindersUsageDescription</key><string>A note can carry a reminder. Switchboard adds it to Reminders and removes it when you clear it, and touches no other reminder.</string>
+  <key>NSAppleEventsUsageDescription</key><string>The Sessions card can bring a Claude session's terminal tab to the front. Switchboard asks Ghostty for that tab and nothing else.</string>
   <key>NSBluetoothAlwaysUsageDescription</key><string>Switchboard lists your paired Bluetooth devices so you can connect and disconnect them from the panel.</string>
 </dict>
 </plist>

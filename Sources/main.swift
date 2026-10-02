@@ -125,6 +125,11 @@ if args.contains("--probe-quick") {
     print(r)
     exit(r.contains("FAIL") ? 1 : 0)
 }
+if args.contains("--probe-sessions") {
+    let r = probeSessions(scanFile: argAfter("--scan-file"))
+    print(r)
+    exit(r.hasSuffix("all passed") ? 0 : 1)
+}
 if let out = argAfter("--snapshot-quick") {
     // One quick page, drawn from the real stores (read only): --page home|limits|approvals|bulbs|notes|timers|controls|models
     let page = QuickPage(rawValue: argAfter("--page") ?? "home") ?? .home
@@ -153,6 +158,12 @@ if let out = argAfter("--snapshot-quick") {
     let controls = ControlsStore()
     if page == .controls { controls.load(devices: false) }
     if page == .models { policy.systemGroups = delegate.panelSystemGroupsFresh(); policy.systemReadOnce = true }
+    if page == .sessions {
+        // a recorded scan when given (--scan-file), else a live one from the installed scanner
+        if let f = argAfter("--scan-file"), let d = FileManager.default.contents(atPath: f) { SessionsStore.shared.show(d) }
+        else if let s = Integrations.scanScript { SessionsStore.shared.show(Data(Services.run("/bin/bash", [s, "--quick"], timeout: 10).out.utf8)) }
+        else { SessionsStore.shared.show(Data("{\"live\": []}".utf8)) }
+    }
     let card = QuickCard(state: state, policy: policy, usage: usage, lights: lights, notes: NotesStore.shared, controls: controls, openTab: { _ in })
     let ok = snapshotCard(AnyView(card), to: out)
     print(ok ? "wrote \(out)" : "snapshot failed")

@@ -1334,6 +1334,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     private var dotWatch: AnyCancellable?
     private var panelScroll: Any?
     private var pageWatch: AnyCancellable?
+    private var countWatch: AnyCancellable?
     /// Switches set to flip back on a timer, in words, for the Now page's badges.
     var appTimedFlips: () -> [String] = { [] }
     /// Services that are down, by name, for the Now page's chips.
@@ -1382,7 +1383,8 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     }
 
     init(liveDirs: @escaping () -> [String], requestSystemRefresh: @escaping () -> Void) {
-        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        // variable width: the icon carries the number of open Claude sessions beside it
+        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         item.autosaveName = "switchboard"
         store.liveDirs = liveDirs
@@ -1414,6 +1416,13 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
                     let shown = order.filter { !hidden.contains($0) }
                     self?.quick.pages = (shown.isEmpty ? Array(order.prefix(1)) : shown).compactMap(QuickPage.init(rawValue:))
                 }
+            countWatch = SessionsStore.shared.$sessions
+                .sink { list in
+                    b.imagePosition = list.isEmpty ? .imageOnly : .imageLeading
+                    b.attributedTitle = list.isEmpty ? NSAttributedString() : NSAttributedString(
+                        string: "\(list.count)", attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)])
+                }
+            SessionsStore.shared.start()
         }
         concerns = SwitchboardConcerns.all(policy: store, usage: usage, lights: lights, controls: controls)
         let host = NSHostingController(rootView: PolicyPanel(concerns: concerns, store: store))

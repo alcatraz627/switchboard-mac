@@ -9,10 +9,11 @@ import AppKit
 import SwiftUI
 
 enum QuickPage: String, CaseIterable {
-    case home, limits, approvals, bulbs, notes, timers, controls, models
+    case sessions, home, limits, approvals, bulbs, notes, timers, controls, models
 
     var title: String {
         switch self {
+        case .sessions: return "Sessions"
         case .home: return "Now"
         case .limits: return "Limits"
         case .approvals: return "Approvals"
@@ -25,6 +26,7 @@ enum QuickPage: String, CaseIterable {
     }
     var icon: String {
         switch self {
+        case .sessions: return "person.2.wave.2"
         case .home: return "house"
         case .limits: return Icons.tab["usage"] ?? "gauge"
         case .approvals: return Icons.tab["approvals"] ?? "hand.raised"
@@ -38,7 +40,7 @@ enum QuickPage: String, CaseIterable {
     /// The panel tab that shows this page in full.
     var tab: String? {
         switch self {
-        case .home: return nil
+        case .sessions, .home: return nil
         case .limits: return "usage"
         case .approvals: return "approvals"
         case .bulbs: return "home"
@@ -137,16 +139,17 @@ func probeQuickCycle() -> String {
           w.scroll(delta: -1, precise: false, phase: .none, momentum: false, at: 0.5) && w.page == .approvals, w.page.rawValue)
     check("up goes back", w.scroll(delta: 1, precise: false, phase: .none, momentum: false, at: 1) && w.page == .limits, w.page.rawValue)
     var r = QuickCycle()
+    r.show(.sessions)
     check("back from the first page wraps to the last",
           r.scroll(delta: 1, precise: false, phase: .none, momentum: false, at: 0) && r.page == .models, r.page.rawValue)
     check("forward from the last wraps to the first",
-          r.scroll(delta: -1, precise: false, phase: .none, momentum: false, at: 1) && r.page == .home, r.page.rawValue)
+          r.scroll(delta: -1, precise: false, phase: .none, momentum: false, at: 1) && r.page == .sessions, r.page.rawValue)
     var d = QuickCycle()
-    for (i, want) in [QuickPage.limits, .approvals, .bulbs, .notes, .timers, .controls, .models, .home].enumerated() {
+    for (i, want) in [QuickPage.limits, .approvals, .bulbs, .notes, .timers, .controls, .models, .sessions, .home].enumerated() {
         _ = d.scroll(delta: -1, precise: false, phase: .none, momentum: false, at: Double(i))
         if d.page != want { check("pages come in order", false, d.page.rawValue); return lines.joined(separator: "\n") }
     }
-    check("pages come in order: now, limits, approvals, bulbs, pinned notes, timers, controls, local models", true)
+    check("pages come in order: sessions, now, limits, approvals, bulbs, pinned notes, timers, controls, local models", true)
 
     // The panel's tabs and sliders: a swipe steps every so many points, not once per swipe.
     var tabs = ScrollStepper.tabs()
@@ -212,6 +215,8 @@ func probeQuickCycle() -> String {
           PolicyStore.startingHidden(saved: ["bulbs"], seen: PolicyStore.quickPageIDs) == ["bulbs"])
     check("a saved page order survives, a gone page drops out, a new one joins at the end",
           PolicyStore.mergedOrder(saved: ["notes", "gone", "home"], all: ["home", "limits", "notes"]) == ["notes", "home", "limits"])
+    check("the Sessions page joins a saved order at the front",
+          PolicyStore.mergedOrder(saved: ["home", "limits"], all: ["sessions", "home", "limits", "notes"]) == ["sessions", "home", "limits", "notes"])
     check("limits are Claude 5h, Claude 7d, Codex 7d", bars == ["sparkle 5h 10", "sparkle 7d 20", "terminal 7d 30"], bars.joined(separator: ", "))
     let many = Array(repeating: "Release work", count: 30)
     let fit = ChipFlow.fitting(many, rows: 2)
@@ -303,6 +308,7 @@ struct QuickCard: View {
     @ObservedObject var notes: NotesStore
     @ObservedObject var timers: TimerStore = .shared
     @ObservedObject var controls: ControlsStore
+    @ObservedObject var sessions: SessionsStore = .shared
     let openTab: (String) -> Void
     /// Opens a tab with its search filled in, so the row a badge names is in view.
     var openSearch: (String, String) -> Void = { _, _ in }
@@ -315,6 +321,9 @@ struct QuickCard: View {
                 })
             Divider().padding(.horizontal, -12)
             switch state.page {
+            case .sessions:
+                // ticks each second so "4s ago" and the waits stay current while it is open
+                TimelineView(.periodic(from: .now, by: 1)) { t in SessionsPage(store: sessions, now: t.date) }
             case .home: home
             case .limits: limits
             case .approvals: approvals

@@ -573,17 +573,9 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
                                       }
                                       // The hub renders the page; start it when it is off, as its own
                                       // Services switch would, rather than sending you there.
-                                      if !Services.probeHTTP("http://127.0.0.1:5400/healthz") {
-                                          guard let hub = Integrations.hubScript else { return "the session hub is not installed" }
-                                          _ = Services.shell("/bin/bash", [hub, "restart"], timeout: 15)
-                                          var up = false
-                                          for _ in 0..<20 where !up {
-                                              Thread.sleep(forTimeInterval: 0.4)
-                                              up = Services.probeHTTP("http://127.0.0.1:5400/healthz")
-                                          }
-                                          self?.refreshSnapshot()
-                                          guard up else { return "the session hub did not start" }
-                                      }
+                                      let wasDown = !Services.probeHTTP("http://127.0.0.1:5400/healthz")
+                                      if let err = Integrations.startHubIfDown() { self?.refreshSnapshot(); return err }
+                                      if wasDown { self?.refreshSnapshot() }
                                       DispatchQueue.main.async { TranscriptWindow.show(sessionID: sid, title: "Warden transcript") }
                                       return nil
                                   }), help: "Read the warden's session. Starts the session hub if it is off.",
