@@ -23,3 +23,4 @@ Flashing local firmware (Cloudcutter to OpenBeken) was considered and left out, 
 - Codex warn and danger thresholds. Deferred by the owner. Do not raise it again.
 - The m5air2 screenshot hang. Deferred until that Mac is available. Ask the owner then.
 - Disk and cleanup tools belong in sys-monitor, not here.
+- Claude agents get tools to manage Switchboard notes and their reminders for the owner (owner, 2026-10-03: "will plan and build later"). Needs its own plan first.
