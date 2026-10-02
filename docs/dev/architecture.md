@@ -1,16 +1,15 @@
 # How Switchboard is put together
 
 Switchboard is one menu bar icon (three faders) that opens a panel. Each tab in
-the panel is a **concern**: one question about this Mac, answered with the
-switches for it. There is no server and no daemon; the app reads files and runs
+the panel answers one question about this Mac with the switches for it. There is no server and no daemon; the app reads files and runs
 small helper scripts when the panel opens or a switch is flipped.
 
 ```
  Switchboard.app
  ┌──────────────────────────────────────────────────────────────────────┐
- │ main.swift        entry; headless flags (--dump, --snapshot, …)      │
- │ App.swift         the snapshot, Machine rows, Keep Awake, timed flips│
- │ PolicyPanel.swift the popover, space bar, SwitchboardConcerns list   │
+ │ main.swift        entry; headless flags (--dump, --snapshot, ...)    │
+ │ App.swift         the snapshot, Machine rows, Keep Awake, flips      │
+ │ PolicyPanel.swift the popover, space bar, the tab list               │
  │  ├─ Agents     Policy.swift     ──▶ pol.sh (optional, ~/.claude)     │
  │  ├─ Usage      Usage.swift      ──▶ rate-limit files, Codex gate     │
  │  ├─ Hooks, Ledger, Queue, Library, Claude MCP                        │
@@ -18,17 +17,21 @@ small helper scripts when the panel opens or a switch is flipped.
  │  ├─ Notes      Notes.swift, NotesView.swift ──▶ .md files, Reminders │
  │  ├─ Timers     Timers.swift     ──▶ sound, UserNotifications         │
  │  ├─ Runtime, Machine, Remote   App.swift + Switchboard.swift         │
- │  │             ──▶ Resources/lib/*.py (jobs, devservers, gitscan, …) │
+ │  │             ──▶ Resources/lib/*.py (jobs, devservers, dbservices, │
+ │  │                 gitscan, ...)                                     │
  │  ├─ Controls   Controls.swift   ──▶ CoreAudio, IOBluetooth           │
  │  ├─ Home       Lights.swift     ──▶ Resources/lib/wiz.py (UDP 38899) │
  │  ├─ Settings   Settings.swift   ──▶ Visibility (AppSupport.swift)    │
  │  └─ Approvals  Needs.swift      ──▶ push nonces, policy asks         │
- │ Hover.swift       the preview on the menu bar icon                   │
+ │ Hover.swift       the pointer watch on the icon, the glass card      │
+ │ QuickPages.swift  the hover card's pages (Now, Limits, ...)          │
+ │ ScrollSteps.swift scrolling over a thing steps it a notch at a time  │
+ │ Inputs.swift      the shared text field, its Enter and Escape rules  │
  │ WhenPicker.swift  one time picker for every "until" and "remind at"  │
  │ Reorder.swift     drag to reorder (notes, timers, bulbs)             │
  │ States.swift      pending, failure and reading-age lines             │
  │ AppSupport.swift  paths, log, live Claude sessions, Integrations     │
- │ DesignKit.swift + Palette.swift   the shared look (design-kit.md)    │
+ │ DesignKit.swift + Palette.swift   the shared look (dev/design-kit.md)│
  └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -43,7 +46,10 @@ slow helper makes a confirmation late, never wrong. `--probe-snapshot` checks
 both.
 
 The list tabs (Hooks, Ledger, Queue, Library, Claude MCP) read their own
-sections through the catalog engine instead, one read per tab, on open.
+sections through the catalog engine instead, one read per tab. A list tab is
+read once at launch and is not read again within 20 seconds of its last read,
+so opening the panel does not refill every tab each time. `--time-tabs` times
+each of these reads.
 
 ## Where things live
 
@@ -116,14 +122,23 @@ rings.
 
 ## Headless checks
 
-Every surface can be checked without a screen:
+Every surface can be checked without a screen, which is how the tests and the
+screenshots are made. Run the binary from `build/Switchboard.app/Contents/MacOS/`
+after a local build, or from `~/Applications/Switchboard.app/Contents/MacOS/`.
 
 ```
+Switchboard --version                     print the version
 Switchboard --dump                        Machine tab rows as text
 Switchboard --dump-policy [--scope DIR]   Agents tab rows as text
-Switchboard --snapshot out.png --tab usage [--light] [--expand]
-Switchboard --snapshot-quick out.png --page home|limits|approvals|bulbs|notes|timers|controls|models   one hover page
+Switchboard --snapshot out.png --tab usage [--light] [--expand] [--scope DIR]
+                                          one tab as an image; add --demo-states
+                                          to draw pending and failure lines, and
+                                          --notifications-off for the Timers notice
+Switchboard --snapshot-quick out.png --page home|limits|approvals|bulbs|notes|timers|controls|models
+                                          one hover page
 Switchboard --snapshot-when out.png       the time picker
+Switchboard --time-tabs                   how long each list tab takes to read
+Switchboard --probe-quick                 the hover card's paging rules
 Switchboard --probe-timers                timed-flip engine (flips Keep Awake, restores it)
 Switchboard --probe-snapshot              one snapshot per burst; a wait gets a fresh one
 Switchboard --probe-catalog               list tabs: parsing, failure, search, redaction, toggles
@@ -131,14 +146,30 @@ Switchboard --probe-notes                 notes files, reminders (a stand-in), h
 Switchboard --probe-timers-tab            countdowns, the repeating chime, silencing
 Switchboard --probe-visibility            hidden sections are neither drawn nor read
 Switchboard --probe-approve | --probe-shell | --probe-transcript | --probe-controls
+Switchboard --open                        open the panel shortly after launch (a normal run)
 ```
 
 The probes that write use a scratch folder or a probe-only preference key,
-never your notes, timers or `~/.claude`. `tests/run-tests.sh` runs them all.
+never your notes, timers or `~/.claude`. `tests/run-tests.sh` runs them all and
+logs to its own folder, not to your real log.
 
-`scripts/snapshots.sh` renders every tab in both appearances.
+```bash
+scripts/snapshots.sh    # every tab, dark and light
+tests/run-tests.sh      # the suite
+```
+
+## The hover card
+
+`Hover.swift` holds the pointer watch (`HoverPeek`) and the glass card shell.
+The card's pages are `QuickPage` in `QuickPages.swift`: Now, Limits,
+Approvals, Bulbs, Pinned notes, and the opt-in Timers, Controls and Local
+models. `ScrollSteps.swift` turns wheel and swipe movement into one step per
+push, which pages the card and also drives the sliders and the space bar.
+The pages, their order and the mouse-away delay are preferences on
+`PolicyStore`, edited in Settings. `--snapshot-quick` draws any page from the
+real stores and `--probe-quick` checks the paging rules.
 
 ## Talking to other apps
 
 - `dev.switchboard.toggle` (distributed notification) opens or closes the
-  panel. The claude-instances dropdown uses it.
+  panel.

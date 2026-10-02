@@ -86,7 +86,7 @@ cat > "$STAGE/Contents/Info.plist" <<EOF
 </dict>
 </plist>
 EOF
-# Ad-hoc signature: enough to run locally; see docs/releasing.md for Gatekeeper.
+# Ad-hoc signature: enough to run locally; see docs/dev/releasing.md for Gatekeeper.
 # By default an ad-hoc signature is pinned to this exact binary's hash, and
 # macOS files a Bluetooth or Reminders grant under it, so every rebuild was
 # asked again. Naming the bundle id as the requirement keeps a grant across builds.

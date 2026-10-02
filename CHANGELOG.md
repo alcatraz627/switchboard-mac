@@ -62,7 +62,7 @@
   everything, and tabs drag into any order within their space.
 - An older copy of the app, such as one started by a notification click, now
   quits instead of closing a newer one that is already running.
-- A user guide covering every tab: `docs/guide.md`.
+- A user guide covering every tab: `docs/user/guide.md`.
 - **Review fixes**: typed times read "5 min", "2 hours" and "1d30m", and take
   "tomorrow" from the picker's own clock; a terminal-started dev server offers
   Kill; the git scan never takes the index lock; more token shapes are
@@ -258,7 +258,7 @@
 - **Every control and reading now shows pending and failure the same way**:
   changes show at once, a spinner appears only if a save takes longer than
   350 ms, a failed change snaps back with a plain-words line and Retry, and
-  readings show their age (amber when old). See docs/design-kit.md.
+  readings show their age (amber when old). See docs/dev/design-kit.md.
 - **Home**: bulbs no longer vanish when a scan misses them. Discovery repeats
   its broadcast and asks every bulb seen before directly; one that still does
   not answer stays listed as not answering. Measured before: 3 of 8 scans

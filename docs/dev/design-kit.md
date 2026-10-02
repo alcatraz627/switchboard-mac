@@ -114,15 +114,18 @@ Use these instead of building another one; a fix to one lands everywhere.
 | `Icons.tab`, `.space`, `.section` | `AppSupport.swift` | The one map of symbols for every tab, space and section header. The space bar, the row of tabs, Settings and every `GroupHeader` read it, and `--probe-visibility` fails when a tab, space or known section has none |
 | `WhenButton` | `WhenPicker.swift` | Any "until", "snooze", "expires" or "remind at". Preset chips (`WhenPreset.short`, `.long`, `.timer`), a typed field that reads "90m", "3h" or "tomorrow 9am", and a calendar |
 | `ReorderStack` | `Reorder.swift` | A list the owner can drag into order; it hands you the grip view and calls `commit` when the drag ends |
-| `Catalog.sections` | `Catalog.swift` | A read-only list with search, details, copyable paths and "Show all" (see `docs/adding-a-concern.md`) |
+| `Catalog.sections` | `Catalog.swift` | A read-only list with search, details, copyable paths and "Show all" (see [adding a tab](adding-a-tab.md)) |
 | `RowFailure`, `PendingMark`, `ReadingStatus` | `States.swift` | The pending and failure rules above |
 
-The hover preview (`Hover.swift`) is a borderless glass card under the menu
-bar icon. It opens after the pointer rests on the icon and stays open while
-the pointer is over the icon or the card. A status item button never reports
-the pointer entering, so the pointer position is polled instead.
-`--snapshot-quick out.png --page <page>` renders one page, but a snapshot cannot show the real glass or
-the hover itself; check those by hand.
+The hover card is a borderless glass card under the menu bar icon.
+`Hover.swift` holds the glass and the pointer watch: the card opens after the
+pointer rests on the icon and stays open while the pointer is over the icon or
+the card. A status item button never reports the pointer entering, so the
+pointer position is polled instead. The card's pages live in
+`QuickPages.swift`, and `ScrollSteps.swift` turns scrolling into one step per
+push for paging and for sliders. `--snapshot-quick out.png --page <page>`
+renders one page, but a snapshot cannot show the real glass or the hover
+itself; check those by hand.
 
 ## Adopting it in a new app
 

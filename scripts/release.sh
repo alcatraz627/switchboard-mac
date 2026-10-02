@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cut a GitHub Release for the version in VERSION (see docs/releasing.md).
+# Cut a GitHub Release for the version in VERSION (see docs/dev/releasing.md).
 #
 #   scripts/release.sh            test, build, zip, tag, push the tag, publish the release
 #   scripts/release.sh --dry-run  everything except tag, push and publish

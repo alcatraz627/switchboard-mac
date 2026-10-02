@@ -1,3 +1,5 @@
+Archived record of past work; it does not describe current behaviour.
+
 # Switchboard roadmap after 0.1.0
 
 <!-- sessions: switch-tabs-b1@2026-09-29 -->

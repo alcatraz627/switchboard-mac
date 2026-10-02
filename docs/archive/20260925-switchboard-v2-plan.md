@@ -1,3 +1,5 @@
+Archived record of past work; it does not describe current behaviour.
+
 # Switchboard v2: one panel for what needs you, what agents may do, and the machine
 
 <!-- sessions: gcc-flags@2026-09-25 -->

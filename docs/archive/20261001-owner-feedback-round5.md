@@ -1,3 +1,5 @@
+Archived record of past work; it does not describe current behaviour.
+
 # Owner feedback, round 5 (2026-10-01): hover popover, notes, inputs, tabs, home
 
 This file is the hand-off. The next agent resumes from it. The owner's words
@@ -324,7 +326,7 @@ Candidates found while applying the model, for the owner to rule on:
 4. The test suite writes "catalog probe read in 0 ms" lines into the owner's
    real Switchboard log. Point test runs at a scratch log.
 5. The old hover preview path (HoverPreview, hoverLines, --snapshot-hover)
-   only serves its own test now. Remove it, or keep it as the fallback.
+   only served its own test. It was removed (see the owner ruling below).
 6. Colour at note creation: the composer has no colour balls; a colour is
    picked after saving.
 7. Middle truncation is applied to Controls names only. Device, repo and

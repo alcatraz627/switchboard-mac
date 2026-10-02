@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Switchboard design system</title>
+<style>
+/* Mock colours approximate the macOS system colours the app asks for by name.
+   The app never hard-codes these: it asks AppKit (systemRed, systemOrange…) or
+   its PaletteStore tokens, so a user override or a new macOS default lands everywhere. */
+:root {
+  --bg: #f5f5f7; --panel: #ffffff; --card: #f0f0f3; --edge: #d9d9de; --text: #1d1d1f; --dim: #6e6e73; --faint: #a1a1a6;
+  --accent: #0a84ff; --fill: rgba(0,0,0,.07);
+  --error: #d70015; --warn: #c93400; --waiting: #b58900; --info: #0071a4; --ok: #248a3d;
+  --t-blue: #0071e3; --t-indigo: #5856d6; --t-purple: #8944ab; --t-pink: #d30f45;
+  --t-teal: #0071a4; --t-gray: #8e8e93; --t-mint: #0c817b; --t-brown: #7f6545;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1c1c1e; --panel: #232326; --card: #2c2c2f; --edge: #3a3a3d; --text: #f5f5f7; --dim: #a1a1a6; --faint: #6e6e73;
+    --accent: #0a84ff; --fill: rgba(255,255,255,.08);
+    --error: #ff453a; --warn: #ff9f0a; --waiting: #ffd60a; --info: #64d2ff; --ok: #30d158;
+    --t-blue: #0a84ff; --t-indigo: #5e5ce6; --t-purple: #bf5af2; --t-pink: #ff375f;
+    --t-teal: #40c8e0; --t-gray: #98989d; --t-mint: #63e6e2; --t-brown: #ac8e68;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1c1c1e; --panel: #232326; --card: #2c2c2f; --edge: #3a3a3d; --text: #f5f5f7; --dim: #a1a1a6; --faint: #6e6e73;
+  --accent: #0a84ff; --fill: rgba(255,255,255,.08);
+  --error: #ff453a; --warn: #ff9f0a; --waiting: #ffd60a; --info: #64d2ff; --ok: #30d158;
+  --t-blue: #0a84ff; --t-indigo: #5e5ce6; --t-purple: #bf5af2; --t-pink: #ff375f;
+  --t-teal: #40c8e0; --t-gray: #98989d; --t-mint: #63e6e2; --t-brown: #ac8e68;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 var(--sans); }
+main { max-width: 980px; margin: 0 auto; padding: 32px 16px 80px; }
+header.top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h1 { font-size: 26px; margin: 0; }
+h2 { font-size: 19px; margin: 40px 0 6px; padding-top: 12px; border-top: 1px solid var(--edge); }
+h3 { font-size: 14px; margin: 22px 0 4px; }
+p, li { color: var(--text); max-width: 72ch; }
+.lede { color: var(--dim); }
+code { font: 12.5px var(--mono); background: var(--fill); padding: 1px 5px; border-radius: 4px; }
+.src { font: 12px var(--mono); color: var(--dim); }
+nav.toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 16px 0 0; }
+nav.toc a { font-size: 12.5px; color: var(--accent); text-decoration: none; background: var(--fill); padding: 3px 10px; border-radius: 999px; }
+button.theme { font: 12.5px var(--sans); color: var(--text); background: var(--fill); border: 1px solid var(--edge); border-radius: 7px; padding: 4px 10px; cursor: pointer; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-top: 10px; }
+.spec { background: var(--panel); border: 1px solid var(--edge); border-radius: 12px; padding: 14px; }
+.spec h3 { margin-top: 0; }
+.stage { background: var(--bg); border: 1px dashed var(--edge); border-radius: 9px; padding: 14px; margin: 8px 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--edge); vertical-align: top; }
+th { color: var(--dim); font-weight: 600; }
+
+/* ── mocks of the app's pieces ───────────────────────────────────────── */
+.m-title { font-size: 14px; font-weight: 600; }
+.m-label { font-size: 12.5px; }
+.m-caption { font-size: 11px; color: var(--dim); }
+.m-section { font-size: 11px; font-weight: 600; color: var(--dim); }
+.m-mono { font: 500 11.5px var(--mono); }
+.m-card { background: var(--card); border-radius: 9px; width: 100%; overflow: hidden; }
+.m-row { display: flex; align-items: center; gap: 8px; padding: 5.5px 12px; }
+.m-row + .m-row { border-top: 1px solid var(--edge); }
+.m-row .grow { flex: 1; min-width: 0; }
+.m-switch { width: 30px; height: 18px; border-radius: 999px; background: var(--ok); position: relative; flex: none; }
+.m-switch::after { content: ""; position: absolute; right: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+.m-switch.off { background: var(--fill); }
+.m-switch.off::after { right: auto; left: 2px; }
+.m-pill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 8px; font-size: 10.5px; font-weight: 500; }
+.m-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.m-count { font: 600 10px var(--sans); padding: 1px 6px; border-radius: 999px; background: color-mix(in srgb, var(--waiting) 30%, transparent); }
+.m-field { display: flex; align-items: center; gap: 6px; padding: 6px 9px; border-radius: 7px; background: var(--fill); border: 1px solid transparent; width: 100%; font-size: 12.5px; color: var(--faint); }
+.m-field.focus { border-color: color-mix(in srgb, var(--accent) 60%, transparent); color: var(--text); }
+.m-ball { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
+.m-ball.on { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--text); }
+.m-qpill { display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px; border-radius: 999px; background: var(--fill); font-size: 11px; color: var(--dim); }
+.m-qpill.on { background: color-mix(in srgb, var(--text) 16%, transparent); color: var(--text); font-weight: 600; padding: 3px 8px; }
+.m-tile { background: var(--fill); border-radius: 6px; padding: 6px 0; text-align: center; font-size: 11.5px; }
+.m-spacebar { display: flex; gap: 2px; padding: 2px; background: var(--fill); border-radius: 7px; width: 100%; }
+.m-spacebar span { flex: 1; text-align: center; padding: 4px 0; border-radius: 5px; font-size: 11.5px; color: var(--dim); }
+.m-spacebar span.on { background: var(--accent); color: #fff; font-weight: 600; }
+.m-subtabs { display: flex; gap: 14px; font-size: 11.5px; color: var(--dim); }
+.m-subtabs span.on { color: var(--text); font-weight: 600; border-bottom: 2px solid var(--accent); padding-bottom: 2px; }
+.m-slider { flex: 1; height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--accent) 63%, var(--fill) 63%); position: relative; }
+.m-slider::after { content: ""; position: absolute; left: 63%; top: -5px; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 1px solid var(--edge); translate: -50% 0; }
+.m-skel { height: 10px; border-radius: 5px; background: var(--fill); }
+.m-fail { display: flex; gap: 8px; align-items: flex-start; padding: 7px 10px; border-radius: 8px; font-size: 11.5px;
+  background: color-mix(in srgb, var(--error) 10%, transparent); color: color-mix(in srgb, var(--error) 75%, var(--text)); width: 100%; }
+.sw { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin-right: 12px; }
+</style>
+</head>
+<body>
+<main>
+<header class="top">
+  <h1>Switchboard design system</h1>
+  <button class="theme" id="theme" type="button">Switch light and dark</button>
+</header>
+<p class="lede">What Switchboard is built from: the tokens, the primitives every tab reuses, the composites they make, and the behaviour rules that keep one grammar across the menu-bar icon, the hover card and the panel. Every piece names the file it lives in, so this page can be checked against the code.</p>
+<nav class="toc">
+  <a href="#principles">Principles</a><a href="#tokens">Tokens</a><a href="#primitives">Primitives</a>
+  <a href="#composites">Composites</a><a href="#behaviour">Behaviour</a><a href="#states">Loading and errors</a>
+</nav>
+
+<h2 id="principles">Principles</h2>
+<ul>
+  <li><b>One surface, one grammar.</b> The icon, the hover card and the panel share navigation, input and status rules. A behaviour learned once works everywhere.</li>
+  <li><b>Hierarchy is size and weight, not colour.</b> Three text roles carry the structure: title, label, caption.</li>
+  <li><b>Colour means something or it is not there.</b> Red is broken, orange needs a look, yellow waits on you, green is fine. Tag colours avoid all four.</li>
+  <li><b>Text wraps.</b> Prose never ends in "…". Names (a device, a repo, a model) keep to one line and lose their middle only when they do not fit.</li>
+  <li><b>Speed is measured.</b> A claim about a slow or fast surface comes with the timing (<code>--time-tabs</code>, the log's open time).</li>
+</ul>
+
+<h2 id="tokens">Tokens</h2>
+<h3>Type and spacing</h3>
+<p class="src">Sources/PolicyPanel.swift · enum PT</p>
+<table>
+  <tr><th>Token</th><th>Value</th><th>Used for</th><th>Sample</th></tr>
+  <tr><td><code>PT.title</code></td><td>14 pt semibold</td><td>The panel's name</td><td class="m-title">Switchboard</td></tr>
+  <tr><td><code>PT.label</code></td><td>12.5 pt</td><td>Row names, field text</td><td class="m-label">Keep Awake</td></tr>
+  <tr><td><code>PT.caption</code></td><td>11 pt, secondary</td><td>Row notes, help lines</td><td class="m-caption">also held awake by node</td></tr>
+  <tr><td><code>PT.section</code></td><td>11 pt semibold, sentence case</td><td>Section headers</td><td class="m-section">Local models</td></tr>
+  <tr><td><code>PT.mono</code></td><td>11.5 pt medium, tabular digits</td><td>Counts, times, levels</td><td class="m-mono">4:05 · 63%</td></tr>
+  <tr><td><code>PT.rowV / rowH</code></td><td>5.5 / 12 pt</td><td>Row padding</td><td></td></tr>
+  <tr><td><code>PT.gap</code></td><td>12 pt</td><td>Between sections and cards</td><td></td></tr>
+  <tr><td><code>PT.width</code></td><td>424 pt</td><td>The panel; the hover card is 320</td><td></td></tr>
+</table>
+
+<h3>Colour roles</h3>
+<p class="src">Sources/Palette.swift (PaletteToken, menuRed, menuYellow, menuGreen) · Sources/PolicyPanel.swift (ProblemLevel colours)</p>
+<div class="grid">
+  <div class="spec"><h3>Error</h3><div class="stage"><span class="m-dot" style="background:var(--error)"></span><span class="m-label">Broken, needs action</span></div><p class="m-caption">menuRed. Turns the icon dot red and pulls the panel to its tab.</p></div>
+  <div class="spec"><h3>Warning</h3><div class="stage"><span class="m-dot" style="background:var(--warn)"></span><span class="m-label">Could use a look</span></div><p class="m-caption">systemOrange. Marks its tab; never turns the icon red.</p></div>
+  <div class="spec"><h3>Waiting</h3><div class="stage"><span class="m-dot" style="background:var(--waiting)"></span><span class="m-label">Waits on you</span></div><p class="m-caption">menuYellow. Held pushes and asks; the yellow icon dot.</p></div>
+  <div class="spec"><h3>Fine and info</h3><div class="stage"><span class="m-dot" style="background:var(--ok)"></span><span class="m-label">On, healthy</span><span class="m-dot" style="background:var(--info)"></span><span class="m-label">Running</span></div><p class="m-caption">menuGreen for on; teal for timers and other neutral running things.</p></div>
+</div>
+
+<h3>Tag colours</h3>
+<p class="src">Sources/Timers.swift · timerColors, tagColorName</p>
+<div class="stage">
+  <span class="m-ball" style="background:var(--t-blue)" title="blue"></span><span class="m-ball" style="background:var(--t-indigo)" title="indigo"></span>
+  <span class="m-ball" style="background:var(--t-purple)" title="purple"></span><span class="m-ball" style="background:var(--t-pink)" title="pink"></span>
+  <span class="m-ball" style="background:var(--t-teal)" title="teal"></span><span class="m-ball" style="background:var(--t-gray)" title="gray"></span>
+  <span class="m-ball" style="background:var(--t-mint)" title="mint"></span><span class="m-ball" style="background:var(--t-brown)" title="brown"></span>
+</div>
+<p>Eight macOS system colours for notes and timers. None is red, orange, yellow or green, so a tag never reads as a status. They are shown as colour only, never named; older saved names (red, orange, yellow, green) map to pink, brown, mint and teal.</p>
+
+<h2 id="primitives">Primitives</h2>
+<div class="grid">
+  <div class="spec"><h3>Card</h3><p class="src">PolicyPanel.swift · Card</p>
+    <div class="stage"><div class="m-card"><div class="m-row"><span class="grow m-label">A row</span></div><div class="m-row"><span class="grow m-label">Another row</span></div></div></div>
+    <p class="m-caption">The rounded fill every list sits in; rows divide with a hairline.</p></div>
+  <div class="spec"><h3>Section header</h3><p class="src">PolicyPanel.swift · GroupHeader</p>
+    <div class="stage"><span class="m-section">⌁ Hook scripts</span></div>
+    <p class="m-caption">Icon plus sentence-case name, secondary colour. Icons come from Icons.section.</p></div>
+  <div class="spec"><h3>Status badge</h3><p class="src">QuickPages.swift · StatusBadge, StatusBadgeView</p>
+    <div class="stage">
+      <span class="m-pill" style="background:color-mix(in srgb,var(--error) 22%,transparent)"><span style="color:var(--error)">⛔</span>refresh failed (exit 1)</span>
+      <span class="m-pill" style="background:color-mix(in srgb,var(--warn) 22%,transparent)"><span style="color:var(--warn)">⚠</span>1 gate is off</span>
+      <span class="m-pill" style="background:color-mix(in srgb,var(--waiting) 22%,transparent)"><span style="color:var(--waiting)">✋</span>2 waiting</span>
+      <span class="m-pill" style="background:color-mix(in srgb,var(--info) 22%,transparent)"><span style="color:var(--info)">⏲</span>Tea · 4:05</span>
+    </div>
+    <p class="m-caption">One shape for every status. Colour rides on the icon and fill; the words stay full contrast. A click opens the tab with its search filled in.</p></div>
+  <div class="spec"><h3>Tab marks</h3><p class="src">PolicyPanel.swift · TabBadge, ProblemMark</p>
+    <div class="stage"><span class="m-label">Approvals</span><span class="m-count">2</span><span class="m-label">Hooks</span><span class="m-dot" style="background:var(--warn)"></span><span class="m-label">Machine</span><span class="m-dot" style="background:var(--error)"></span></div>
+    <p class="m-caption">A count for what waits; a dot in the worst problem's colour.</p></div>
+  <div class="spec"><h3>Input field</h3><p class="src">Inputs.swift · InputBox, EditorText</p>
+    <div class="stage"><div class="m-field">Label</div><div class="m-field focus">Typing here</div></div>
+    <p class="m-caption">Soft fill, accent edge while it has the keyboard. Enter acts, Escape lets go.</p></div>
+  <div class="spec"><h3>Search field</h3><p class="src">PolicyPanel.swift · SearchField</p>
+    <div class="stage"><div class="m-field">⌕ Search</div></div>
+    <p class="m-caption">One word of placeholder; the full scope is in the tooltip. Escape keeps the search; the x clears it.</p></div>
+  <div class="spec"><h3>Colour balls</h3><p class="src">Inputs.swift · ColorBalls</p>
+    <div class="stage"><span class="m-ball on" style="background:var(--t-blue)"></span><span class="m-ball" style="background:var(--t-indigo)"></span><span class="m-ball" style="background:var(--t-mint)"></span><span class="m-ball" style="background:var(--t-brown)"></span></div>
+    <p class="m-caption">The chosen one carries a ring. On a note, tapping it again clears the colour.</p></div>
+  <div class="spec"><h3>Level slider</h3><p class="src">Controls.swift · slider · Settings.swift · lingerSlider</p>
+    <div class="stage" style="flex-wrap:nowrap"><span class="m-slider"></span><span class="m-mono" style="color:var(--dim)">63%</span></div>
+    <p class="m-caption">The value reads at the end. Scrolling over it moves 5% (or one second) a notch.</p></div>
+  <div class="spec"><h3>Switch</h3><p class="src">SwiftUI Toggle, .switch style</p>
+    <div class="stage"><span class="sw"><span class="m-switch"></span>On</span><span class="sw"><span class="m-switch off"></span>Off</span></div>
+    <p class="m-caption">Anything that cuts a connection asks before turning off.</p></div>
+</div>
+
+<h2 id="composites">Composites</h2>
+<div class="grid">
+  <div class="spec"><h3>Row</h3><p class="src">PolicyPanel.swift · SystemRowView (data: Policy.swift · SystemRow)</p>
+    <div class="stage"><div class="m-card">
+      <div class="m-row"><div class="grow"><div class="m-label">Claude/switchboard-mac</div><div class="m-caption">main · 1 unpushed</div></div><span class="m-switch"></span></div>
+      <div class="m-row"><div class="grow"><div class="m-label">Repository</div><div class="m-caption">/Users/you/Code/…</div></div></div>
+    </div></div>
+    <p class="m-caption">Name, note, then its control. A row with children opens on click; an opened detail row's text is selectable. A label marked as a name keeps to one line.</p></div>
+  <div class="spec"><h3>Spaces and tabs</h3><p class="src">PolicyPanel.swift · spaceBar, subTabs</p>
+    <div class="stage" style="flex-direction:column;align-items:stretch">
+      <div class="m-spacebar"><span class="on">Claude</span><span>Records</span><span>Desk</span><span>Mac</span><span>Around</span></div>
+      <div class="m-subtabs"><span>Agents</span><span class="on">Usage</span><span>Hooks</span><span>Library</span></div>
+    </div>
+    <p class="m-caption">Each space reopens on its last-used tab. Scrolling over either row steps along it, on its own.</p></div>
+  <div class="spec"><h3>Hover card</h3><p class="src">QuickPages.swift · QuickCard · Hover.swift · HoverPeek</p>
+    <div class="stage" style="flex-direction:column;align-items:stretch">
+      <div style="display:flex;gap:4px;align-items:center"><span class="m-qpill on">⌂ Now</span><span class="m-qpill">✋</span><span class="m-qpill">◔</span><span class="m-qpill">💡</span><span style="flex:1"></span><span class="m-caption">⚙</span></div>
+      <div style="border-top:1px solid var(--edge);margin:4px -14px"></div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px"><span class="m-tile">Agents</span><span class="m-tile">Hooks</span><span class="m-tile">Notes</span><span class="m-tile">Timers</span><span class="m-tile">Controls</span><span class="m-tile">Machine</span></div>
+    </div>
+    <p class="m-caption">Pills, a divider, then the page. Now is six shortcuts over one badge row. Pages turn by scroll over the icon or title bar, a pill, or a number key.</p></div>
+  <div class="spec"><h3>Note sheet</h3><p class="src">Inputs.swift · NoteSheet · NotesView.swift · NoteCompose, NoteRow</p>
+    <div class="stage" style="flex-direction:column;align-items:stretch">
+      <div class="m-card" style="padding:7px 8px"><div class="m-label" style="font-weight:600">Buy</div><div style="border-top:1px solid var(--edge);margin:5px 0"></div><div class="m-label">milk and eggs</div></div>
+    </div>
+    <p class="m-caption">A title over a body. Enter in the title moves the rest of the line to the top of the body; either may be empty, not both.</p></div>
+  <div class="spec"><h3>Chip flow</h3><p class="src">QuickPages.swift · ChipFlow, FlowLayout</p>
+    <div class="stage"><span class="m-qpill">💡 Bedroom Second Light</span><span class="m-qpill">💡 Bulb 17</span><span class="m-qpill">… 3 more</span></div>
+    <p class="m-caption">Inactive things as small chips that wrap; past two rows, the last chip says how many more.</p></div>
+  <div class="spec"><h3>Settings group</h3><p class="src">Settings.swift</p>
+    <div class="stage"><div class="m-card"><div class="m-row"><span class="m-caption">⠿</span><span class="grow m-label">Now</span><span class="m-switch"></span></div><div class="m-row"><span class="m-caption">⠿</span><span class="grow m-label">Timers</span><span class="m-switch off"></span></div></div></div>
+    <p class="m-caption">Header, one sentence of help, then a card. Ordered lists drag by the grip.</p></div>
+</div>
+
+<h2 id="behaviour">Behaviour rules</h2>
+<table>
+  <tr><th>Rule</th><th>Where it is enforced</th></tr>
+  <tr><td>Enter does the field's main action; Escape only lets go of the keyboard, never closes or deletes.</td><td><code>Inputs.swift</code> EditorText, every <code>onExitCommand</code></td></tr>
+  <tr><td>Opening Notes or Timers puts the cursor in the new item's field, unless something is being edited.</td><td><code>InputRules.focusNewInput</code>, <code>EditingState</code></td></tr>
+  <tr><td>Scroll over a thing adjusts that thing: a tab row steps tabs, a slider steps its level, content scrolls content.</td><td><code>ScrollSteps.swift</code> ScrollStepper, ScrollTargets</td></tr>
+  <tr><td>Number keys pick a hover page only when no text field has the keyboard.</td><td><code>QuickCycle.page(forKey:)</code></td></tr>
+  <tr><td>Every problem is an error or a warning; only errors turn the icon red or pull the panel to a tab.</td><td><code>Problem</code>, <code>ProblemLevel</code>, <code>attention(problems:)</code></td></tr>
+  <tr><td>Names keep to one line and lose their middle only when they do not fit; prose wraps.</td><td><code>nameFit</code>, <code>SystemRow.labelIsName</code></td></tr>
+  <tr><td>Read-only detail text is selectable and copies with ⌘C.</td><td><code>selectable</code> in SystemRowView</td></tr>
+</table>
+
+<h2 id="states">Loading and errors</h2>
+<div class="grid">
+  <div class="spec"><h3>Reading status</h3><p class="src">States.swift · ReadingStatus</p>
+    <div class="stage" style="flex-direction:column;align-items:flex-start;gap:4px">
+      <span class="m-caption">Reading…</span>
+      <span class="m-caption" style="color:var(--faint)">as of 4 min ago</span>
+      <span class="m-caption" style="color:var(--warn)">ⓘ as of 2 h ago · couldn't refresh: helper timed out</span>
+    </div>
+    <p class="m-caption">The line under a reading's header: reading, its age (amber once it is old), or why it could not refresh, with Retry.</p></div>
+  <div class="spec"><h3>Pending</h3><p class="src">States.swift · PendingMark, Pending</p>
+    <div class="stage"><span class="m-label">Keep Awake</span><span class="m-caption">◌</span></div>
+    <p class="m-caption">A small spinner that appears only once a change has waited a moment; until the answer comes, the control is held.</p></div>
+  <div class="spec"><h3>Failure</h3><p class="src">States.swift · RowFailure</p>
+    <div class="stage"><div class="m-fail"><span>⚠</span><span>Wi-Fi did not turn on: the interface is busy. <u>Try again</u></span></div></div>
+    <p class="m-caption">A sentence a person reads, with Retry or Dismiss; never an exit code or a traceback alone.</p></div>
+  <div class="spec"><h3>Empty</h3><p class="src">Catalog.section · .unavailable</p>
+    <div class="stage"><span class="m-caption">Nothing here yet.</span></div>
+    <p class="m-caption">A source that returns nothing says so in words.</p></div>
+</div>
+</main>
+<script>
+// remembers the reader's choice; works without storage too
+const root = document.documentElement;
+try { const t = localStorage.getItem('sb-ds-theme'); if (t) root.dataset.theme = t; } catch (e) {}
+document.getElementById('theme').addEventListener('click', () => {
+  const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  root.dataset.theme = dark ? 'light' : 'dark';
+  try { localStorage.setItem('sb-ds-theme', root.dataset.theme); } catch (e) {}
+});
+</script>
+</body>
+</html>

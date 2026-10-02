@@ -1,3 +1,5 @@
+Archived record of past work; it does not describe current behaviour.
+
 # gcc policy panel: one store, one click from the top bar
 
 <!-- sessions: gcc-flags@2026-09-24 -->

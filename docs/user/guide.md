@@ -2,9 +2,9 @@
 
 This guide is for the people who use Switchboard, not the people who build it. It says what each tab shows, what every button does, which ones ask before they act, and what you will see when something is missing or broken. Where a behaviour depends on tools outside the app (a Claude Code setup in `~/.claude`, csync, pm2), the guide says so.
 
-For how the app is put together, read [architecture.md](architecture.md). For the look and the reusable pieces, read [design-kit.md](design-kit.md). For what changed in each release, read [CHANGELOG.md](../CHANGELOG.md). This guide matches version 0.3.0.
+For what changed in each release, read [CHANGELOG.md](../../CHANGELOG.md). For how the app is built, start at the [docs index](../README.md). This guide matches version 0.4.0.
 
-Contents: [What Switchboard is](#what-switchboard-is) · [How every tab behaves](#how-every-tab-behaves) · [The tabs](#the-tabs) · [Settings in depth](#settings-in-depth) · [Permissions and privacy](#permissions-and-privacy) · [Troubleshooting](#troubleshooting) · [Sources for maintainers](#sources-for-maintainers)
+Contents: [What Switchboard is](#what-switchboard-is) · [How every tab behaves](#how-every-tab-behaves) · [The tabs](#the-tabs) · [Settings in depth](#settings-in-depth) · [Permissions and privacy](#permissions-and-privacy) · [Troubleshooting](#troubleshooting)
 
 ## What Switchboard is
 
@@ -26,9 +26,9 @@ The tabs are grouped into five spaces along the top: Claude, Records, Desk, Mac 
 | Mac | Machine, Runtime, Controls |
 | Around | Home, Remote |
 
-Every visible tab is refreshed when the panel opens, and a tab is refreshed again when you click it. While the panel stays open, the Agents values and the Claude usage numbers are re-read every 30 seconds. A hidden tab is never refreshed.
+Every visible tab is refreshed when the panel opens, and a tab is refreshed again when you click it. The list tabs (Hooks, Ledger, Queue, Library and Claude MCP) are read once when the app starts and are not read again within 20 seconds of their last read, so opening the panel does not refill them every time. While the panel stays open, the Agents values and the Claude usage numbers are re-read every 30 seconds. A hidden tab is never refreshed.
 
-If you installed with `scripts/build.sh --install`, Switchboard starts at login. Other tools can open or close the panel by posting the distributed notification `dev.switchboard.toggle`, which is how the claude-instances dropdown does it.
+If you installed with `scripts/build.sh --install`, Switchboard starts at login. Other tools can open or close the panel by posting the distributed notification `dev.switchboard.toggle`.
 
 ### The tabs at a glance
 
@@ -53,34 +53,47 @@ The default order is below. You can change it in Settings (see [Settings in dept
 | Settings | What does the panel show? | Always there |
 | Approvals | What is waiting on me? | Shown only while something waits |
 
-### The hover preview
+### The hover card
 
-Rest the pointer on the menu bar icon and a small card opens under it. It stays open while the pointer is on the icon or on the card, and closes a moment after the pointer leaves both. It does not open while the panel itself is open, and it does not open at all when there is nothing to show. It uses what Switchboard already knows; the only thing it reads fresh is the Claude limits file.
+Rest the pointer on the menu bar icon and a small card opens under it. It stays open while the pointer is on the icon or on the card, and closes a moment after the pointer leaves both (the delay is yours to set, see [Settings in depth](#settings-in-depth)). It does not open while the panel itself is open. The card is made of pages, and it reopens on the page you last left it on.
 
-What the card carries is your choice, made in Settings. Each item is one switch.
+| Page | What it shows |
+|---|---|
+| Now | Six shortcuts that open Agents, Hooks, Notes, Timers, Controls and Machine, and under them one row of badges, one for each thing that needs you. A badge opens its tab with the search filled in, so the row it names is in view. With nothing to show it says "Nothing needs you" |
+| Limits | Claude 5h, Claude 7d and Codex 7d, each with its icon, its percentage and its reset time. The per-model and reserve windows stay on the Usage tab |
+| Approvals | The pushes and asks waiting on you, with Approve and Cancel |
+| Bulbs | The lights that are on as rows, the others as small chips you click to switch on |
+| Pinned notes | The notes you pinned on the Notes tab |
+| Timers, Controls, Local models | Off until you switch them on in Settings under Hover pages |
 
-| Item | On by default | What it adds to the card |
+Every page has a button that opens its full tab.
+
+To move between pages, scroll over the icon or over the card's title bar, click a pill in the title bar, or press the page's number once the card has the keyboard. Scrolling over a page's content leaves the page alone, so a long list can still scroll. The gear on Now opens the hover settings in the panel.
+
+What Now shows under its shortcuts is your choice, made in Settings under Now page. Each item is one switch.
+
+| Item | On by default | What it adds |
 |---|---|---|
-| Claude limits | Yes | The 5-hour and weekly bars with their percentages, coloured by your warn and danger zones. The reset time appears only when it is less than 30 minutes away |
-| Waiting on you | Yes | How many pushes and asks wait, and the title of the oldest (for example "1 waiting on you: Push switchboard-mac") |
-| Problems | Yes | "All clear", or up to three problems in a sentence each, then "N more in the panel" |
-| Running timers | Yes | Up to two running countdown timers from the Timers tab, any timed flips such as Keep Awake with the time left, and the next note reminder |
-| Services down | No | "Down: kanban, session hub, ipc broker", naming only the ones that are down |
-| Dot on the icon | No | Not a line on the card. It puts a small dot on the menu bar icon itself |
+| Waiting on you | Yes | How many pushes and asks wait, and the oldest |
+| Problems | Yes | Sources that failed to read, failing jobs and the like, as badges |
+| Running timers | Yes | Up to two running timers, timed flips such as Keep Awake with the time left, and the next note reminder |
+| Services down | No | Kanban, the session hub or the ipc broker, only when down |
+| Dot on the icon | No | Not a badge. It puts a small dot on the menu bar icon itself |
 
 ### What the icon dot means
 
-With "Dot on the icon" switched on, a yellow dot means something is waiting on you (something on the Approvals tab). A red dot means something is wrong, and red wins over yellow. The dot is off by default.
+With "Dot on the icon" switched on, a yellow dot means something is waiting on you (something on the Approvals tab). A red dot means something is wrong, and red wins over yellow. The dot is off by default. Opening the panel while the dot is red or yellow lands on the tab that raised it, once for each new cause.
 
-"Wrong" means any of these, judged from the last read of your Mac:
+Every problem is either an error or a warning. Only errors turn the icon red. These are errors, judged from the last read of your Mac:
 
 - a source could not be read (the message names the helper, for example `gitscan.py`),
 - a scheduled job's last run failed,
-- one or more hook gates are off,
-- a timed flip could not turn its switch on or off,
-- a hook has no event or its file is missing (counted after the Hooks tab has been read once).
+- a timed flip could not turn its switch on or off.
 
-The Problems line on the hover card lists the same things.
+These are warnings. They show in orange as badges on Now but never turn the icon red and never pull the panel to their tab:
+
+- one or more hook gates are off,
+- a hook script has no event, or its file is missing.
 
 ## How every tab behaves
 
@@ -96,7 +109,7 @@ Every button on a row is a small icon; hover it for its name. A copy button puts
 
 ### Search and Show all
 
-The list tabs (Hooks, Ledger, Queue, Library, Claude MCP) and Runtime have a search field pinned above the list, and so does Settings. Type a few words; the list narrows once you pause for a quarter of a second. A row matches when every word appears somewhere in its name, its summary line or its opened details, in any order and in any case. Sections with no match disappear while you search. The X in the field, or the Escape key, clears it.
+The list tabs (Hooks, Ledger, Queue, Library, Claude MCP) and Runtime have a search field pinned above the list, and so does Settings. Type a few words; the list narrows once you pause for a quarter of a second. A row matches when every word appears somewhere in its name, its summary line or its opened details, in any order and in any case. Sections with no match disappear while you search. The field says only "Search" (hover it to see what it covers). The X in the field clears it. Escape lets go of the keyboard and keeps your search.
 
 To keep long lists short, a section with more than seven rows shows its first six and a row reading "Show all 23", with the note "17 more; or search above". Click it and every row shows, ending with "Show fewer". Searching always shows every match.
 
@@ -205,7 +218,7 @@ Answers: how much of my Claude and Codex quota is left?
 
 Two sections, Claude and Codex, each with a status line, a link to the provider's usage page, and a card of bars. A bar shows the window's name, the percentage used, and "resets in 2h 10m" when the reset time is known. Small tick marks on the bar show the thresholds that act on it. The bar is green, orange at the warn line and red at the danger line.
 
-Claude. The numbers come from what Claude Code hands its statusline (`~/.claude/widgets/.rate-limits-raw.json`, with `.limits.json` as a fallback). Every window it sends appears: "5 hours", "Week", and any per-model window such as "Week · Opus". The ticks are warn, danger and, on the 5-hour and weekly bars, "stand-down", the usage level at which the session warden stands down (from your policy, 90 if none). Two sliders set "Warn at" and "Danger at" between 50 and 100 percent in steps of five. The defaults are 70 and 90. Changing them also writes the same values into the claude-instances bar's preferences and tells it to redraw, because its icon is coloured by the same zones. Until Claude Code writes a reading you see "No usage reading yet. It arrives with the next statusline render."
+Claude. The numbers come from what Claude Code hands its statusline (`~/.claude/widgets/.rate-limits-raw.json`, with `.limits.json` as a fallback). Every window it sends appears: "5 hours", "Week", and any per-model window such as "Week · Opus". The ticks are warn, danger and, on the 5-hour and weekly bars, "stand-down", the usage level at which the session warden stands down (from your policy, 90 if none). Two sliders set "Warn at" and "Danger at" between 50 and 100 percent in steps of five. The defaults are 70 and 90. Until Claude Code writes a reading you see "No usage reading yet. It arrives with the next statusline render."
 
 Codex. The numbers come from a cache kept by the Codex usage gate (`~/.claude/adapters/codex/state/limits.json`). Opening the panel never starts Codex. To get fresh numbers, click "Ask Codex now": it starts a short-lived Codex process, shows a spinner, and gives up after 60 seconds. If it fails, the reason shows under the header (up to 140 characters), and older numbers stay on screen in amber. If the gate is muted (a `.no-codex-usage-gate` file in `~/.claude`), it refuses and says so. The single slider "Warn at" (default 60) sets where a bar turns orange, and the red line is the policy's Codex seat stand-down (75 if none), marked "seat stand-down". If Codex has free full resets available, a line says how many and when the first expires. Without the Codex adapter the section reads "Codex usage needs the Codex adapter in ~/.claude."
 
@@ -285,11 +298,13 @@ If a folder is missing, its section shows a red line such as "~/.claude/skills c
 
 Answers: what keeps going wrong, and what improvements are proposed?
 
-Three sections. The footer says "Mistakes sort by how often they recur; each row copies its CLI line."
+Four sections. The footer says "Mistakes sort by how often they recur; each row copies its CLI line."
 
 Mistakes reads `~/.claude/atone/events.jsonl` and groups events by pattern. Each row shows the pattern name, the title of the latest event, a count badge (red if the worst was severity S3, orange for S2, grey otherwise), and a tag like "S3 · last 2026-09-01". Opened, it shows the check to make before acting, what never to do again, how many times it happened (with the severity counts), and the three latest events. The last row copies the path to the write-up file when one exists. The Copy button copies `bash ~/.claude/scripts/atone.sh list --slug <pattern>`. Most frequent first, then most recent.
 
 Open proposals and Closed proposals read `~/.claude/proposals.jsonl`, newest first. A row shows the title, the first sentence of its body, and a tag ("open · 2026-09-20 · small"). Opened, it shows the full proposal, why it was closed, its kind, tags, links, the last three updates, and when it was filed. The Copy button copies `bash ~/.claude/scripts/propose.sh show <id>`.
+
+Checkpoints lists the last twenty checkpoints your sessions wrote with `/core-dump`, newest first, read from `~/.claude/checkpoints/index.jsonl`. A file written again shows once, at its newest. Automatic session-end and pre-compaction snapshots are left out, since they carry no summary to resume from. A row shows the checkpoint's name and a tag such as "switchboard-mac · 2 Oct, 9:14 AM". Opened, it shows where the work stopped, the project, and the line that resumes it. The Copy button copies `/catchup at <path>`. A checkpoint whose file has been deleted says "file gone" and offers nothing to copy.
 
 A file that cannot be read shows a red line naming it. A line in a file that does not parse is skipped.
 
@@ -312,13 +327,13 @@ Everything here is read-only apart from the copy buttons.
 
 Answers: what did I want to keep at hand?
 
-A compose bar is pinned above the list. Type and press Enter to save a note. The three icons beside the field are: open a larger editor (first line becomes the title, the rest the body), save what is on the clipboard as a note, and save and copy the note's path. A short message confirms ("Saved", "Saved from the clipboard", "Saved; path copied"). Saving the same text twice does not make a second note ("Already saved"). Notes are not searchable.
+A compose bar is pinned above the list. A note has a title over a body. Either can be left empty, but not both. Press Enter in the title and the rest of the line moves to the top of the body, with the cursor there. Save with the check mark or with Command and Return. The other icons beside the field open the larger title-and-body editor, save what is on the clipboard as a note, and save and copy the note's path. You can pick one of eight tag colours as you write. A short message confirms ("Saved", "Saved from the clipboard", "Saved; path copied"). Saving the same text twice does not make a second note ("Already saved"). Opening the tab puts the cursor in the compose bar, unless you are editing a note below. Notes are not searchable.
 
 Each note is one markdown file, so its path can be handed to an agent. The default folder is `~/Library/Application Support/Switchboard/notes`, and you can choose another in Settings. The file has a small header (title, created time, tags, expiry, reminder) and then the body. If you drop your own markdown file into the folder, Switchboard reads it: a file with no header takes its first line as the title (a leading `#` is dropped). Editing such a file keeps its body.
 
-A row shows the title and a second line with the first line of the body, the tags as `#tag`, "reminds 3 Oct, 9:00 AM, weekly" and "expires 5 Oct, 6:00 PM". Three copy buttons copy the file's full path, the whole note, and the title. Drag the grip at the left to reorder; the order is saved. Click the row to open its editor.
+A row shows the title and a second line with the first line of the body, a dot in the note's tag colour, "reminds 3 Oct, 9:00 AM, weekly" and "expires 5 Oct, 6:00 PM". Point at a row and its buttons appear. The copy buttons follow what the note has: one copies the file's full path, one the text if there is a body, one the title if there is a title. The pin button puts the note on the Pinned notes page of the hover card. Drag the grip at the left to reorder; the order is saved. Click the row to open its editor.
 
-The editor has the title, the body, a tags field (separated by commas), an expiry chip and a reminder chip. The expiry chip opens the time picker, with a "No expiry" link. Once a note has expired it dims, is struck through, and moves to a folded section at the end called "EXPIRED 2". Nothing is deleted. The reminder chip opens the picker with "Once / Every day / Every week / Every month" and a "No reminder" link. For a one-off reminder, a checkbox "Expire the note when it fires" appears. The editor saves by itself 0.7 seconds after you stop typing, and saves when you fold the row, so there is no Save button. The trash icon asks first ("The file and any reminder it set are removed").
+The editor has the title, the body, the tag colour (shown as colour only), an expiry chip and a reminder chip. The expiry chip opens the time picker, with a "No expiry" link. Once a note has expired it dims, is struck through, and moves to a folded section at the end called "EXPIRED 2". Nothing is deleted. The reminder chip opens the picker with "Once / Every day / Every week / Every month" and a "No reminder" link. For a one-off reminder, a checkbox "Expire the note when it fires" appears. The editor saves by itself 0.7 seconds after you stop typing, and saves when you fold the row, so there is no Save button. The trash icon asks first ("The file and any reminder it set are removed").
 
 Reminders. A reminder is created in the macOS Reminders app, in your default list, with an alarm at the time you chose and, for a repeat, a daily, weekly or monthly rule. Its notes carry the note's body and file path. It follows a change to the time, the repeat or the title, but typing in the body does not touch Reminders. Clearing the reminder or deleting the note removes that one reminder, and Switchboard touches no other reminder. The first time you set a reminder, macOS asks for Reminders access. The note is saved at once and the reminder is created when you allow it, from the note as it is then. If access is denied, a red line at the top says "Switchboard may not add reminders. Allow it in System Settings > Privacy & Security > Reminders." If you answer no to the dialog, it says "Reminders access was not given, so the reminder was not set." If Reminders itself refuses, the line says why.
 
@@ -328,7 +343,7 @@ If a note cannot be saved or deleted, a red line at the top says so. The folder 
 
 Answers: how long until the tea is ready?
 
-The top of the tab is a small form: a label field ("Label, e.g. Tea"), a row of eight colour dots, and a Start button. Click Start and pick how long; the timer starts at once. With no label, it is named "Timer". The picker takes minute presets and any typed time (see [the time picker](#the-time-picker)).
+The top of the tab is a small form: a label field ("Label, e.g. Tea"), a row of eight colour dots, and a Start button. Press Enter in the label, or click Start, and pick how long; the timer starts at once. With no label, it is named "Timer". The picker takes minute presets and any typed time (see [the time picker](#the-time-picker)).
 
 Each timer is a coloured row with its label, the time left as a clock ("4:05", or "1:02:05" past an hour) and a progress bar. Click the label to rename it; Enter or clicking away saves. Drag the grip to reorder. The plus button adds a minute to a running timer, or restarts a finished one for a minute. The X cancels a running timer or clears a finished one. A finished timer stays listed as "done" with "went off 3m ago" until you clear it.
 
@@ -372,7 +387,7 @@ Switchboard never commits, pushes or resets. Hidden sections are described in [S
 
 Answers: what is running, and can I stop it?
 
-Five sections, with a search field pinned above them (prompt: "Search services, ports, models and jobs"). The footer says "Stop and Disable ask first; a command copies instead of opening a terminal."
+Five sections, with a search field pinned above them . The footer says "Stop and Disable ask first; a command copies instead of opening a terminal."
 
 **Databases** lists the services Homebrew runs through launchd (the `homebrew.mxcl.*` agents in `~/Library/LaunchAgents`), such as mongod, redis, postgres and nginx, including ones `brew services` leaves out. A row shows its ports and pid, or "stopped". Start needs no confirmation; Stop and Restart ask first, since connected apps lose their connection. Stop unloads the service so launchd does not start it straight back, and it returns at the next login. Copy puts the connection string (`redis://127.0.0.1:6379`) on the clipboard, and Open shows its log. Opened, the row lists its ports, data folder, log and launchd label, each with a copy button. A button only reports success once the service has really started or exited.
 
@@ -475,7 +490,7 @@ If csync cannot be read, Console shows a red line, or an amber one with old valu
 
 Answers: what does the panel show?
 
-Settings has three groups: Tabs (show or hide each tab and its sections, and put the tabs in your order), Hover preview (which items the hover card carries), and Notes folder. A search field at the top narrows all three. Every part of it is explained in [Settings in depth](#settings-in-depth). The footer says "Hidden tabs and sections are not read, so they cost nothing."
+Settings has five groups: Tabs (show or hide each tab and its sections, and put the tabs in your order), Hover pages (which pages the hover card moves through, and in what order), Mouse-away delay, Now page (what the Now page shows as badges) and Notes folder. A search field at the top narrows all of them. Every part of it is explained in [Settings in depth](#settings-in-depth). The footer says "Hidden tabs and sections are not read, so they cost nothing."
 
 Settings cannot be hidden, and neither can Approvals.
 
@@ -517,11 +532,11 @@ The Tabs group lists every tab except Settings and Approvals, under the name and
 | Agents | Context |
 | Usage | Claude, Codex |
 | Hooks | Guards, Rules, Hook scripts |
-| Ledger | Mistakes, Open proposals, Closed proposals |
+| Ledger | Mistakes, Open proposals, Closed proposals, Checkpoints |
 | Queue | Scheduled, Cron duties, Deploy queue, Open proposals |
 | Library | Skills, Parked skills, Knowledge, Personas, Scripts |
 | Machine | Session, Drives, Repos |
-| Runtime | Services, Dev servers, Local models, Schedules |
+| Runtime | Databases, Services, Dev servers, Local models, Schedules |
 | Claude MCP | Plugins, MCP servers, Project plugins, Project MCP servers |
 | Controls | Sound, Display, Wi-Fi, Bluetooth |
 
@@ -537,11 +552,19 @@ In Settings the tabs are listed under their space. Drag the grip on a tab row to
 
 ### Search
 
-The search field in Settings ("Search tabs, sections and preview items") matches tab names, section names, hover items (their titles and their descriptions) and "notes folder". While you search, the grips are hidden and a tab whose section matched opens to just the matching sections.
+The search field in Settings matches tab names, section names, hover pages, the Now page items (their titles and their descriptions), "delay" and "notes folder". While you search, the grips are hidden and a tab whose section matched opens to just the matching sections.
 
-### Hover preview items
+### Hover pages
 
-Six switches, one per item in the table in [The hover preview](#the-hover-preview). The defaults are Claude limits, Waiting on you, Problems and Running timers. Each row's note describes what it adds. Turning on "Dot on the icon" is what makes the dot appear.
+Lists every page of the hover card in its order, with a grip and a switch. Drag the grip to reorder the pages, and switch a page off to hide it. Timers, Controls and Local models start off. The last page still shown cannot be hidden, so the card always has one.
+
+### Mouse-away delay
+
+A slider from 1 to 15 seconds for how long the hover card stays after the pointer leaves the icon and the card. Scrolling over the slider moves it a second at a time.
+
+### Now page
+
+Five switches, one per item in the table under [The hover card](#the-hover-card). The defaults are Waiting on you, Problems and Running timers. Each row's note describes what it adds. Turning on "Dot on the icon" is what makes the dot appear.
 
 ### Notes folder
 
@@ -591,7 +614,7 @@ Grants are filed by the app's code requirement. Builds made with `scripts/build.
 
 ### A group says it failed
 
-Read the line. An amber "as of 12m ago · couldn't refresh: the reason" means the last read failed and the old values are still shown. A red line means there was never a value. Retry (or the reload arrow in the footer) reads it again. The reason is usually one of these: a helper took longer than its limit and was stopped, a tool such as pm2 or python3 is not installed or not on the PATH, launchd or macOS refused, or a file could not be read. The hover card's Problems line names the helper that failed (for example `gitscan.py`). The log line "probe failed, keeping the last value" has the same reason.
+Read the line. An amber "as of 12m ago · couldn't refresh: the reason" means the last read failed and the old values are still shown. A red line means there was never a value. Retry (or the reload arrow in the footer) reads it again. The reason is usually one of these: a helper took longer than its limit and was stopped, a tool such as pm2 or python3 is not installed or not on the PATH, launchd or macOS refused, or a file could not be read. The Problems badge on the hover card's Now page names the helper that failed (for example `gitscan.py`). The log line "probe failed, keeping the last value" has the same reason.
 
 ### An older version appears
 
@@ -603,7 +626,7 @@ Check Settings first, since it may be hidden. Agents is absent when the policy t
 
 ### The panel shows old values
 
-Click the reload arrow in the footer, or click the tab again. Values are read when the panel opens; the Agents values and Claude usage also refresh every 30 seconds while it is open.
+Click the reload arrow in the footer, or click the tab again. Values are read when the panel opens, except that the list tabs are not read again within 20 seconds of their last read. The Agents values and Claude usage also refresh every 30 seconds while it is open.
 
 ### Where the log is
 
@@ -611,7 +634,7 @@ Click the reload arrow in the footer, or click the tab again. Values are read wh
 
 ### Checking without a screen
 
-Every surface can be checked headlessly. The commands below are for people who have the repository or the app bundle; they read only, except where noted. The full list is in [architecture.md](architecture.md#headless-checks).
+Every surface can be checked headlessly. The commands below are for people who have the repository or the app bundle; they read only, except where noted. The full list is in [the architecture notes](../dev/architecture.md#headless-checks).
 
 | Command | What it does |
 |---|---|
@@ -622,34 +645,3 @@ Every surface can be checked headlessly. The commands below are for people who h
 | `Switchboard --probe-timers` | Exercises timed flips by really flipping Keep Awake and putting it back |
 
 Run it from `~/Applications/Switchboard.app/Contents/MacOS/Switchboard`, or from `build/Switchboard.app/Contents/MacOS/Switchboard` after a local build. The probes that write use a scratch folder, never your notes, timers or `~/.claude`, and `tests/run-tests.sh` runs them all.
-
-## Sources for maintainers
-
-Every behaviour in this guide was read from the code below (line numbers as of 0.3.0).
-
-| Tab or topic | Files |
-|---|---|
-| Opening, tab bar, footer, refresh on open | `Sources/PolicyPanel.swift` 174-285 (panel), 1223-1309 (status item, toggle, show) |
-| Tab registry and absence rules | `Sources/PolicyPanel.swift` 70-171; `Sources/AppSupport.swift` 122-149 (Integrations) |
-| Hover preview and icon dot | `Sources/Hover.swift`; `Sources/AppSupport.swift` 252-284 (HoverItem); `Sources/PolicyPanel.swift` 1313-1348; `Sources/App.swift` 1566-1614 (app-side lines and problems) |
-| Rows, buttons, copy, confirm, failure | `Sources/PolicyPanel.swift` 606-982; `Sources/States.swift`; `Sources/Policy.swift` 200-285; `docs/design-kit.md` "Pending and failure" |
-| Search and Show all | `Sources/Catalog.swift` 51-127; `Sources/PolicyPanel.swift` 422-488, 1460-1525 |
-| Timed flips | `Sources/App.swift` 1393-1477; `Sources/PolicyPanel.swift` 917-933; `Sources/AppSupport.swift` 76-89 |
-| Time picker | `Sources/WhenPicker.swift` 11-77 (presets, `WhenText.parse`), 95-198 (panel) |
-| Agents | `Sources/PolicyPanel.swift` 289-418, 1018-1179; `Sources/Policy.swift`; `Sources/App.swift` 567-588; `Sources/Switchboard.swift` 306-339 |
-| Usage | `Sources/Usage.swift` 26-236 (readings), 240-406 (tab) |
-| Claude MCP | `Sources/CatalogReaders.swift` 177-399; `Sources/PolicyPanel.swift` 131-135, 1462-1483 |
-| Hooks | `Sources/CatalogReaders.swift` 21-173; `Sources/App.swift` 370-447, 592-608; `Sources/Switchboard.swift` 23-206, 210-304 |
-| Library | `Sources/CatalogReaders.swift` 620-762; `Sources/Catalog.swift` 129-231 |
-| Ledger | `Sources/CatalogReaders.swift` 532-616 |
-| Queue | `Sources/CatalogReaders.swift` 457-528 |
-| Notes | `Sources/Notes.swift` 100-355; `Sources/NotesView.swift` 10-325; `Sources/Reorder.swift` |
-| Timers | `Sources/Timers.swift` 11-296 |
-| Machine | `Sources/App.swift` 539-563, 909-1028, 1322-1391; `Resources/lib/drives.py`, `gitscan.py`, `wol.py`, `state.py` |
-| Runtime | `Sources/App.swift` 450-537, 726-903, 1177-1273, 1293-1318; `Sources/Switchboard.swift` 343-556; `Resources/lib/jobs.py`, `devservers.py`, `models.py`; `Sources/Transcript.swift` |
-| Controls | `Sources/Controls.swift` 135-420; `scripts/build.sh` 80-85 (usage strings) |
-| Home | `Sources/Lights.swift` 89-483; `Resources/lib/wiz.py` |
-| Remote | `Sources/App.swift` 1033-1173; `Resources/lib/remote.py`; `Sources/AppSupport.swift` 144-148 |
-| Settings | `Sources/Settings.swift`; `Sources/AppSupport.swift` 184-284; `Sources/PolicyPanel.swift` 80-89 |
-| Approvals | `Sources/Needs.swift` 39-249; `Sources/Switchboard.swift` 178-206; `Sources/AppSupport.swift` 96-115 |
-| Permissions, log, one-copy rule | `Sources/Controls.swift`; `Sources/Notes.swift` 285-323; `Sources/Timers.swift` 53-60, 164-172; `Sources/AppSupport.swift` 11-74; `Sources/App.swift` 66-108; `scripts/build.sh` 67-96 |
