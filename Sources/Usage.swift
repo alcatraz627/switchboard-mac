@@ -361,7 +361,7 @@ struct UsageBarRow: View {
             HStack {
                 Text(window.label).font(SBStyle.label)
                 Spacer()
-                Text("\(window.pct)%").font(SBStyle.mono)
+                Text("\(window.pct)%").font(SBStyle.mono).contentTransition(.numericText()).animation(Motion.fast, value: window.pct)
                 if let r = window.resetsAt, r > now {
                     Text("resets in \(countdownText(to: r, now: now))").font(SBStyle.caption).foregroundStyle(.secondary)
                 }

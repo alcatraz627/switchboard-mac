@@ -227,7 +227,16 @@ func probeQuickCycle() -> String {
 
 /// What the card shows and which page it is on; the view follows it.
 final class QuickState: ObservableObject {
-    @Published var page: QuickPage = .home
+    @Published var page: QuickPage = .home {
+        willSet {
+            // which way the turn went, read while the new page draws; going round the end still counts as onward
+            guard let a = pages.firstIndex(of: page), let b = pages.firstIndex(of: newValue), a != b else { return }
+            let n = pages.count
+            forward = (a == n - 1 && b == 0) ? true : (a == 0 && b == n - 1) ? false : b > a
+        }
+    }
+    /// The last page turn went onward through the pages, not back.
+    private(set) var forward = true
     /// The pages in the owner's order.
     @Published var pages: [QuickPage] = QuickPage.allCases
     /// How far down the card the title bar ends, measured when it draws;
@@ -306,6 +315,7 @@ let quickLaunchTabs: [(id: String, title: String)] = [
 /// then the page itself.
 struct QuickCard: View {
     @ObservedObject var state: QuickState
+    @Namespace private var pillSpace
     @ObservedObject var policy: PolicyStore
     @ObservedObject var usage: UsageStore
     @ObservedObject var lights: LightsStore
@@ -331,19 +341,23 @@ struct QuickCard: View {
                     })
                 Divider().padding(.horizontal, -12)
             }
-            switch state.page {
-            case .sessions:
-                // ticks each second so "4s ago" and the waits stay current while it is open
-                TimelineView(.periodic(from: .now, by: 1)) { t in SessionsPage(store: sessions, now: t.date) }
-            case .home: home
-            case .limits: limits
-            case .approvals: approvals
-            case .bulbs: bulbs
-            case .notes: pinned
-            case .timers: timerPage
-            case .controls: controlsPage
-            case .models: modelsPage
+            Group {
+                switch state.page {
+                case .sessions:
+                    // ticks each second so "4s ago" and the waits stay current while it is open
+                    TimelineView(.periodic(from: .now, by: 1)) { t in SessionsPage(store: sessions, now: t.date) }
+                case .home: home
+                case .limits: limits
+                case .approvals: approvals
+                case .bulbs: bulbs
+                case .notes: pinned
+                case .timers: timerPage
+                case .controls: controlsPage
+                case .models: modelsPage
+                }
             }
+            .id(state.page)
+            .transition(Motion.turn(forward: state.forward))
             if policy.approvalsUnderEveryPage && state.page != .approvals && state.pages.contains(.approvals) {
                 Divider().padding(.horizontal, -12)
                 approvalsCard
@@ -351,6 +365,7 @@ struct QuickCard: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
         .frame(width: sw(320), alignment: .leading)
+        .animation(Motion.fast, value: state.page)
         .background(GlassBackground())
         .coordinateSpace(name: state.space)
         .environment(\.cardSpace, state.space)
@@ -396,7 +411,11 @@ struct QuickCard: View {
                         if on && named { Text(p.title).font(.sb(11, weight: .semibold)).lineLimit(1).fixedSize() }
                     }
                     .padding(.horizontal, on && named ? 8 : 6).padding(.vertical, 3)
-                    .background(Capsule().fill(Color.primary.opacity(on ? 0.16 : 0.06)))
+                    .background(Capsule().fill(Color.primary.opacity(0.06)))
+                    // the highlight travels from pill to pill rather than jumping
+                    .background {
+                        if on { Capsule().fill(Color.primary.opacity(0.1)).matchedGeometryEffect(id: "pill", in: pillSpace) }
+                    }
                     .foregroundStyle(on ? .primary : .secondary)
                     .contentShape(Capsule())
                 }

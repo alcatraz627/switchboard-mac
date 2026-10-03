@@ -63,7 +63,7 @@ private struct ReorderDrop: DropDelegate {
 
     func dropEntered(info: DropInfo) {
         guard let d = dragging, d != target else { return }
-        withAnimation(.easeInOut(duration: 0.16)) { move(d, target) }
+        withAnimation(Motion.fast) { move(d, target) }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }

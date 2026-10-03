@@ -59,7 +59,7 @@ struct NoteCompose: View {
                                        font: .systemFont(ofSize: 12 * UIScale.text), singleLine: true, onReturn: { before, after in
                                            let r = InputRules.splitTitle(before: before, after: after, body: text)
                                            nav.draftTitle = r.title; nav.draftBody = r.body
-                                           withAnimation(.easeOut(duration: 0.12)) { expanded = true }
+                                           withAnimation(Motion.slow) { expanded = true }
                                            focus = .body
                                        })
                         }
@@ -73,7 +73,7 @@ struct NoteCompose: View {
                 let buttons = Group {
                     icon(expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                          expanded ? "Back to one line" : "Open a title and body") {
-                        withAnimation(.easeOut(duration: 0.12)) { expanded.toggle() }
+                        withAnimation(Motion.slow) { expanded.toggle() }
                     }
                     icon("checkmark", "Save (⌘↩); ⇧⌘↩ saves and pins it") { save(copyPath: false) }
                         .keyboardShortcut(.return, modifiers: .command)
@@ -89,7 +89,7 @@ struct NoteCompose: View {
                 if expanded { VStack(spacing: 8) { buttons }.padding(.top, 6) } else { HStack(spacing: 6) { buttons }.padding(.top, 6) }
             }
             if let f = flash {
-                Text(f).font(PT.caption).foregroundStyle(.secondary).padding(.leading, 4).transition(.opacity)
+                Text(f).font(PT.caption).foregroundStyle(.secondary).padding(.leading, 4).transition(Motion.arrive)
             }
         }
         .padding(.horizontal, PT.gap).padding(.top, PT.gap - 2).padding(.bottom, 2)
@@ -170,7 +170,7 @@ private struct NotesList: View {
             NotesFolderLink()
             if !notes.expired.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
-                    Button { withAnimation(.easeOut(duration: 0.15)) { showExpired.toggle() } } label: {
+                    Button { withAnimation(Motion.slow) { showExpired.toggle() } } label: {
                         HStack(spacing: 5) {
                             Image(systemName: "chevron.right").font(.sbIcon(8, weight: .semibold))
                                 .rotationEffect(.degrees(showExpired ? 90 : 0))
@@ -368,7 +368,7 @@ struct NoteRow: View {
                 Button("Copy title and text") { copy(note.content) }
                 Button("Copy file path") { copy(note.path) }
             }
-            if open, draft != nil { editor.transition(.opacity) }
+            if open, draft != nil { editor.transition(Motion.arrive) }
         }
     }
 
@@ -429,7 +429,7 @@ struct NoteRow: View {
     /// A click on the row: open it ready to edit, or close it (closing keeps whatever was typed).
     private func toggleOpen() {
         snapshotOpen = false
-        withAnimation(.easeOut(duration: 0.15)) {
+        withAnimation(Motion.slow) {
             nav.focus = open ? .row(note.id) : .open(note.id, nil, typing: true)
         }
     }

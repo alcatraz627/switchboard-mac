@@ -186,7 +186,7 @@ struct WhenPanel: View {
                     .onSubmit { if let d = typedDate { pick(d) } }
                     // Escape lets go of the keyboard; a second Escape closes the picker
                     .onExitCommand { fieldFocused = false }
-                Button { withAnimation(.easeOut(duration: 0.15)) { showCalendar.toggle() } } label: {
+                Button { withAnimation(Motion.slow) { showCalendar.toggle() } } label: {
                     Image(systemName: "calendar").font(.sbIcon(12))
                 }
                 .buttonStyle(.borderless).help("Pick on a calendar")

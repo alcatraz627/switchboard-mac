@@ -215,7 +215,7 @@ struct DeskTab: View {
             ScrollView(.vertical) { concern.content.padding(.bottom, sc(8)) }
                 .onReceive(FocusScroll.shared.$key) { k in
                     guard let k else { return }
-                    DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.13)) { proxy.scrollTo(k) } }
+                    DispatchQueue.main.async { withAnimation(Motion.fast) { proxy.scrollTo(k) } }
                 }
         }
             .scrollContentFrame()

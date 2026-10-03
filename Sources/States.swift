@@ -23,7 +23,7 @@ struct PendingMark: View {
             visible = false
             let wait = max(0, Pending.showAfter - Date().timeIntervalSince(since))
             try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
-            withAnimation(.easeIn(duration: 0.15)) { visible = true }
+            withAnimation(Motion.fast) { visible = true }
         }
         .help(help)
     }

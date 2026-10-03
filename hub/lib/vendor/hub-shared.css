@@ -93,7 +93,7 @@
 .tip { position: fixed; z-index: 200; max-width: 320px; padding: 5px 9px; border-radius: 7px; pointer-events: none;
     background: color-mix(in srgb, var(--text) 92%, var(--bg)); color: var(--bg);
     font: 500 12px/1.4 var(--sans); white-space: pre-line; box-shadow: 0 6px 20px -6px rgba(0,0,0,.45);
-    opacity: 0; translate: 0 3px; transition: opacity 120ms, translate 120ms; }
+    opacity: 0; translate: 0 3px; transition: opacity var(--t-fast, 130ms) var(--ease, ease), translate var(--t-fast, 130ms) var(--ease, ease); }
 .tip.on { opacity: 1; translate: 0 0; }
 
 /* ===== hover copy button for a paragraph, list item, table cell or code block ===== */

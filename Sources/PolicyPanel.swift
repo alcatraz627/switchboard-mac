@@ -222,13 +222,13 @@ struct PolicyPanel: View {
                     .onReceive(Reveal.shared.$key) { k in
                         guard let k else { return }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(k, anchor: .center) }
+                            withAnimation(Motion.slow) { proxy.scrollTo(k, anchor: .center) }
                         }
                     }
                     // the row the keyboard moved to stays in view, scrolled no further than needed
                     .onReceive(FocusScroll.shared.$key) { k in
                         guard let k else { return }
-                        DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.13)) { proxy.scrollTo(k) } }
+                        DispatchQueue.main.async { withAnimation(Motion.fast) { proxy.scrollTo(k) } }
                     }
                 }
                 .frame(height: min(max(contentHeight, 120), PT.maxHeight))
@@ -773,7 +773,7 @@ struct SystemRowView: View {
                 // The whole row is the target for a row that opens something;
                 // the small chevron alone was too hard to hit.
                 .onTapGesture {
-                    if opens { withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() } }
+                    if opens { withAnimation(Motion.slow) { expanded.toggle() } }
                     else if let menu = row.menu { menu().popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil) }
                     // A row whose one action is a copy (a file path) copies anywhere it is clicked.
                     else if row.buttons.count == 1, case .copy = row.buttons[0].kind { press(row.buttons[0]) }

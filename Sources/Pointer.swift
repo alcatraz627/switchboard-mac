@@ -93,7 +93,8 @@ final class Reveal: ObservableObject {
     }
 }
 
-/// Two soft pulses of the accent colour around a row that a link just landed on.
+/// The attention ring around a row that a link just landed on: the hub's
+/// accent ring, two beats, so "you landed here" reads the same in both places.
 struct RevealFlash: ViewModifier {
     let key: String?
     @ObservedObject private var reveal = Reveal.shared
@@ -101,12 +102,7 @@ struct RevealFlash: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.accentColor.opacity(lit ? 0.18 : 0))
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor.opacity(lit ? 0.7 : 0), lineWidth: 1.5))
-                    .allowsHitTesting(false)
-            )
+            .modifier(AttentionRing(lit: lit))
             .onChange(of: reveal.at) { _ in
                 guard let key, reveal.key == key else { return }
                 pulse()
@@ -118,10 +114,15 @@ struct RevealFlash: ViewModifier {
     }
 
     private func pulse() {
-        withAnimation(.easeOut(duration: 0.18)) { lit = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { withAnimation(.easeIn(duration: 0.25)) { lit = false } }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { withAnimation(.easeOut(duration: 0.18)) { lit = true } }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { withAnimation(.easeIn(duration: 0.4)) { lit = false } }
+        // Reduce Motion: one steady ring for the same time, no beats
+        if Motion.reduced {
+            lit = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { lit = false }
+            return
+        }
+        for b in Motion.beats {
+            DispatchQueue.main.asyncAfter(deadline: .now() + b.at) { withAnimation(Motion.slow) { lit = b.on } }
+        }
     }
 }
 

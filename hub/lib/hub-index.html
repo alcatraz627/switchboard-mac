@@ -7,7 +7,7 @@
 <!-- The menu-bar widget's Claude starburst (terracotta), tiled on the hub's
      slate and wearing a teal live-dot — the hub's own mark. -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23191a21'/%3E%3Cg stroke='%23d97757' stroke-width='5.5' stroke-linecap='round'%3E%3Cpath d='M32 32 32 9'/%3E%3Cpath d='M32 32 46 14'/%3E%3Cpath d='M32 32 55 27'/%3E%3Cpath d='M32 32 50 44'/%3E%3Cpath d='M32 32 37 55'/%3E%3Cpath d='M32 32 21 52'/%3E%3Cpath d='M32 32 10 42'/%3E%3Cpath d='M32 32 9 25'/%3E%3Cpath d='M32 32 18 11'/%3E%3C/g%3E%3Ccircle cx='51' cy='51' r='6' fill='%234fb6a6' stroke='%23191a21' stroke-width='2.5'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/vendor/hub-shared.css?v=2">
+<link rel="stylesheet" href="/vendor/hub-shared.css?v=3">
 <style>
 /* V6 "FLEET" index — the merged board. V3's state-grouped spine (Needs you →
    Working → Ended), V5's query grammar + live peek panes, V1's table density,
@@ -156,8 +156,12 @@ div.hs { border-color: transparent; background: transparent; }
 /* opening a card: its title becomes the transcript's title (owner D1 note) */
 @view-transition { navigation: auto; }
 .topbar { view-transition-name: topbar; }
-::view-transition-group(*) { animation-duration: 340ms; animation-timing-function: cubic-bezier(.2, 0, 0, 1); }
-::view-transition-old(root), ::view-transition-new(root) { animation-duration: 220ms; animation-timing-function: cubic-bezier(.2, 0, 0, 1); }
+::view-transition-group(*) { animation-duration: var(--t-slow); animation-timing-function: var(--ease); }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: var(--t-slow); animation-timing-function: var(--ease); }
+/* the card you came back to: the accent ring, two beats, as on the transcript and the Mac */
+.pane.landed { animation: landed 1.2s var(--ease); }
+@keyframes landed { 20%, 60% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--you) 45%, transparent); }
+                    40%, 100% { box-shadow: 0 0 0 0 transparent; } }
 @media (prefers-reduced-motion: reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none; } }
 
 main { max-width: 1120px; margin: 0 auto; padding: calc(var(--tb-h) + 22px) 18px 70px; }
@@ -702,7 +706,7 @@ document.addEventListener('click', e => {
     const b = e.target.closest('.hs[data-st]');
     if (b) setStFilter(stFilter === b.dataset.st ? 'all' : b.dataset.st);
 });
-$('#searchBtn').onclick = () => { const fq = $('#fq'); if (fq) { fq.focus(); fq.scrollIntoView({ block: 'center', behavior: 'smooth' }); } };
+$('#searchBtn').onclick = () => { const fq = $('#fq'); if (fq) { fq.focus(); fq.scrollIntoView({ block: 'center', behavior: smooth() }); } };
 stLabel();
 $('#sortSel').value = sortBy;
 $('#sortSel').onchange = () => { sortBy = $('#sortSel').value; try { localStorage.setItem(SS.sort, sortBy); } catch (e) {} renderBoard(curQ); };
@@ -841,8 +845,19 @@ document.addEventListener('click', e => {
     try { sessionStorage.setItem('hub-open', JSON.stringify({ sid: s.session_id, title: s.cwd_short, model: s.model,
         cwd: (s.cwd || '').replace(/^\/Users\/[^/]+/, '~') })); } catch (err) {}
     document.querySelectorAll('[style*="view-transition-name"]').forEach(el => { el.style.viewTransitionName = ''; });
-    const t = a.querySelector('.p-title, .c-dir'); if (t) t.style.viewTransitionName = 'sess-title';
+    nameCardParts(a);
 });
+/* The card's state dot, title and model travel to the same three on the
+   transcript's header; everything else crossfades. */
+function nameCardParts(card) {
+    const parts = { 'sess-title': '.p-title, .c-dir', 'sess-dot': '.p-st', 'sess-model': '.p-model, .c-model' };
+    const named = [];
+    for (const [name, sel] of Object.entries(parts)) {
+        const el = card.querySelector(sel);
+        if (el) { el.style.viewTransitionName = name; named.push(el); }
+    }
+    return named;
+}
 /* Hovering a card refreshes the browser's copy of its transcript, at most once
    every 5 s per session, so opening it paints at once (the transcript page
    revalidates on arrival). Needs the Cache API, so this Mac only. */
@@ -1314,7 +1329,7 @@ document.addEventListener('keydown', e => {
         cursor = cursor < 0 ? 0 : Math.min(items.length - 1, Math.max(0, cursor + (e.key === 'ArrowDown' ? 1 : -1)));
         items.forEach((el, i) => el.classList.toggle('cur', i === cursor));
         const el = items[cursor], r = el.getBoundingClientRect();
-        if (r.bottom > innerHeight - 24 || r.top < 90) scrollTo({ top: el.offsetTop - 140, behavior: 'smooth' });
+        if (r.bottom > innerHeight - 24 || r.top < 90) scrollTo({ top: el.offsetTop - 140, behavior: smooth() });
         if (el.dataset.peek) showPeek(el); else hidePeek();
     } else if (e.key === 'Enter' && cursor >= 0) items[cursor].click();
 });
@@ -1435,6 +1450,8 @@ function applyTextSize(px) {
    never on the 5s polls. No-op where unsupported or with reduced motion. */
 const vt = fn => (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches)
     ? document.startViewTransition(fn) : fn();
+/* Every scroll made on the reader's behalf glides, unless they asked for less motion. */
+function smooth() { return matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'; }
 /* opening a result while filtering = a query that worked; remember it */
 document.addEventListener('click', e => { if (curQ && e.target.closest('#board a')) pushHist(curQ); });
 $('#viewBtn').onclick = () => { const p = $('#viewPanel'); const o = p.classList.toggle('open'); $('#viewBtn').setAttribute('aria-pressed', String(o)); };
@@ -1465,16 +1482,18 @@ applyTextSize(HubShared.savedSize());
     }
     setMode(FEED.live.length || FEED.recent.length ? 'normal' : 'loading');
 })();
-/* Carry the transcript's title back into its card, then let the name go so
-   the next card opened can take it. */
+/* Carry the transcript's header back into its card, ring the card once so the
+   eye lands on it, then let the names go so the next card opened can take them. */
 function nameReturnCard() {
     let sid = null;
     try { sid = sessionStorage.getItem('hub-back'); sessionStorage.removeItem('hub-back'); } catch (e) {}
     if (!sid) return;
-    const t = document.querySelector(`#board [data-sid="${CSS.escape(sid)}"] .p-title, #board [data-sid="${CSS.escape(sid)}"] .c-dir`);
-    if (!t) return;
-    t.style.viewTransitionName = 'sess-title';
-    setTimeout(() => { t.style.viewTransitionName = ''; }, 900);
+    const card = document.querySelector(`#board [data-sid="${CSS.escape(sid)}"]`);
+    if (!card) return;
+    const named = nameCardParts(card);
+    card.classList.add('landed');
+    setTimeout(() => { named.forEach(el => { el.style.viewTransitionName = ''; }); }, 900);
+    setTimeout(() => card.classList.remove('landed'), 1400);
 }
 nameReturnCard();
 pollFeed();

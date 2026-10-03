@@ -445,6 +445,8 @@ struct SessionRow: View {
             // a Button, not a tap gesture: the card is not the key window, and only buttons take that first click
             Button(action: open) { HStack(spacing: 6) {
                 Circle().fill(session.attention.color).frame(width: si(6), height: si(6))
+                    // a working session looks alive; waiting is not activity, so needs-you stays still
+                    .overlay { if session.attention == .working { AlivePulse(color: session.attention.color, size: si(6)) } }
                 Text(session.title).font(.sb(11.5, weight: .medium)).lineLimit(1)
                 Text(stateWord).font(.sb(10.5))
                     .foregroundStyle(session.attention == .needsYou ? session.attention.color : .secondary).lineLimit(1)
