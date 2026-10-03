@@ -33,10 +33,15 @@ struct SettingsTabView: View {
         let folder = matches("notes folder") || matches(NotesStore.dir)
         let sizes = matches("size") || matches("small") || matches("medium") || matches("large") || matches("zoom")
         let prompts = matches("permission") || matches("prompt") || matches("claude asks") || matches("approvals")
+        let keys = matches("keyboard") || matches("shortcut") || matches("hotkey") || matches("keys")
         VStack(alignment: .leading, spacing: PT.gap) {
             if sizes {
                 group("Size", note: "How big everything is drawn: the panel, the hover card, its pages and the menu bar icon. Text grows most, icons a little less, inputs least.",
                       rows: [sizeRow])
+            }
+            if keys {
+                group("Keyboard", note: "⌘⌘ opens the panel on the last tab; ⌘⌘ again shows a letter for each tab; a third time closes it. ⌃⌥⌘N, ⌃⌥⌘U and ⌃⌥⌘B open Notes, Usage and Home from anywhere, and ⌃⌥⌘Space works like ⌘⌘. In the panel: ⌃Tab walks the tabs, ⌘1 to ⌘5 pick a space, Escape steps back out. Notes: arrows move, → opens and → again edits, Escape steps back, ⌘↩ saves, P pins, C copies, 1 to 8 colours.",
+                      rows: [commandWatchRow])
             }
             if !orderedTabs.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
@@ -120,7 +125,7 @@ struct SettingsTabView: View {
                       note: "When on, a prompt Claude Code would ask in the terminal shows under Claude asks in Approvals first. It waits \(PermissionRoute.wait) seconds for your Approve or Deny there, then asks in the terminal as usual.",
                       rows: [promptsRow])
             }
-            if orderedTabs.isEmpty && hover.isEmpty && pages.isEmpty && !linger && !folder && !prompts && !sizes {
+            if orderedTabs.isEmpty && hover.isEmpty && pages.isEmpty && !linger && !folder && !prompts && !sizes && !keys {
                 Text("Nothing in Settings matches \"\(query)\".").font(PT.caption).foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
             }
@@ -146,6 +151,21 @@ struct SettingsTabView: View {
         r.selected = UISize.allCases.firstIndex(of: scale.size) ?? 0
         r.onChoose = { i in scale.size = UISize.allCases[i] }
         r.key = "settings-size"
+        return r
+    }
+
+    @State private var watchAllowed = HotKeys.commandWatchAllowed
+
+    private var commandWatchRow: SystemRow {
+        var r = SystemRow(label: "⌘⌘ while another app is in front", state: watchAllowed ? .on(menuGreen) : .off,
+                          note: watchAllowed ? "allowed" : "needs permission: click, then turn Switchboard on in Accessibility",
+                          tip: "macOS only lets an app hear ⌘ on its own, from anywhere, with this permission. The ⌃⌥⌘ keys work without it.",
+                          action: {
+                              HotKeys.askForCommandWatch()
+                              DispatchQueue.main.asyncAfter(deadline: .now() + 2) { watchAllowed = HotKeys.commandWatchAllowed }
+                          })
+        r.icon = "command"
+        r.key = "settings-command-watch"
         return r
     }
 

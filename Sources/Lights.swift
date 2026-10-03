@@ -287,6 +287,7 @@ final class LightsStore: ObservableObject {
 
 struct LightsTabView: View {
     @ObservedObject var lights: LightsStore
+    @Environment(\.panelSpace) private var space
 
     private var scanState: ReadingState {
         if let e = lights.error {
@@ -329,7 +330,7 @@ struct LightsTabView: View {
                             if i > 0 { Divider().padding(.leading, SBStyle.rowH) }
                             HStack(spacing: 0) {
                                 grip.padding(.leading, 4)
-                                BulbRow(bulb: b, lights: lights)
+                                BulbRow(bulb: b, lights: lights, nav: RowNav.forSpace(space, "home"))
                             }
                         }
                     }
@@ -347,6 +348,7 @@ struct LightsTabView: View {
 struct BulbRow: View {
     let bulb: Bulb
     @ObservedObject var lights: LightsStore
+    @ObservedObject var nav: RowNav
     @State private var dim: Double = 50
     @State private var warm: Double = 2700
     @State private var hue: Double = 0
@@ -359,7 +361,7 @@ struct BulbRow: View {
     /// Headless renders set this (--expand) so the colour strip can be checked.
     static var startExpanded = false
 
-    private static let swatches: [(String, String)] = [
+    static let swatches: [(String, String)] = [
         ("FF3B30", "Red"), ("FF9500", "Orange"), ("FFD60A", "Yellow"), ("34C759", "Green"),
         ("00C7BE", "Teal"), ("007AFF", "Blue"), ("AF52DE", "Purple"), ("FF2D55", "Pink"),
     ]
@@ -394,7 +396,7 @@ struct BulbRow: View {
                         .font(SBStyle.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button { showColour.toggle() } label: {
+                Button { showColour.toggle(); nav.expanded = showColour ? bulb.id : nil } label: {
                     Image(systemName: "paintpalette").font(.sbIcon(11))
                         .foregroundStyle(showColour ? Color.accentColor : .secondary)
                 }
@@ -467,6 +469,9 @@ struct BulbRow: View {
             }
         }
         .padding(.horizontal, SBStyle.rowH).padding(.vertical, SBStyle.rowV + 1)
+        .keyRing(nav.focus == .row(bulb.id))
+        // Return on the focused bulb opens its colour strip, as the palette button does
+        .onChange(of: nav.expanded) { e in showColour = e == bulb.id }
         .opacity(bulb.reachable ? 1 : 0.55)
         .revealFlash(BulbRow.revealKey(bulb.mac))
         .id(BulbRow.revealKey(bulb.mac))

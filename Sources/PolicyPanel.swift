@@ -9,6 +9,7 @@
 // action, a pending flip, a changed value).
 
 import AppKit
+import Carbon.HIToolbox
 import Combine
 import SwiftUI
 
@@ -224,6 +225,11 @@ struct PolicyPanel: View {
                             withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(k, anchor: .center) }
                         }
                     }
+                    // the row the keyboard moved to stays in view, scrolled no further than needed
+                    .onReceive(FocusScroll.shared.$key) { k in
+                        guard let k else { return }
+                        DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.13)) { proxy.scrollTo(k) } }
+                    }
                 }
                 .frame(height: min(max(contentHeight, 120), PT.maxHeight))
                 .scrollContentFrame()
@@ -254,9 +260,28 @@ struct PolicyPanel: View {
             }
             spaceBar
             if currentSpaceTabs.count > 1 { subTabs }
+            if keys.jumping && !unbounded { jumpStrip }
         }
         .padding(.horizontal, PT.gap)
         .padding(.vertical, 10)
+    }
+
+    @ObservedObject private var keys = PanelKeys.shared
+    @ObservedObject private var toast = Toast.shared
+
+    /// After ⌘⌘: each tab's letter. A letter jumps there; Escape or ⌘⌘ again stops listening.
+    private var jumpStrip: some View {
+        let items = shown.compactMap { c in JumpLetters.letter(for: c.id).map { (c, $0) } }
+        return FlowLayout(spacing: 8) {
+            ForEach(items, id: \.0.id) { c, l in
+                HStack(spacing: 3) {
+                    Text(String(l).uppercased()).font(.sb(10.5, weight: .bold).monospaced())
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(RoundedRectangle(cornerRadius: 3).fill(Color.accentColor.opacity(0.18)))
+                    Text(c.title).font(PT.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 
     private func open(_ c: SwitchboardConcern) {
@@ -377,7 +402,8 @@ struct PolicyPanel: View {
     private var footer: some View {
         HStack(spacing: 6) {
             Image(systemName: current.footerIcon).font(.sbIcon(9)).foregroundStyle(.secondary)
-            Text(current.footer).font(PT.caption).foregroundStyle(.secondary)
+            // what a key just did, briefly, in place of the tab's own line
+            Text(toast.text ?? current.footer).font(PT.caption).foregroundStyle(toast.text == nil ? .secondary : .primary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
             // A Machine read can take a minute; the spinner says the click was heard.
@@ -1355,6 +1381,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     private var dotWatch: AnyCancellable?
     private var panelScroll: Any?
     private var panelMiddle: Any?
+    private var panelKeys: Any?
     private var pageWatch: AnyCancellable?
     private var countWatch: AnyCancellable?
     /// A Now page pinned to the desktop shares the hover card's badges; they refresh while it is up.
@@ -1474,6 +1501,15 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             guard let self, self.popover.isShown, let v = self.popover.contentViewController?.view, e.window === v.window else { return e }
             return MiddleClickTargets.shared.handle(e, in: v, space: ScrollTargets.space) ? nil : e
         }
+        // The keyboard: panel-wide keys first, then the open tab's own (Keys.swift).
+        panelKeys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            guard let self, self.popover.isShown, let v = self.popover.contentViewController?.view, e.window === v.window else { return e }
+            return self.handleKey(e) ? nil : e
+        }
+        KeyRouter.lights = lights
+        HotKeys.shared.onDoubleCommand = { [weak self] in self?.frontDoor(tab: nil) }
+        HotKeys.shared.onChord = { [weak self] tab in self?.frontDoor(tab: tab == "leader" ? nil : tab) }
+        HotKeys.shared.start()
 
         // Desk panels draw from the same stores as the hover card and the panel.
         DeskPanels.shared.title = { [weak self] item in
@@ -1526,6 +1562,61 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     @objc private func toggle(_ sender: Any?) {
         if popover.isShown { popover.performClose(sender); return }
         show()
+    }
+
+    /// ⌘⌘ and the chords. Closed: open (on the tab asked for, or the last one).
+    /// Open: a chord switches tab; ⌘⌘ shows the jump letters, and again closes.
+    func frontDoor(tab: String?) {
+        if !popover.isShown {
+            NSApp.activate(ignoringOtherApps: true)
+            show(tab: tab ?? UserDefaults.standard.string(forKey: PolicyPanel.tabKey))
+            return
+        }
+        if let tab { switchTab(tab); return }
+        if PanelKeys.shared.jumping { PanelKeys.shared.jumping = false; popover.performClose(nil) }
+        else { PanelKeys.shared.jumping = true }
+    }
+
+    private var currentTab: String { UserDefaults.standard.string(forKey: PolicyPanel.tabKey) ?? "agents" }
+
+    /// Visible tabs in the bar's order, and each space's tabs with its last-used one first.
+    private var tabOrder: (tabs: [String], spaces: [[String]]) {
+        let rank = Dictionary(store.tabOrder.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        let tabs = concerns.filter { $0.isShown() && !store.hiddenTabs.contains($0.id) }
+            .sorted { (rank[$0.id] ?? 99) < (rank[$1.id] ?? 99) }.map(\.id)
+        let spaces: [[String]] = Visibility.spaces.compactMap { s in
+            let ts = tabs.filter(s.tabs.contains)
+            guard !ts.isEmpty else { return nil }
+            guard let last = Visibility.lastTab(in: s.id), let i = ts.firstIndex(of: last) else { return ts }
+            var out = ts
+            out.insert(out.remove(at: i), at: 0)
+            return out
+        }
+        return (tabs, spaces)
+    }
+
+    private func switchTab(_ tab: String) {
+        guard tab != currentTab else { return }
+        UserDefaults.standard.set(tab, forKey: PolicyPanel.tabKey)
+        Visibility.rememberTab(tab)
+        concerns.first { $0.id == tab }?.refresh()
+    }
+
+    private func handleKey(_ e: NSEvent) -> Bool {
+        let o = tabOrder
+        switch PanelNav.move(e, current: currentTab, tabs: o.tabs, spaces: o.spaces, jumping: PanelKeys.shared.jumping) {
+        case .tab(let t)?: switchTab(t); return true
+        case .close?: popover.performClose(nil); return true
+        case .none?: return true
+        case nil: break
+        }
+        if KeyRouter.handle(e, space: ScrollTargets.space, tab: currentTab) { return true }
+        // Escape with nothing left to step out of closes the panel
+        if Int(e.keyCode) == kVK_Escape, !((e.window?.firstResponder as? NSTextView)?.isEditable ?? false) {
+            popover.performClose(nil)
+            return true
+        }
+        return false
     }
 
     /// Opens the panel on a tab and lands on one row there: scrolled into view and flashed.

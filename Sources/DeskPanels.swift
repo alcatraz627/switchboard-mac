@@ -153,6 +153,12 @@ final class DeskPanels: NSObject, NSWindowDelegate {
             guard let self, let (v, space) = self.deskView(of: e) else { return e }
             return MiddleClickTargets.shared.handle(e, in: v, space: space) ? nil : e
         }) { watches.append(m) }
+        // a pinned tab answers the same keys it does in the panel
+        if let k = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] e in
+            guard let self, let w = e.window, let key = w.identifier?.rawValue, self.windows[key] === w,
+                  let item = self.items.first(where: { $0.key == key }), item.kind == .tab else { return e }
+            return KeyRouter.handle(e, space: item.space, tab: item.id) ? nil : e
+        }) { watches.append(k) }
     }
     private func deskView(of e: NSEvent) -> (NSView, String)? {
         guard let w = e.window, let key = w.identifier?.rawValue, windows[key] === w, let v = w.contentView,
@@ -205,7 +211,13 @@ struct DeskTab: View {
     let space: String
     var body: some View {
         // the tab's own window space, so its wheel and middle-click places never mix with the popover's
-        ScrollView(.vertical) { concern.content.padding(.bottom, sc(8)) }
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) { concern.content.padding(.bottom, sc(8)) }
+                .onReceive(FocusScroll.shared.$key) { k in
+                    guard let k else { return }
+                    DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.13)) { proxy.scrollTo(k) } }
+                }
+        }
             .scrollContentFrame()
             // a resized panel grows the list with it
             .frame(minWidth: PT.width, idealWidth: PT.width, maxWidth: .infinity,

@@ -123,7 +123,7 @@ if args.contains("--time-tabs") {
     exit(0)
 }
 if args.contains("--probe-quick") {
-    let r = probeQuickCycle() + "\n" + (probePointer() + probeScale() + probeDesk() + probeTimerShorthand()).joined(separator: "\n")
+    let r = probeQuickCycle() + "\n" + (probePointer() + probeScale() + probeDesk() + probeTimerShorthand() + probeKeys()).joined(separator: "\n")
     print(r)
     exit(r.contains("FAIL") ? 1 : 0)
 }
@@ -195,6 +195,14 @@ if let out = argAfter("--snapshot") {
                                  remote: tab == "remote" ? delegate.panelRemoteGroups() : [])
     print(ok ? "wrote \(out)" : "snapshot failed")
     exit(ok ? 0 : 1)
+}
+
+if let out = argAfter("--drive-notes") {
+    // the Notes tab by keyboard, end to end, on the scratch state folder; runs its own steps and exits
+    NotesStore.remindersOff = true
+    let drive = KeyDrive(out: out)
+    DispatchQueue.main.async { drive.run() }
+    app.run()
 }
 
 app.delegate = delegate

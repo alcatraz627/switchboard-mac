@@ -80,6 +80,12 @@ extension View {
 /// An NSTextView that reports when it gains and loses the keyboard.
 final class EditorTextView: NSTextView {
     var onFocus: ((Bool) -> Void)?
+    /// A click on text that is open only to read: the owner means to edit it.
+    var onClickReadOnly: (() -> Void)?
+    override func mouseDown(with e: NSEvent) {
+        if !isEditable { onClickReadOnly?() }
+        super.mouseDown(with: e)
+    }
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
         if ok { onFocus?(true) }
@@ -105,6 +111,11 @@ struct EditorText: NSViewRepresentable {
     var onReturn: ((String, String) -> Void)? = nil
     /// When the keyboard is handed over from outside, put the cursor at the start.
     var caretAtStart = false
+    /// False shows the text to read: it can hold the keyboard, be selected and copied, not changed.
+    var editable = true
+    /// Where the cursor goes when the keyboard is handed over from outside, if not the default.
+    var caret: Int? = nil
+    var onClickReadOnly: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -126,6 +137,7 @@ struct EditorText: NSViewRepresentable {
         tv.isAutomaticDashSubstitutionEnabled = false
         tv.isFieldEditor = singleLine   // Tab moves on, as in any form
         tv.string = text
+        tv.isEditable = editable
         tv.delegate = context.coordinator
         tv.onFocus = { [weak coord = context.coordinator] on in coord?.focusChanged(on) }
         let sv = NSScrollView()
@@ -143,15 +155,30 @@ struct EditorText: NSViewRepresentable {
         guard let tv = context.coordinator.textView else { return }
         if tv.string != text { tv.string = text }
         if tv.font != font { tv.font = font }
+        if tv.isEditable != editable {
+            tv.isEditable = editable
+            // starting to type puts the cursor at the end of what was being read
+            if editable, tv.window?.firstResponder === tv, caret == nil {
+                tv.setSelectedRange(NSRange(location: (tv.string as NSString).length, length: 0))
+            }
+        }
+        tv.onClickReadOnly = onClickReadOnly
         let has = tv.window?.firstResponder === tv
+        let coord = context.coordinator
+        // Each hand-over runs a moment later and checks it is still wanted then: two
+        // fields acting on a stale wish pass the keyboard between them forever.
         if focused && !has {
+            let at = caret
             DispatchQueue.main.async {
-                guard let w = tv.window, w.firstResponder !== tv else { return }
+                guard coord.parent.focused, let w = tv.window, w.firstResponder !== tv else { return }
                 w.makeFirstResponder(tv)
-                if caretAtStart { tv.setSelectedRange(NSRange(location: 0, length: 0)) }
+                let len = (tv.string as NSString).length
+                if let at { tv.setSelectedRange(NSRange(location: min(at, len), length: 0)) }
+                else if caretAtStart { tv.setSelectedRange(NSRange(location: 0, length: 0)) }
+                else if !editable { tv.setSelectedRange(NSRange(location: 0, length: 0)) }
             }
         } else if !focused && has {
-            DispatchQueue.main.async { if tv.window?.firstResponder === tv { tv.window?.makeFirstResponder(nil) } }
+            DispatchQueue.main.async { if !coord.parent.focused, tv.window?.firstResponder === tv { tv.window?.makeFirstResponder(nil) } }
         }
     }
 
@@ -210,6 +237,12 @@ struct NoteSheet: View {
     var titlePrompt = "Title"
     var bodyPrompt = "Write a note"
     var bodyMax: CGFloat = 220
+    /// False while the note is open to read: the chosen block holds the keyboard but nothing changes.
+    var editable = true
+    /// Where the cursor lands when typing moves in from outside.
+    var caret: Int? = nil
+    /// A click on a block that is open to read.
+    var onClickReadOnly: ((Field) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -218,15 +251,18 @@ struct NoteSheet: View {
                            singleLine: true, onReturn: { before, after in
                                let r = InputRules.splitTitle(before: before, after: after, body: text)
                                title = r.title; text = r.body; focus = .body
-                           })
+                           }, editable: editable, caret: caret, onClickReadOnly: { onClickReadOnly?(.title) })
             }
             .padding(.horizontal, 8).padding(.top, 7).padding(.bottom, 5)
+            .keyRing(!editable && focus == .title, radius: 5)
             Divider().opacity(0.5).padding(.horizontal, 8)
             placeholder(bodyPrompt, empty: text.isEmpty, size: 12, weight: .regular) {
-                EditorText(text: $text, focused: bind(.body), font: .systemFont(ofSize: 12 * UIScale.text), maxHeight: bodyMax, caretAtStart: true)
+                EditorText(text: $text, focused: bind(.body), font: .systemFont(ofSize: 12 * UIScale.text), maxHeight: bodyMax,
+                           caretAtStart: true, editable: editable, caret: caret, onClickReadOnly: { onClickReadOnly?(.body) })
                     .frame(minHeight: 54, alignment: .top)
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
+            .keyRing(!editable && focus == .body, radius: 5)
         }
     }
 

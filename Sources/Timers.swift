@@ -230,6 +230,14 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
 
 struct TimersTabView: View {
     @ObservedObject var timers: TimerStore
+    @Environment(\.panelSpace) private var space
+
+    var body: some View { TimersList(timers: timers, nav: RowNav.forSpace(space, "timers")) }
+}
+
+private struct TimersList: View {
+    @ObservedObject var timers: TimerStore
+    @ObservedObject var nav: RowNav
     @State private var label = ""
     @State private var color: String? = "blue"
     @State private var picking = false
@@ -253,6 +261,9 @@ struct TimersTabView: View {
                         }
                         .onExitCommand { focused = false }
                         .inputBox(focused: focused)
+                        .onChange(of: focused) { f in if f { nav.focus = .field } }
+                        // ↑ from the first timer hands the label the keyboard again
+                        .onChange(of: nav.focus) { f in if f == .field, !focused { focused = true } }
                     WhenButton(title: "Start a timer for", presets: WhenPreset.timer,
                                onPick: { d, _ in timers.add(label: label, color: color ?? "blue", fireAt: d); label = "" },
                                isOpen: $picking) {
@@ -305,7 +316,7 @@ struct TimersTabView: View {
                     ReorderStack(items: timers.timers, move: { timers.move($0, to: $1) }, commit: { timers.save() }) { i, t, grip in
                         VStack(spacing: 0) {
                             if i > 0 { Divider().padding(.leading, PT.rowH) }
-                            TimerRow(timer: t, timers: timers, grip: grip)
+                            TimerRow(timer: t, timers: timers, nav: nav, grip: grip)
                                 .revealFlash("timer-" + t.id).id("timer-" + t.id)
                         }
                     }
@@ -319,6 +330,7 @@ struct TimersTabView: View {
 struct TimerRow: View {
     let timer: SBTimer
     @ObservedObject var timers: TimerStore
+    @ObservedObject var nav: RowNav
     let grip: AnyView
     @State private var editing = false
     @State private var draft = ""
@@ -341,12 +353,7 @@ struct TimerRow: View {
                             .onExitCommand { focused = false }
                     } else {
                         Text(timer.label).font(PT.label)
-                            .onTapGesture {
-                                draft = timer.label; editing = true
-                                EditingState.shared.timer = timer.id
-                                NSApp.activate(ignoringOtherApps: true)
-                                DispatchQueue.main.async { focused = true }
-                            }
+                            .onTapGesture { startRename() }
                             .help("Click to rename")
                     }
                     Spacer()
@@ -372,12 +379,24 @@ struct TimerRow: View {
                 .buttonStyle(.borderless).foregroundStyle(.secondary).help(timer.running ? "Cancel it" : "Clear it")
         }
         .padding(.leading, 4).padding(.trailing, PT.rowH).padding(.vertical, PT.rowV + 1)
+        .keyRing(nav.focus == .row(timer.id))
+        // Return on the focused timer renames it, as a click on its name does
+        .onChange(of: nav.renaming) { r in if r == timer.id, !editing { startRename() } }
+    }
+
+    private func startRename() {
+        draft = timer.label; editing = true
+        EditingState.shared.timer = timer.id
+        nav.renaming = timer.id
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async { focused = true }
     }
 
     private func finish() {
         guard editing else { return }
         editing = false
         if EditingState.shared.timer == timer.id { EditingState.shared.timer = nil }
+        if nav.renaming == timer.id { nav.renaming = nil }
         timers.rename(timer, to: draft)
     }
 }

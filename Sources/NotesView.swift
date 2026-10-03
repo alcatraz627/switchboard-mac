@@ -7,39 +7,58 @@ import SwiftUI
 
 /// The bar above the list: a title line that opens into a title and body
 /// sheet, with buttons to save, save what is on the clipboard, or save and
-/// copy the new note's path. Enter in the title opens the body; ⌘↩ saves.
+/// copy the new note's path. Enter in the title opens the body; ⌘↩ saves and
+/// carries on typing in the saved note; Escape leaves the draft where it is.
 struct NoteCompose: View {
     @ObservedObject var notes: NotesStore
-    @State private var title = ""
-    @State private var text = ""
-    @State private var color: String?
+    @ObservedObject private var nav: NotesNav
     @State private var expanded = false
     @State private var flash: String?
     @State private var focus: NoteSheet.Field?
     /// Snapshots draw the composer opened up.
     static var startExpanded = false
 
-    init(notes: NotesStore) {
+    init(notes: NotesStore, space: String = ScrollTargets.space) {
         self.notes = notes
+        nav = NotesNav.forSpace(space)
         if Self.startExpanded { _expanded = State(initialValue: true) }
     }
 
+    private var title: String { nav.draftTitle }
+    private var text: String { nav.draftBody }
+
     var body: some View {
+        content
+            .onChange(of: focus) { f in
+                if let f {
+                    nav.composeField = f == .body ? .body : .title
+                    if nav.focus != .compose { nav.focus = .compose }
+                } else if nav.focus == .compose {
+                    nav.focus = .none
+                }
+            }
+            .onChange(of: nav.focus) { f in
+                if f == .compose, focus == nil { focus = expanded && nav.composeField == .body ? .body : .title }
+                else if f != .compose, focus != nil { focus = nil }
+            }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top, spacing: 6) {
                 Group {
                     if expanded {
                         VStack(alignment: .leading, spacing: 0) {
-                            NoteSheet(title: $title, text: $text, focus: $focus, titlePrompt: "Title", bodyPrompt: "Note", bodyMax: 160)
-                            ColorBalls(selection: $color, allowNone: true, size: 11).padding(.horizontal, 5).padding(.bottom, 4)
+                            NoteSheet(title: $nav.draftTitle, text: $nav.draftBody, focus: $focus, titlePrompt: "Title", bodyPrompt: "Note", bodyMax: 160)
+                            ColorBalls(selection: $nav.draftColor, allowNone: true, size: 11).padding(.horizontal, 5).padding(.bottom, 4)
                         }
                     } else {
                         ZStack(alignment: .leading) {
                             if title.isEmpty { Text("New note").font(PT.label).foregroundStyle(.tertiary).allowsHitTesting(false) }
-                            EditorText(text: $title, focused: Binding(get: { focus == .title }, set: { focus = $0 ? .title : nil }),
+                            EditorText(text: $nav.draftTitle, focused: Binding(get: { focus == .title }, set: { focus = $0 ? .title : nil }),
                                        font: .systemFont(ofSize: 12 * UIScale.text), singleLine: true, onReturn: { before, after in
                                            let r = InputRules.splitTitle(before: before, after: after, body: text)
-                                           title = r.title; text = r.body
+                                           nav.draftTitle = r.title; nav.draftBody = r.body
                                            withAnimation(.easeOut(duration: 0.12)) { expanded = true }
                                            focus = .body
                                        })
@@ -75,19 +94,19 @@ struct NoteCompose: View {
         }
         .padding(.horizontal, PT.gap).padding(.top, PT.gap - 2).padding(.bottom, 2)
         .onAppear {
-            // the new note gets the keyboard, unless a note below is open for editing
-            guard InputRules.focusNewInput(editing: EditingState.shared.note) else { return }
+            // the new note gets the keyboard, unless a note below is open or has the keyboard
+            guard InputRules.focusNewInput(editing: EditingState.shared.note), nav.focus == .none || nav.focus == .compose else { return }
             DispatchQueue.main.async { if focus == nil { focus = .title } }
         }
     }
 
     private func save(copyPath: Bool, pin: Bool = false) {
         let before = notes.notes.count
-        guard var n = notes.add(title: title, body: text, color: color) else {
+        guard var n = notes.add(title: title, body: text, color: nav.draftColor) else {
             if !InputRules.canSave(title: title, body: text) { show("Type a title or a note first") }
             return
         }
-        title = ""; text = ""; color = nil
+        nav.draftTitle = ""; nav.draftBody = ""; nav.draftColor = nil
         if pin { n.pinned = true; notes.update(n) }
         if copyPath {
             NSPasteboard.general.clearContents()
@@ -109,9 +128,19 @@ struct NoteCompose: View {
 
 struct NotesTabView: View {
     @ObservedObject var notes: NotesStore
+    @Environment(\.panelSpace) private var space
+
+    var body: some View { NotesList(notes: notes, nav: NotesNav.forSpace(space)) }
+}
+
+/// The notes under the colour filter, each row knowing whether it has the keyboard.
+private struct NotesList: View {
+    @ObservedObject var notes: NotesStore
+    @ObservedObject var nav: NotesNav
     @State private var showExpired = false
 
     var body: some View {
+        let shown = nav.visible(notes.live)
         VStack(alignment: .leading, spacing: PT.gap) {
             if let e = notes.error {
                 ReadingStatus(state: .failed(e)).padding(.horizontal, 4)
@@ -123,15 +152,20 @@ struct NotesTabView: View {
                     .padding(.horizontal, 4)
             }
             if !notes.live.isEmpty {
+                NoteFilterBar(nav: nav, hidden: notes.live.count - shown.count)
+            }
+            if !shown.isEmpty {
                 Card {
-                    ReorderStack(items: notes.live, move: { notes.move($0, to: $1) }, commit: { notes.saveOrder() }) { i, n, grip in
+                    ReorderStack(items: shown, move: { notes.move($0, to: $1) }, commit: { notes.saveOrder() }) { i, n, grip in
                         VStack(spacing: 0) {
                             if i > 0 { Divider().padding(.leading, PT.rowH) }
-                            NoteRow(note: n, notes: notes, grip: grip)
+                            NoteRow(note: n, notes: notes, nav: nav, grip: grip)
                                 .revealFlash("note-" + n.id).id("note-" + n.id)
                         }
                     }
                 }
+            } else if !notes.live.isEmpty {
+                Text("No notes in the chosen colours.").font(PT.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
             }
             NotesFolderLink()
             if !notes.expired.isEmpty {
@@ -149,7 +183,7 @@ struct NotesTabView: View {
                         Card {
                             ForEach(Array(notes.expired.enumerated()), id: \.element.id) { i, n in
                                 if i > 0 { Divider().padding(.leading, PT.rowH) }
-                                NoteRow(note: n, notes: notes, grip: AnyView(Color.clear.frame(width: si(14))))
+                                NoteRow(note: n, notes: notes, nav: nav, grip: AnyView(Color.clear.frame(width: si(14))))
                             }
                         }
                         .opacity(0.6)
@@ -158,6 +192,39 @@ struct NotesTabView: View {
             }
         }
         .padding(PT.gap)
+    }
+}
+
+/// One small row: "All" and the eight colours. Chosen colours narrow the list;
+/// ← and → walk it from the keyboard, Space picks.
+struct NoteFilterBar: View {
+    @ObservedObject var nav: NotesNav
+    let hidden: Int
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Text("All").font(.sb(10.5, weight: nav.filter.isEmpty ? .semibold : .regular))
+                .foregroundStyle(nav.filter.isEmpty ? Color.primary : .secondary)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Capsule().fill(Color.primary.opacity(nav.filter.isEmpty ? 0.1 : 0)))
+                .keyRing(nav.focus == .filter(0), radius: 8)
+                .contentShape(Rectangle())
+                .onTapGesture { nav.toggleFilter(0) }
+            ForEach(Array(timerColors.enumerated()), id: \.element.0) { i, c in
+                let on = nav.filter.contains(c.0)
+                Circle().fill(c.1).frame(width: si(10), height: si(10))
+                    .opacity(nav.filter.isEmpty || on ? 1 : 0.35)
+                    .overlay(Circle().strokeBorder(Color.primary.opacity(on ? 0.8 : 0), lineWidth: 1.5).padding(-3))
+                    .padding(3)
+                    .keyRing(nav.focus == .filter(i + 1), radius: 9)
+                    .contentShape(Circle())
+                    .onTapGesture { nav.toggleFilter(i + 1) }
+                    .accessibilityLabel(c.0)
+            }
+            Spacer(minLength: 4)
+            if hidden > 0 { Text("\(hidden) hidden").font(PT.caption).foregroundStyle(.tertiary) }
+        }
+        .padding(.horizontal, 4)
     }
 }
 
@@ -196,8 +263,10 @@ struct NotesFolderLink: View {
 struct NoteRow: View {
     let note: Note
     @ObservedObject var notes: NotesStore
+    @ObservedObject var nav: NotesNav
     let grip: AnyView
-    @State private var open = false
+    /// Snapshots draw the first note open without touching where the keyboard is.
+    @State private var snapshotOpen = false
     @State private var draft: Note?
     @State private var tagsText = ""
     @State private var expireWithReminder = false
@@ -211,7 +280,40 @@ struct NoteRow: View {
 
     @State private var hovering = false
 
+    /// This note's place in the keyboard's path: open (and which block, reading or typing) or not.
+    private var openState: (block: NoteBlock?, typing: Bool)? {
+        if case .open(let id, let b, let t) = nav.focus, id == note.id { return (b, t) }
+        return snapshotOpen ? (nil, true) : nil
+    }
+    private var open: Bool { openState != nil }
+
     var body: some View {
+        rows
+            .onChange(of: open) { o in
+                if o { begin() } else { save() }
+                if o { EditingState.shared.note = note.id } else if EditingState.shared.note == note.id { EditingState.shared.note = nil }
+            }
+            .onChange(of: nav.focus) { _ in
+                let want: NoteSheet.Field? = openState?.block.map { $0 == .title ? .title : .body }
+                if focus != want { focus = want }
+            }
+            .onChange(of: focus) { f in
+                // a click into a field of this note: the keyboard is here, typing
+                guard let f, let s = openState else { return }
+                let b: NoteBlock = f == .title ? .title : .body
+                if s.block != b { nav.focus = .open(note.id, b, typing: s.typing) }
+            }
+            .onChange(of: nav.saveTick) { _ in if open { save() } }
+            .onAppear {
+                // the note ⌘↩ just saved is drawn already open, so nothing above fires for it
+                guard open, draft == nil else { return }
+                begin()
+                EditingState.shared.note = note.id
+                focus = openState?.block.map { $0 == .title ? .title : .body }
+            }
+    }
+
+    private var rows: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 6) {
                 grip
@@ -254,6 +356,7 @@ struct NoteRow: View {
             }
             .padding(.leading, 4).padding(.trailing, PT.rowH).padding(.vertical, PT.rowV)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(hovering && !open ? 0.05 : 0)))
+            .keyRing(nav.focus == .row(note.id))
             .contentShape(Rectangle())
             .onTapGesture { toggleOpen() }
             .onHover { hovering = $0 }
@@ -293,13 +396,14 @@ struct NoteRow: View {
         NSPasteboard.general.setString(s, forType: .string)
     }
 
-    init(note: Note, notes: NotesStore, grip: AnyView) {
+    init(note: Note, notes: NotesStore, nav: NotesNav, grip: AnyView) {
         self.note = note
         self.notes = notes
+        self.nav = nav
         self.grip = grip
         // Snapshots start the first note open; changing state mid-capture blanks the frame.
         if Self.startOpen, notes.live.first?.id == note.id {
-            _open = State(initialValue: true)
+            _snapshotOpen = State(initialValue: true)
             _draft = State(initialValue: note)
         }
     }
@@ -322,17 +426,20 @@ struct NoteRow: View {
         return parts.joined(separator: " · ")
     }
 
+    /// A click on the row: open it ready to edit, or close it (closing keeps whatever was typed).
     private func toggleOpen() {
-        if open { save() }   // closing keeps whatever was typed
+        snapshotOpen = false
         withAnimation(.easeOut(duration: 0.15)) {
-            open.toggle()
-            if open {
-                draft = note
-                tagsText = note.tags.joined(separator: ", ")
-                expireWithReminder = note.remindAt != nil && note.expires == note.remindAt
-            }
+            nav.focus = open ? .row(note.id) : .open(note.id, nil, typing: true)
         }
-        if open { EditingState.shared.note = note.id } else if EditingState.shared.note == note.id { EditingState.shared.note = nil }
+    }
+
+    private func begin() {
+        draft = note
+        tagsText = note.tags.joined(separator: ", ")
+        expireWithReminder = note.remindAt != nil && note.expires == note.remindAt
+        // the cursor position carried from the new note applies once
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { nav.caret = nil }
     }
 
     /// The editor saves by itself shortly after each change, so there is no
@@ -343,7 +450,8 @@ struct NoteRow: View {
         return VStack(alignment: .leading, spacing: 8) {
             // title and body are one sheet, like a note app, not two boxed fields
             VStack(alignment: .leading, spacing: 0) {
-                NoteSheet(title: d.title, text: d.body, focus: $focus)
+                NoteSheet(title: d.title, text: d.body, focus: $focus, editable: openState?.typing ?? true, caret: nav.caret,
+                          onClickReadOnly: { f in nav.focus = .open(note.id, f == .title ? .title : .body, typing: true) })
                 HStack(spacing: 3) {
                     Text("#").font(PT.caption).foregroundStyle(.tertiary)
                     TextField("tags, separated by commas", text: Binding(get: { tagsText }, set: { t in

@@ -50,6 +50,7 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   check "a section hidden in Settings is neither drawn nor read" "$BIN" --probe-visibility
   check "the Settings tab renders" "$BIN" --snapshot "$WORK/settings.png" --tab settings
   check "notes save, read back, expire, reorder and delete (scratch folder)" env SWITCHBOARD_STATE="$WORK/notes-state" "$BIN" --probe-notes
+  check "Notes and Timers work by keyboard alone: write, save, read, select, filter, edit, rename, extend, clear (scratch folder)" env SWITCHBOARD_STATE="$WORK/drive-state" "$BIN" --drive-notes "$WORK/drive"
   check "scrolling turns one quick page per push, wraps, and ignores inertia" "$BIN" --probe-quick
   for p in home limits approvals bulbs notes timers controls models; do
     check "the $p quick page renders" env SWITCHBOARD_STATE="$WORK/notes-state" "$BIN" --snapshot-quick "$WORK/quick-$p.png" --page "$p"
