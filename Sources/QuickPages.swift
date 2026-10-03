@@ -364,7 +364,9 @@ struct QuickCard: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
-        .frame(width: sw(320), alignment: .leading)
+        // the hover card is a fixed width; a pinned page fills the window it is given
+        .frame(width: state.onDesk ? nil : sw(320), alignment: .leading)
+        .frame(minWidth: state.onDesk ? sw(320) : nil, maxWidth: state.onDesk ? .infinity : nil, alignment: .leading)
         .animation(Motion.fast, value: state.page)
         .background(GlassBackground())
         .coordinateSpace(name: state.space)

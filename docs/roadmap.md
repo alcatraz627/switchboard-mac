@@ -36,17 +36,6 @@ The Android app (csync) and Switchboard should act as if they share many actions
 3. Notes: each app keeps its own, and each can manage and edit the other's. Sharing must be possible, not primary.
 4. More shared actions and context after that.
 
-## Desk panels: collapse, and several in one window (owner, 2026-10-03; "/ui on this later")
-
-- A collapse and expand view for desk panels, notably Notes and Usage.
-- Combine panels into one window: cards split vertically, a divider between, each card keeping its own title row and controls.
-
-Run through /ui after the current queue is finished and checked.
-
-## Wheel on sliders: audit the whole app (owner, 2026-10-03, "bug for later")
-
-On the Usage tab, the wheel over Claude's weekly "Warn at" slider also moves Codex's slider (by the same relative offset), and the wheel does nothing on the other sliders on that page ("What acts on these numbers"). Audit every slider in the app for one wheel target per slider, each moving only itself, before fixing.
-
 ## Other deferred items
 
 - Codex warn and danger thresholds. Deferred by the owner. Do not raise it again.

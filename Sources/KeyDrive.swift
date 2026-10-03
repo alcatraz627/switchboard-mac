@@ -271,10 +271,47 @@ final class KeyDrive {
         }
         step("→ on a choice row picks the next choice") {
             self.check(self.chosen == 1, "chosen \(self.chosen)")
+            self.showStack()
+        }
+        step("two pinned panels combine into one window of stacked cards") {
+            self.check(self.stack?.items.first?.children?.count == 2, "\(String(describing: self.stack?.items))")
+            self.snapStack("stack-open")
+            self.stack?.foldCard("page-limits", in: self.stack?.items.first?.key ?? "")
+        }
+        step("folding the second card leaves its title row") {
+            self.snapStack("stack-folded")
+            self.check(self.stack?.items.first?.children?.last?.isCollapsed == true)
+            self.stack?.closeAll()
+            UserDefaults.standard.removeObject(forKey: DeskPanels.saveKey)
         }
     }
 
     private var tab = "notes"
+    private var stack: DeskPanels?
+
+    /// Two real cards (the Notes tab and a short page) pinned and combined, on a panel list of the drive's own.
+    private func showStack() {
+        DeskPanels.saveKey = "switchboard.deskPanels.drive"
+        UserDefaults.standard.removeObject(forKey: DeskPanels.saveKey)
+        let d = DeskPanels(probe: true)
+        d.content = { i in
+            i.id == "notes" ? AnyView(DeskTab(concern: SwitchboardConcern(id: "notes", title: "Notes", subtitle: "", icon: "note.text", footer: "",
+                                                                          footerIcon: "doc.text", content: AnyView(NotesTabView(notes: NotesStore.shared)),
+                                                                          pinned: AnyView(NotesTop())), space: i.space))
+                            : AnyView(Text("Claude 5h 13% · 7d 84%").font(PT.label).padding(12).frame(maxWidth: .infinity, alignment: .leading))
+        }
+        d.title = { $0.id == "notes" ? "Notes" : "Limits" }
+        d.pin(.tab, "notes"); d.pin(.page, "limits")
+        d.combine("page-limits", into: "tab-notes")
+        stack = d
+    }
+
+    private func snapStack(_ name: String) {
+        guard let w = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("stack-") == true && $0.isVisible }),
+              let v = w.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { check(false, "no stack window"); return }
+        v.cacheDisplay(in: v.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(out)/\(name).png"))
+    }
     private var log: [String] = []
     private var chosen = 0
 

@@ -772,8 +772,11 @@ enum PanelNav {
         if jumping {
             PanelKeys.shared.jumping = false
             if Int(e.keyCode) == kVK_Escape { return Move.none }
-            if mods.isEmpty, let c = e.charactersIgnoringModifiers?.lowercased().first, let t = JumpLetters.tab(for: c), tabs.contains(t) {
-                return .tab(t)
+            if mods.isEmpty, let c = e.charactersIgnoringModifiers?.lowercased().first, let t = JumpLetters.tab(for: c) {
+                if tabs.contains(t) { return .tab(t) }
+                // a tab that is hidden right now (Approvals with nothing waiting) says so instead of doing nothing
+                Toast.shared.show(t == "approvals" ? "Nothing waits on you" : "That tab is hidden in Settings")
+                return Move.none
             }
             return nil
         }

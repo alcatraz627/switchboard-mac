@@ -1597,6 +1597,9 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
                 guard let c = self.concerns.first(where: { $0.id == item.id }) else { return nil }
                 c.refresh()
                 return AnyView(DeskTab(concern: c, space: item.space))
+            case .stack:
+                // a stack draws its cards itself, one card per child
+                return nil
             }
         }
         DispatchQueue.main.async { DeskPanels.shared.restore() }
@@ -1948,9 +1951,7 @@ struct SearchField: View {
                 .help("Clear")
             }
         }
-        .padding(.horizontal, 9).padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(0.07)))
-        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(focused ? Color.accentColor.opacity(0.6) : .clear))
+        .inputBox(focused: focused)
         .padding(.horizontal, PT.gap).padding(.top, PT.gap - 2).padding(.bottom, 2)
         // A menu bar app takes keystrokes only once it is active.
         .onTapGesture { NSApp.activate(ignoringOtherApps: true); focused = true }

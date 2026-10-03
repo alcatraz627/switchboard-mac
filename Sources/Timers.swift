@@ -348,6 +348,7 @@ struct TimerRow: View {
                     if editing {
                         TextField("Label", text: $draft).textFieldStyle(.plain).font(PT.label)
                             .focused($focused)
+                            .inputBox(focused: focused)
                             .onSubmit { finish() }
                             .onChange(of: focused) { f in if !f { finish() } }
                             // Escape lets go of the keyboard; letting go saves, as clicking away does

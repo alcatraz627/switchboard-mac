@@ -171,7 +171,7 @@ if let out = argAfter("--snapshot-quick") {
     let desk = args.contains("--desk")
     if desk { state.pages = [page]; state.onDesk = true; state.space = DeskItem(kind: .page, id: page.rawValue).space }
     let card = QuickCard(state: state, policy: policy, usage: usage, lights: lights, notes: NotesStore.shared, controls: controls, openTab: { _ in })
-    let shown = desk ? AnyView(DeskFrame(item: DeskItem(kind: .page, id: page.rawValue), title: page.title, toggleTop: {}, close: {}) { card })
+    let shown = desk ? AnyView(DeskFrame(item: DeskItem(kind: .page, id: page.rawValue), title: page.title, inStack: false, first: true, others: { [] }, toggleTop: {}, toggleFold: {}, combine: { _ in }, takeOut: {}, close: {}) { card })
                      : AnyView(card)
     let ok = snapshotCard(shown, to: out)
     print(ok ? "wrote \(out)" : "snapshot failed")
