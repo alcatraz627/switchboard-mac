@@ -1,9 +1,10 @@
 // DeskPanels.swift
 // Desk panels: any hover page (Sessions, Limits, Bulbs…) or any panel tab
-// pinned as a small window on the desktop, live and clickable, the way a
-// widget would be if widgets could hold sliders and lists. Each sits on the
-// desktop layer by default (or above other windows, if chosen), shows on every
-// Space, and comes back where it was after a restart.
+// pinned as a small window of its own, live and clickable, the way a widget
+// would be if widgets could hold sliders and lists. Each behaves like any other
+// window (a click brings it forward, another window can cover it) or stays above
+// every window, if chosen; it shows on every Space and comes back where it was
+// after a restart.
 
 import AppKit
 import SwiftUI
@@ -74,17 +75,23 @@ final class DeskPanels: NSObject, NSWindowDelegate {
         })
         host.frame.size = host.fittingSize
         let p = NSPanel(contentRect: NSRect(origin: .zero, size: host.fittingSize),
-                        styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel],
+                        styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
                         backing: .buffered, defer: false)
         p.titleVisibility = .hidden
         p.titlebarAppearsTransparent = true
+        // the panel's own row carries close and layer, so the traffic lights only cost a white strip
+        [.closeButton, .miniaturizeButton, .zoomButton].forEach { p.standardWindowButton($0)?.isHidden = true }
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        // a click activates the app, so the panel comes forward and can take typing
+        p.becomesKeyOnlyIfNeeded = false
         p.isMovableByWindowBackground = true
         p.isReleasedWhenClosed = false
         p.hidesOnDeactivate = false
         p.contentView = host
         p.delegate = self
         p.identifier = NSUserInterfaceItemIdentifier(item.key)
-        p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        p.collectionBehavior = [.canJoinAllSpaces, .ignoresCycle]
         Self.applyLevel(p, onTop: item.onTop)
         // a saved place on a screen that is no longer connected falls back to the middle of this one
         if let f = item.frame, f.count == 4,
@@ -102,9 +109,9 @@ final class DeskPanels: NSObject, NSWindowDelegate {
         ScrollTargets.forget(item.space)
     }
 
-    /// On the desktop (below every window) or above other windows.
+    /// Among the other windows, or above all of them.
     static func applyLevel(_ p: NSPanel, onTop: Bool) {
-        p.level = onTop ? .floating : NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
+        p.level = onTop ? .floating : .normal
     }
 
     private func toggleTop(_ key: String) {
@@ -178,14 +185,16 @@ struct DeskFrame<Content: View>: View {
                     Image(systemName: onTop ? "square.stack.3d.up.fill" : "square.stack.3d.down.right").font(.sbIcon(10))
                 }
                 .buttonStyle(.borderless).foregroundStyle(.secondary)
-                .help(onTop ? "Above other windows; click to keep it on the desktop" : "On the desktop; click to keep it above other windows")
+                .help(onTop ? "Above other windows; click to let other windows cover it" : "Among your windows; click to keep it above them")
                 Button(action: close) { Image(systemName: "xmark").font(.sbIcon(9.5, weight: .semibold)) }
                     .buttonStyle(.borderless).foregroundStyle(.secondary).help("Unpin from the desktop")
             }
-            .padding(.horizontal, sc(10)).padding(.top, sc(24)).padding(.bottom, sc(2))
+            .padding(.horizontal, sc(10)).padding(.top, sc(10)).padding(.bottom, sc(2))
             content
         }
-        .background(GlassBackground())
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(GlassBackground().ignoresSafeArea())
+        .ignoresSafeArea(.container, edges: .top)
         .environment(\.cardSpace, item.space)
     }
 }
@@ -198,7 +207,9 @@ struct DeskTab: View {
         // the tab's own window space, so its wheel and middle-click places never mix with the popover's
         ScrollView(.vertical) { concern.content.padding(.bottom, sc(8)) }
             .scrollContentFrame()
-            .frame(width: PT.width, height: min(PT.maxHeight, sw(520)))
+            // a resized panel grows the list with it
+            .frame(minWidth: PT.width, idealWidth: PT.width, maxWidth: .infinity,
+                   minHeight: sw(160), idealHeight: min(PT.maxHeight, sw(520)), maxHeight: .infinity)
             .coordinateSpace(name: space)
             .environment(\.panelSpace, space)
     }
