@@ -27,6 +27,15 @@ Flashing local firmware (Cloudcutter to OpenBeken) was considered and left out, 
 - "The html view transitions in the hub pages is crude, explore adding more elements and animations to those."
 - "The navbar scroll to change transcript does not work. In fact I think a lot of your slated ideas are not done." Audit hub/docs/remaining-work.md and the earlier hub plans against what is actually built, and list the gaps before building.
 
+## csync and Switchboard together (owner, 2026-10-03; "far later")
+
+The Android app (csync) and Switchboard should act as if they share many actions and context. It can grow step by step, and nothing gets built past step 1 before a plan, an exploration and a review audit.
+
+1. Done 2026-10-03: the hub is reachable on the tailnet at http://aakarshs-m5-pro.tail905820.ts.net:5400/ (or http://100.65.206.85:5400/) and comes back after a restart (pm2 Start at login on). The owner pins that URL in csync or the phone browser.
+2. A Bulbs screen in csync that stays in step with the Bulbs surface here.
+3. Notes: each app keeps its own, and each can manage and edit the other's. Sharing must be possible, not primary.
+4. More shared actions and context after that.
+
 ## Other deferred items
 
 - Codex warn and danger thresholds. Deferred by the owner. Do not raise it again.

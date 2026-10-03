@@ -2,6 +2,8 @@
 
 > "I want to /pick-skill reseearch and propose an animation skinning over both the hub and the mac os widget. Devise a strategy for this thoroughly, all should be coherent and relevant to the content and product and visual identity and affordance / mapping / mental model / actions / associations, on all levels." Also: "the html view transitions in the hub pages is crude, explore adding more elements and animations to those".
 
+**Ruling (owner, 2026-10-03):** "Yes these animation directions look good." Approved as written; build P1 to P6.
+
 Repo f308761. Evidence: `.claude/output/20261003-0325-animation-direction/research-sheet.md` (rows cited below as R, H, V, K, M, X, W). No build in this pass.
 
 ## The direction: motion says what happened to a thing
