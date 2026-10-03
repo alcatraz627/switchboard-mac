@@ -267,6 +267,11 @@ h1 { font: 650 var(--t-xl)/1.2 var(--sans); letter-spacing: -.014em; margin: 0; 
 /* tail lines wrap (the house rule: text wraps, it is never cut with an ellipsis) */
 .p-line { display: flex; gap: 8px; color: var(--dim); }
 .p-line + .p-line { margin-top: 2px; }
+.fc.toolmix { gap: 8px; }
+.fc.toolmix .tm { display: inline-flex; align-items: center; gap: 2px; }
+.fc.toolmix .tm .icon { width: 12px; height: 12px; }
+.fc.toolmix .k-shell { color: var(--tool); } .fc.toolmix .k-file, .fc.toolmix .k-edit { color: var(--you); }
+.fc.toolmix .k-find { color: var(--claude); } .fc.toolmix .k-agent { color: var(--meta); } .fc.toolmix .k-skill { color: var(--add); }
 .p-line[data-seq] { border-radius: 4px; transition: background var(--t-fast) var(--ease); }
 .p-line[data-seq]:hover { background: var(--sel); }
 .p-line .tx { min-width: 0; overflow-wrap: anywhere; }
@@ -429,7 +434,19 @@ h1 { font: 650 var(--t-xl)/1.2 var(--sans); letter-spacing: -.014em; margin: 0; 
 .viewpanel { position: fixed; top: calc(var(--tb-h) + 8px); right: 12px; z-index: 78; width: 340px;
     background: var(--panel); border: 1px solid var(--edge2); border-radius: 13px; box-shadow: var(--shadow);
     padding: 13px 15px; display: none; flex-direction: column; gap: 13px; }
-.viewpanel.open { display: flex; }
+.viewpanel.open { display: flex; animation: fresh var(--t-slow) var(--ease); }
+/* the mailroom: open asks between sessions and inboxes left by ended ones */
+.mailbtn .n { font: 700 var(--t-xs) var(--mono); }
+.mailbtn.owed { color: var(--you); }
+.mailpanel { width: 420px; max-height: calc(100vh - var(--tb-h) - 24px); overflow-y: auto; }
+.ml-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 6px 0; border-top: 1px solid var(--edge); }
+.ml-row:first-child { border-top: 0; }
+.ml-who { font: 600 var(--t-sm) var(--sans); color: var(--text); overflow-wrap: anywhere; }
+.ml-who .to { color: var(--dim); font-weight: 500; }
+.ml-age { font: var(--t-xs) var(--mono); color: var(--faint); text-align: right; }
+.ml-sub { grid-column: 1 / -1; font: var(--t-xs) var(--mono); color: var(--faint); overflow-wrap: anywhere; }
+.ml-sub.mine { color: var(--you); }
+.ml-empty { color: var(--faint); font: var(--t-sm) var(--sans); }
 .vp-cap { font: 700 var(--t-xs) var(--mono); letter-spacing: .01em; color: var(--faint);
     display: flex; align-items: center; gap: 8px; }
 .vp-cap::after { content: ''; flex: 1; height: 1px; background: var(--edge); }
@@ -500,6 +517,7 @@ h1 { font: 650 var(--t-xl)/1.2 var(--sans); letter-spacing: -.014em; margin: 0; 
   <span class="tb-sp"></span>
   <span class="chip refresh" id="chipRefresh" style="display:none"><span class="pulse"></span>refreshing…</span>
   <span class="tb-spend" id="tbSpend" hidden></span>
+  <button class="tctl mailbtn" id="mailBtn" title="What sessions owe each other (m)" aria-pressed="false" hidden><svg class="icon"><use href="#i-inbox"/></svg><span class="n" id="mailN"></span></button>
   <button class="tctl icon" id="searchBtn" title="Search sessions and transcripts (/)"><svg class="icon"><use href="#i-search"/></svg></button>
   <label class="tctl" title="Sort within groups"><svg class="icon"><use href="#i-sort"/></svg>
     <select id="sortSel" aria-label="Sort">
@@ -519,6 +537,10 @@ h1 { font: 650 var(--t-xl)/1.2 var(--sans); letter-spacing: -.014em; margin: 0; 
 <main id="main"></main>
 <div class="hpk" id="hpk" aria-hidden="true"></div>
 <script src="/vendor/hub-shared.js?v=2"></script>
+<div class="viewpanel mailpanel" id="mailPanel">
+  <div class="vp-cap">Mailroom</div>
+  <div id="mailBody"></div>
+</div>
 <div class="viewpanel" id="viewPanel">
   <div class="vp-cap">View</div>
   <div class="vp-grp"><span class="vp-lb">Direction</span>
@@ -737,7 +759,7 @@ function lineFor(r) {
     }
     if (r.role === 'tools') { const t = r.tools[0], k = tailKind(t.name);
         const what = firstLineOf((t.input && t.input.command) || t.preview || '').replace(/…$/, '');
-        return { g: ic(k.icon), c: 't k-' + k.k, tx: `<b>${esc(k.label)}</b> ${esc(what)}`, html: true }; }
+        return { g: ic(k.icon), c: 't k-' + k.k, tool: k.label, icon: k.icon, tx: `<b>${esc(k.label)}</b> ${esc(what)}`, html: true }; }
     return null;
 }
 const firstLineOf = s => (String(s || '').split('\n').find(l => l.trim()) || '').replace(/\s+/g, ' ').trim();
@@ -923,6 +945,23 @@ function headHTML(s, state, when) {
 }
 /* The footer: where it runs and when it last moved, then the numbers as small
    icon chips. Path and branch copy on click; problems are tinted, not shouted. */
+/* What a session has mostly been doing lately: its four most used tools in its
+   recent lines, most used first, as icons with counts. */
+function toolMixHTML(sid) {
+    const t = tails[sid];
+    if (!t || !t.src.length) return '';
+    const n = {};
+    for (const l of t.src) {
+        // lines cached before the tool was recorded still carry its name in bold
+        const nm = l.tool || (l.c && l.c.startsWith('t ') && (/<b>([^<]+)<\/b>/.exec(l.tx || '') || [])[1]);
+        // grouped by kind of work, so Edit and Write (one pencil) count together
+        if (nm) { const g = (n[l.c] = n[l.c] || { g: l.g, c: l.c, k: 0, names: new Set() }); g.k++; g.names.add(nm); }
+    }
+    const top = Object.entries(n).sort((a, b) => b[1].k - a[1].k).slice(0, 4);
+    if (!top.length) return '';
+    return `<span class="fc toolmix" title="Tools used in its recent lines: ${esc(top.map(([, v]) => [...v.names].join('/') + ' ' + v.k).join(', '))}">` +
+        top.map(([nm, v]) => `<span class="tm ${esc(v.c.replace(/^t /, ''))}">${v.g}${v.k}</span>`).join('') + `</span>`;
+}
 function footHTML(s) {
     const ended = s.state === 'ended';
     const chip = (icon, body, cls = '', title = '') =>
@@ -933,6 +972,7 @@ function footHTML(s) {
         s.output_tokens ? chip('up', esc(s.output_tokens), '', 'output tokens') : '',
         s.cost_usd != null ? chip('coin', cfmt(s.cost_usd), '', 'cost') : '',
         s.turns ? chip('turns', s.turns, '', 'turns') : '',
+        toolMixHTML(s.session_id),
         s.subagent_count ? chip('bot', s.subagent_count, 'meta', 'sub-agents running') : '',
         s.git_branch ? `<span class="fc branch" data-copy="${esc(s.git_branch)}" title="Copy branch">${ic('branch')}${esc(s.git_branch)}${s.git_modified ? `<span class="mod">*${s.git_modified}</span>` : ''}</span>` : '',
         ipcChipHTML(s),
@@ -1462,6 +1502,50 @@ const vt = fn => (document.startViewTransition && !matchMedia('(prefers-reduced-
 function smooth() { return matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'; }
 /* opening a result while filtering = a query that worked; remember it */
 document.addEventListener('click', e => { if (curQ && e.target.closest('#board a')) pushHist(curQ); });
+/* The mailroom: the open count on the top bar, the list on a click (or m). */
+let MAIL = null;
+const fmtAge = s => s < 3600 ? Math.max(1, Math.round(s / 60)) + 'm' : s < 172800 ? Math.round(s / 3600) + 'h' : Math.round(s / 86400) + 'd';
+async function pollMail() {
+    try { const r = await fetch('/api/mail', { cache: 'no-store' }); MAIL = await r.json(); } catch (e) { MAIL = { ok: false, error: 'the hub did not answer', asks: [], orphans: [] }; }
+    const n = MAIL.asks.length, b = $('#mailBtn');
+    b.hidden = !MAIL.ok && !n;
+    $('#mailN').textContent = n ? String(n) : '';
+    b.classList.toggle('owed', n > 0);
+    b.title = n ? `${n} open ask${n === 1 ? '' : 's'} between sessions (m)` : 'Nothing owed between sessions (m)';
+    if ($('#mailPanel').classList.contains('open')) renderMail();
+}
+function renderMail() {
+    const m = MAIL || { asks: [], orphans: [] };
+    const asks = m.asks.slice().sort((a, b) => b.age_s - a.age_s);
+    let h = m.ok === false ? `<div class="ml-empty">${esc(m.error || 'claude-ipc did not answer')}</div>` : '';
+    h += `<div class="vp-lb">Open asks <b>${asks.length}</b></div>`;
+    h += asks.length ? asks.map(a =>
+        `<div class="ml-row"><span class="ml-who">${esc(a.from_alias)} <span class="to">→ ${esc(a.to_alias || '?')}</span></span>` +
+        `<span class="ml-age">${fmtAge(a.age_s)}</span>` +
+        `<span class="ml-sub" data-copy="claude-ipc inbox ${esc(a.to_alias || '')}" title="Copy the command that opens this inbox">${esc(a.kind)} · ${esc(a.ask_state)}` +
+        (a.nudge_stage && a.nudge_stage !== 'none' ? ' · nudged ' + esc(a.nudge_stage) : '') + ` · ${esc(a.corr_id)}</span></div>`).join('')
+        : '<div class="ml-empty">No open asks.</div>';
+    h += `<div class="vp-lb" style="margin-top:10px">Left behind <b>${m.orphans.length}</b></div>`;
+    h += m.orphans.length ? m.orphans.map(o =>
+        `<div class="ml-row"><span class="ml-who">${esc(o.alias)}</span><span class="ml-age">${o.real_mail} mail</span>` +
+        `<span class="ml-sub" data-copy="claude-ipc inbox ${esc(o.alias)}" title="Copy the command that opens this inbox">${esc((o.cwd || '').replace(/^\/Users\/[^/]+/, '~'))} · oldest ${esc((o.oldest_ts || '').slice(0, 10))}</span></div>`).join('')
+        : '<div class="ml-empty">No ended session holds mail.</div>';
+    $('#mailBody').innerHTML = h;
+}
+function toggleMail(force) {
+    const p = $('#mailPanel'), o = force ?? !p.classList.contains('open');
+    p.classList.toggle('open', o); $('#mailBtn').setAttribute('aria-pressed', String(o));
+    if (o) { renderMail(); pollMail(); }
+}
+$('#mailBtn').onclick = () => toggleMail();
+document.addEventListener('click', e => {
+    if (!e.target.closest('#mailPanel') && !e.target.closest('#mailBtn')) toggleMail(false);
+});
+document.addEventListener('keydown', e => {
+    if (e.key !== 'm' || e.metaKey || e.ctrlKey || e.altKey || /input|textarea|select/i.test(e.target.tagName)) return;
+    toggleMail();
+});
+pollMail(); setInterval(pollMail, 30000);
 $('#viewBtn').onclick = () => { const p = $('#viewPanel'); const o = p.classList.toggle('open'); $('#viewBtn').setAttribute('aria-pressed', String(o)); };
 document.addEventListener('click', e => {
     if (!e.target.closest('#viewPanel') && !e.target.closest('#viewBtn')) { $('#viewPanel').classList.remove('open'); $('#viewBtn').setAttribute('aria-pressed', 'false'); }

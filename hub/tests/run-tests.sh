@@ -249,6 +249,17 @@ t_grep "the wheel over the top bar or pager turns chapters" lib/transcript-app.h
 t_grep "a jump to a call inside a folded run opens the run" lib/transcript-app.html 'state.expanded.add\(best.k\)'
 t_grep "a preview line opens the transcript at its record"  lib/hub-index.html "location.href = a.getAttribute\('href'\) \+ '#r'"
 t_grep "the ipc alias copies on click"                     lib/hub-index.html 'class="ipcchip.*data-copy'
+t_grep "the mailroom lists open asks and orphaned inboxes"  lib/hub-server.py '"claude-ipc", "asks", "--all", "--json"'
+t_grep "the board has a mail button and panel"             lib/hub-index.html 'id="mailBtn"'
+t_grep "cards show their recent tools by kind"             lib/hub-index.html 'function toolMixHTML'
+t_grep "a run with a failed call opens the first time"     lib/transcript-app.html 'function openFailures'
+t_grep "search takes tool:, role: and err: fields"         lib/transcript-app.html 'function parseFields'
+t_grep "role chips show one voice at a time"               lib/transcript-app.html 'id="tbRoles"'
+t_grep "the pager has a standing latest button"            lib/transcript-app.html 'id="chLatest"'
+t_grep "a transcript reopens where it was read"            lib/transcript-app.html 'function restorePosition'
+t_grep "diffs mark the changed words"                      lib/transcript-app.html 'function wordDiff'
+t_grep "a sub-agent opens as a page of its own"            lib/transcript-app.html 'async function bootAgent'
+
 t_check "page reads liveness from /data, not the fleet scan" bash -c '! rg -q "/api/sessions" lib/transcript-app.html'
 t_grep "failed polls raise the disconnected bar" lib/transcript-app.html 'Disconnected, retrying'
 t_check "page loads nothing from a CDN" bash -c '! rg -q "https?://cdn" lib/transcript-app.html'

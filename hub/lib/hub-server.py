@@ -426,6 +426,25 @@ def search_parsed(target, parsed, q):
     return {"q": q, "total": total, "hits": hits, "truncated": total > len(hits)}
 
 
+_mail_cache = {"at": 0.0, "data": None}
+
+
+def mail_payload():
+    """What the sessions owe each other: open asks and inboxes left behind by
+    sessions that ended, from claude-ipc. Cached 15 s; a failure says why."""
+    now = time.time()
+    if _mail_cache["data"] is not None and now - _mail_cache["at"] < 15:
+        return _mail_cache["data"]
+    try:
+        r = subprocess.run(["claude-ipc", "asks", "--all", "--json"], capture_output=True, text=True, timeout=5)
+        d = json.loads(r.stdout or "{}")
+        out = {"ok": True, "asks": d.get("asks") or [], "orphans": d.get("orphans") or []}
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        out = {"ok": False, "error": "claude-ipc did not answer (" + type(e).__name__ + ")", "asks": [], "orphans": []}
+    _mail_cache.update(at=now, data=out)
+    return out
+
+
 # Claude Code's own record of each running session: ~/.claude/sessions/<pid>.json
 # carries sessionId, status (busy / idle / shell) and statusUpdatedAt.
 SESSIONS_DIR = os.path.expanduser("~/.claude/sessions")
@@ -635,6 +654,8 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             return self._serve_index()
         if path == "/api/sessions":
             return self._json(200, sessions_payload())
+        if path == "/api/mail":
+            return self._json(200, mail_payload())
         if path == "/healthz":
             return self._json(200, {"ok": True, "host": socket.gethostname()})
         if path == "/favicon.ico":
