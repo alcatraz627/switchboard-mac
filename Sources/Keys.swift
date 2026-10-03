@@ -366,6 +366,108 @@ final class RowNav: ObservableObject {
     var focusedID: String? { if case .row(let id) = focus { return id }; return nil }
 }
 
+// ── Every other tab: rows that take keys by being rows ──────────────────────
+
+/// What a row can do from the keyboard. Each is optional; a row offers what it has.
+struct RowKeyActions {
+    /// Return: what a click on the row does.
+    var primary: (() -> Void)?
+    /// Space: flip its switch, or do the primary.
+    var toggle: (() -> Void)?
+    /// ← and →: step a slider or a choice, -1 or +1.
+    var step: ((Int) -> Void)?
+    /// → opens, ← closes, for a row with children. Answers whether it is open.
+    var isOpen: (() -> Bool)?
+    var setOpen: ((Bool) -> Void)?
+}
+
+/// The rows on one window's tabs that take keys, by where they sit on screen,
+/// and which one has the keyboard. Rows register themselves as they draw.
+final class KeyRows: ObservableObject {
+    private static var spaces: [String: KeyRows] = [:]
+    static func forSpace(_ s: String) -> KeyRows {
+        if let r = spaces[s] { return r }
+        let r = KeyRows(); spaces[s] = r; return r
+    }
+    @Published var focused: String?
+    private(set) var rows: [String: (frame: CGRect, actions: RowKeyActions)] = [:]
+
+    func set(_ key: String, frame: CGRect, actions: RowKeyActions) { rows[key] = (frame, actions) }
+    func remove(_ key: String) { rows[key] = nil; if focused == key { focused = nil } }
+    /// Keys in reading order: top to bottom, then left to right.
+    var ordered: [String] {
+        rows.sorted { a, b in abs(a.value.frame.minY - b.value.frame.minY) > 2 ? a.value.frame.minY < b.value.frame.minY
+                                                                              : a.value.frame.minX < b.value.frame.minX }.map(\.key)
+    }
+
+    /// One key: true when it was used.
+    func handle(_ k: Key) -> Bool {
+        let keys = ordered
+        guard !keys.isEmpty else { return false }
+        let at = focused.flatMap { keys.firstIndex(of: $0) }
+        let a = focused.flatMap { rows[$0]?.actions }
+        switch k {
+        case .down: focused = keys[at.map { min(keys.count - 1, $0 + 1) } ?? 0]
+        case .up: focused = keys[at.map { max(0, $0 - 1) } ?? keys.count - 1]
+        case .escape:
+            guard focused != nil else { return false }
+            focused = nil
+        case .enter:
+            guard let a else { return false }
+            if let o = a.isOpen, let s = a.setOpen, a.primary == nil { s(!o()) } else { a.primary?() }
+        case .right:
+            guard let a else { return false }
+            if let s = a.setOpen, a.isOpen?() == false { s(true) } else if let st = a.step { st(1) } else { return false }
+        case .left:
+            guard let a else { return false }
+            if let s = a.setOpen, a.isOpen?() == true { s(false) } else if let st = a.step { st(-1) } else { return false }
+        case .space:
+            guard let a else { return false }
+            (a.toggle ?? a.primary)?()
+        default: return false
+        }
+        if let f = focused { FocusScroll.shared.show("kr-" + f) }
+        return true
+    }
+}
+
+private struct KeyRowModifier: ViewModifier {
+    let key: String
+    let actions: RowKeyActions
+    @Environment(\.panelSpace) private var space
+    @ObservedObject private var registry: KeyRows
+
+    init(key: String, actions: RowKeyActions, space: String) {
+        self.key = key; self.actions = actions
+        _registry = ObservedObject(wrappedValue: KeyRows.forSpace(space))
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .keyRing(registry.focused == key, radius: 5)
+            .id("kr-" + key)
+            .background(GeometryReader { g in
+                let f = g.frame(in: .named(space))
+                Color.clear
+                    .onAppear { KeyRows.forSpace(space).set(key, frame: f, actions: actions) }
+                    .onChange(of: f) { nf in KeyRows.forSpace(space).set(key, frame: nf, actions: actions) }
+                    .onDisappear { KeyRows.forSpace(space).remove(key) }
+            })
+    }
+}
+
+private struct KeyRowHost: ViewModifier {
+    let key: String
+    let actions: RowKeyActions
+    @Environment(\.panelSpace) private var space
+    func body(content: Content) -> some View { content.modifier(KeyRowModifier(key: key, actions: actions, space: space)) }
+}
+
+extension View {
+    /// Makes this row reachable with ↑/↓ and actionable by keys, wherever it is drawn.
+    func keyRow(_ key: String, _ actions: RowKeyActions) -> some View { modifier(KeyRowHost(key: key, actions: actions)) }
+}
+
 /// Asks the open panel to bring a row into view, without the reveal flash.
 final class FocusScroll: ObservableObject {
     static let shared = FocusScroll()
@@ -383,8 +485,19 @@ enum KeyRouter {
         case "notes": return notes(k, space: space, window: e.window)
         case "home": return bulbs(k, space: space, window: e.window)
         case "timers": return timers(k, space: space, window: e.window)
-        default: return false
+        default: return rows(k, space: space, window: e.window)
         }
+    }
+
+    /// Any other tab: its rows by ↑/↓, acted on by Return, Space, ← and →. From a
+    /// search box, ↓ steps down into the rows; every other key stays the box's.
+    private static func rows(_ k: Key, space: String, window: NSWindow?) -> Bool {
+        let typing = (window?.firstResponder as? NSTextView)?.isEditable == true
+        if typing {
+            guard k == .down else { return false }
+            window?.makeFirstResponder(nil)
+        }
+        return KeyRows.forSpace(space).handle(k)
     }
 
     /// Bulbs: Space switches, ←/→ brightness and ⇧←/⇧→ warmth in the wheel's steps,
@@ -798,6 +911,28 @@ func probeKeys() -> [String] {
     check("after ⌘⌘, Escape just stops listening", mv(ev(kVK_Escape, [], "\u{1b}"), jumping: true) == PanelNav.Move.none)
     check("without ⌘⌘, letters are left to the tab", mv(ev(kVK_ANSI_B, [], "b")) == nil)
     PanelKeys.shared.jumping = false
+
+    // any other tab: rows in reading order, each acted on by what it offers
+    let kr = KeyRows()
+    var log: [String] = []
+    var open = false
+    kr.set("b", frame: CGRect(x: 0, y: 40, width: 10, height: 10), actions: RowKeyActions(primary: { log.append("b") }))
+    kr.set("a", frame: CGRect(x: 0, y: 10, width: 10, height: 10), actions: RowKeyActions(toggle: { log.append("a-flip") }))
+    kr.set("c", frame: CGRect(x: 0, y: 70, width: 10, height: 10),
+           actions: RowKeyActions(isOpen: { open }, setOpen: { open = $0 }))
+    _ = kr.handle(.down)
+    check("↓ on a tab with no row chosen picks the top row", kr.focused == "a")
+    _ = kr.handle(.space)
+    check("Space flips the row's switch", log == ["a-flip"])
+    _ = kr.handle(.down); _ = kr.handle(.enter)
+    check("Return does what a click does", log.last == "b")
+    _ = kr.handle(.down); _ = kr.handle(.right)
+    check("→ opens a row with children, ← closes it", open && { _ = kr.handle(.left); return !open }())
+    check("Escape lets go of the row, then is the panel's", kr.handle(.escape) && kr.focused == nil && !kr.handle(.escape))
+    var stepped = 0
+    kr.set("s", frame: CGRect(x: 0, y: 100, width: 10, height: 10), actions: RowKeyActions(step: { stepped += $0 }))
+    kr.focused = "s"; _ = kr.handle(.right); _ = kr.handle(.right); _ = kr.handle(.left)
+    check("← and → step a slider or a choice", stepped == 1)
 
     // bulbs and timers
     let rows = ["x", "y"]

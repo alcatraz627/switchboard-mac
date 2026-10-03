@@ -249,10 +249,58 @@ final class KeyDrive {
         step("a pinned Notes tab carries its new-note box and search") {
             let fields = self.textFields(in: self.window.contentView)
             self.check(fields >= 2, "\(fields) text fields drawn")
+            self.showSharedRows()
+        }
+        // any other tab: the shared rows, made up for the drive so no real setting changes
+        step("↓ on a tab of shared rows reaches the first row") {
+            self.tab = "machine"
+            self.key(kVK_DownArrow)
+        }
+        step("the first row has the keyboard; Return does what its click does") {
+            self.check(KeyRows.forSpace(self.space).focused?.contains("Run me") == true, "\(String(describing: KeyRows.forSpace(self.space).focused))")
+            self.key(kVK_Return)
+        }
+        step("its action ran; ↓ then → opens the row with children") {
+            self.check(self.log == ["run"], "\(self.log)")
+            self.key(kVK_DownArrow); self.key(kVK_RightArrow)
+        }
+        step("the children show and take the keyboard in turn") {
+            let child = KeyRows.forSpace(self.space).ordered.contains { $0.contains("A child") }
+            self.check(child, "\(KeyRows.forSpace(self.space).ordered)")
+            self.key(kVK_DownArrow); self.key(kVK_DownArrow); self.key(kVK_RightArrow)
+        }
+        step("→ on a choice row picks the next choice") {
+            self.check(self.chosen == 1, "chosen \(self.chosen)")
         }
     }
 
     private var tab = "notes"
+    private var log: [String] = []
+    private var chosen = 0
+
+    /// Three shared rows as a tab draws them: one with an action, one with children, one with choices.
+    private func showSharedRows() {
+        window.makeFirstResponder(nil)
+        var run = SystemRow(label: "Run me", state: .ok, note: "", tip: "", action: { [weak self] in self?.log.append("run") })
+        run.buttonLabel = "Run"
+        var parent = SystemRow(label: "Has children", state: .ok, note: "", tip: "")
+        parent.children = [SystemRow(label: "A child", state: .ok, note: "child", tip: "")]
+        var pick = SystemRow(label: "Pick one", state: .ok, note: "", tip: "")
+        pick.choices = ["One", "Two", "Three"]; pick.selected = 0
+        pick.onChoose = { [weak self] i in self?.chosen = i }
+        let store = PolicyStore()
+        (window.contentView as? NSHostingView<AnyView>)?.rootView = AnyView(ScaledRoot {
+            VStack(spacing: 0) {
+                SystemRowView(row: run, store: store)
+                SystemRowView(row: parent, store: store)
+                SystemRowView(row: pick, store: store)
+            }
+            .frame(width: PT.width)
+            .coordinateSpace(name: "drive")
+            .environment(\.panelSpace, "drive")
+            .background(Color(nsColor: .windowBackgroundColor))
+        })
+    }
     private var firedAt: Date?
     private var timerIDs: [String] = []
     private var rows: RowNav { RowNav.forSpace(space, "timers") }

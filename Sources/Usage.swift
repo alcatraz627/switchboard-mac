@@ -261,8 +261,8 @@ struct UsageTabView: View {
                                     ? [(usage.warnPct, "warn"), (usage.dangerPct, "danger"), (standDown, "stand-down")]
                                     : [(usage.warnPct, "warn"), (usage.dangerPct, "danger")])
                 }
-                ZoneSlider(label: "Warn at", value: $usage.warnPct, tint: .orange)
-                ZoneSlider(label: "Danger at", value: $usage.dangerPct, tint: .red)
+                ZoneSlider(id: "claude-warn", label: "Warn at", value: $usage.warnPct, tint: .orange)
+                ZoneSlider(id: "claude-danger", label: "Danger at", value: $usage.dangerPct, tint: .red)
             }
             }
             if !policy.hiddenSections.contains("usage::Codex") {
@@ -275,7 +275,7 @@ struct UsageTabView: View {
                                 ticks: w.id.hasPrefix("codex") ? [(usage.codexWarnPct, "warn"), (codexGate, "seat stand-down")]
                                                                : [(usage.codexWarnPct, "warn")])
                 }
-                ZoneSlider(label: "Warn at", value: $usage.codexWarnPct, tint: .orange)
+                ZoneSlider(id: "codex-warn", label: "Warn at", value: $usage.codexWarnPct, tint: .orange)
                 if !usage.codexResets.isEmpty {
                     let f = DateFormatter()
                     let _ = f.dateFormat = "d MMM"
@@ -387,6 +387,8 @@ struct UsageBarRow: View {
 
 /// A 50–100% slider for one of the Claude usage zones.
 struct ZoneSlider: View {
+    /// What the slider sets, unique on the page: two sliders may share a label but never an id.
+    let id: String
     let label: String
     @Binding var value: Int
     let tint: Color
@@ -408,7 +410,7 @@ struct ZoneSlider: View {
                 .sbControlSize(.small)
                 .frame(width: sc(108))
                 // up raises the threshold, 5 points a notch, as every slider in the app turns
-                .scrollSteps("usage-threshold-" + label, inContent: true, stepper: .slider()) { by in
+                .scrollSteps("usage-threshold-" + id, inContent: true, stepper: .slider()) { by in
                     value = min(100, max(50, value - by * 5))
                 }
             Text("\(dragging ? Int(draft) : value)%").font(SBStyle.mono).frame(width: sw(36), alignment: .trailing)

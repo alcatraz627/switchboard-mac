@@ -489,6 +489,12 @@ struct BulbRow: View {
                 if !e { lights.set(bulb, ["rgb=\(hueHex(hue))"]) }
             })
             .sbControlSize(.mini)
+            // the wheel walks the colour wheel, a twenty-fourth a notch, round and round
+            .scrollSteps("bulb-hue-" + bulb.mac, inContent: true, stepper: .slider()) { by in
+                hue = (hue - Double(by) / 24).truncatingRemainder(dividingBy: 1)
+                if hue < 0 { hue += 1 }
+                lights.set(bulb, ["rgb=\(hueHex(hue))"])
+            }
             .onAppear {
                 if let c = bulb.rgb {
                     hue = Double(NSColor(srgbRed: CGFloat(c.r) / 255, green: CGFloat(c.g) / 255,

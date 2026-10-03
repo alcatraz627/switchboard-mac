@@ -759,6 +759,32 @@ struct SystemRowView: View {
     static var startExpanded = false
 
     private var opens: Bool { !row.children.isEmpty }
+
+    /// What a click on a row that does not open does: its menu, its one copy, or its labelled action.
+    private var clickAction: (() -> Void)? {
+        if let menu = row.menu { return { menu().popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil) } }
+        // A row whose one action is a copy (a file path) copies anywhere it is clicked.
+        if row.buttons.count == 1, case .copy = row.buttons[0].kind { return { press(row.buttons[0]) } }
+        // So does a row whose one action is a labelled button ("Show all").
+        if row.buttonLabel != nil, row.buttons.isEmpty, let a = row.action { return a }
+        return nil
+    }
+
+    /// The same row by keyboard. Return falls back to the row's first button when a click does nothing.
+    private var keyActions: RowKeyActions {
+        var k = RowKeyActions()
+        if opens {
+            k.isOpen = { expanded }
+            k.setOpen = { o in withAnimation(Motion.slow) { expanded = o } }
+        } else {
+            k.primary = clickAction ?? row.buttons.first.map { b in { press(b) } }
+        }
+        if row.isSwitch, row.enabled { k.toggle = { flip(to: !(pendingFlip?.target ?? row.isOn)) } }
+        if let choose = row.onChoose, let ch = row.choices, !ch.isEmpty {
+            k.step = { by in choose(min(ch.count - 1, max(0, row.selected + by))) }
+        }
+        return k
+    }
     /// A row that only shows text (an opened item's details): its words can be
     /// selected and copied like a web page. Rows a click acts on stay clickable.
     private var readOnly: Bool {
@@ -774,12 +800,10 @@ struct SystemRowView: View {
                 // the small chevron alone was too hard to hit.
                 .onTapGesture {
                     if opens { withAnimation(Motion.slow) { expanded.toggle() } }
-                    else if let menu = row.menu { menu().popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil) }
-                    // A row whose one action is a copy (a file path) copies anywhere it is clicked.
-                    else if row.buttons.count == 1, case .copy = row.buttons[0].kind { press(row.buttons[0]) }
-                    // So does a row whose one action is a labelled button ("Show all").
-                    else if row.buttonLabel != nil, row.buttons.isEmpty, let a = row.action { a() }
+                    else { clickAction?() }
                 }
+                // the keyboard does what the mouse does: Return clicks, Space flips, arrows open or step
+                .keyRow("sys-" + (row.key ?? row.label) + "-\(Int(indent))", keyActions)
             if let b = asking, case .ask(let placeholder, _) = b.kind {
                 HStack(spacing: 6) {
                     TextField(placeholder, text: $askDraft)
@@ -1174,6 +1198,31 @@ struct PolicyRowView: View {
     private var shown: PolicyValue { (pendingChange?.target ?? nil) ?? item.value }
 
     var body: some View {
+        // Space flips a switch, ← and → step a choice or a slider, as the mouse would
+        rowBody.keyRow("pol-" + item.key, keyActions)
+    }
+
+    private var keyActions: RowKeyActions {
+        var k = RowKeyActions()
+        switch item.kind {
+        case .toggle:
+            k.toggle = { store.set(item, .text(shown == .text("allow") ? "block" : "allow")) }
+            k.primary = k.toggle
+        case .segmented(let opts), .menu(let opts):
+            k.step = { by in
+                let i = opts.firstIndex(of: shown.cli) ?? 0
+                store.set(item, .text(opts[min(opts.count - 1, max(0, i + by))]))
+            }
+        case .slider(let lo, let hi, let step, _):
+            k.step = { by in
+                let notch = max(step, ((hi - lo) / 20).rounded())
+                store.set(item, .number(min(hi, max(lo, numeric(shown) + Double(by) * notch))))
+            }
+        }
+        return k
+    }
+
+    private var rowBody: some View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -1296,6 +1345,11 @@ struct PolicyRowView: View {
                        })
                     .sbControlSize(.small)
                     .frame(width: PT.slider)
+                    // up raises, a twentieth of the range a notch (5 on a percent), as every slider in the app turns
+                    .scrollSteps("policy-" + item.key, inContent: true, stepper: .slider()) { by in
+                        let notch = max(step, ((hi - lo) / 20).rounded())
+                        store.set(item, .number(min(hi, max(lo, numeric(shown) - Double(by) * notch))))
+                    }
                 Text("\(Int(dragging ? draft : numeric(shown)))\(unit)")
                     .font(PT.mono)
                     .frame(width: sw(36), alignment: .trailing)
