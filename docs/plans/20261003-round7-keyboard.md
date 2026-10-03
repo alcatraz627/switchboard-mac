@@ -77,6 +77,14 @@ A focused row shows a ring, the same accent the reveal flash uses, so you always
 - **The hub on your phone:** it was stopped in pm2, so the tailnet URL was dead. It is running again at http://aakarshs-m5-pro.tail905820.ts.net:5400/ and set to come back after a restart. The csync plan is noted in `docs/roadmap.md`.
 - **The animation direction** has your approval recorded in its memo.
 
+## What was built, and where it differs from the above
+
+- **Reminders became Timers.** There is no Reminders tab (reminders live on notes), so P2 is the Home tab's bulbs and the Timers tab. Timers: Escape leaves the new-timer box for the list, ↑ from the first timer goes back, Return renames, + adds a minute, ⌫ clears. Bulbs: Space switches, ←/→ brightness, ⇧←/⇧→ warmth, Return opens the colour strip, 1 to 8 pick a colour.
+- **The front door:** ⌘⌘ opens on the last tab, ⌘⌘ again shows a letter per tab (N Notes, T Timers, U Usage, B Home, and so on), a third time closes. ⌃⌥⌘N, ⌃⌥⌘U, ⌃⌥⌘B and ⌃⌥⌘Space as planned. In the panel, ⌃Tab walks the tabs and ⌘1 to ⌘5 pick a space. Keys cannot be changed in Settings yet; Settings > Keyboard lists them and asks for the ⌘⌘ permission. No Siri shortcut is set on this Mac.
+- **Other tabs** get the panel-wide keys only. Row-by-row keys stop at Notes, Timers and Home.
+- **One open note at a time.** Opening a note, by click or key, closes the one open before. One colour strip at a time on bulbs, likewise.
+- **Checks:** `--probe-quick` walks the rules (38 key checks); `--drive-notes` drives the real Notes and Timers views key by key on a scratch folder, in the suite as "Notes and Timers work by keyboard alone".
+
 ## Build order and checks
 
 1. The focus engine (depths, ring, arrows, Escape, Tab) as one shared component, and Notes on it. Check: a probe walks the Notes tab with key events only (compose, save, filter, open, read, copy, edit, Escape) and asserts focus and clipboard after each step; a screenshot shows the ring.
