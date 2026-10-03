@@ -32,7 +32,11 @@ struct NoteCompose: View {
             .onChange(of: focus) { f in
                 if let f {
                     nav.composeField = f == .body ? .body : .title
-                    if nav.focus != .compose { nav.focus = .compose }
+                    // macOS hands a window's keyboard back to its first field when a picker closes;
+                    // only a click, or the keyboard path itself, moves the keyboard here
+                    if nav.focus != .compose {
+                        if nav.focus == .none || clickedNow() { nav.focus = .compose } else { focus = nil }
+                    }
                 } else if nav.focus == .compose {
                     nav.focus = .none
                 }
@@ -46,11 +50,12 @@ struct NoteCompose: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top, spacing: 6) {
+                // the new note's colour, the same dot every note wears
+                ColorDot(selection: $nav.draftColor, size: si(9)).padding(.top, 7)
                 Group {
                     if expanded {
                         VStack(alignment: .leading, spacing: 0) {
                             NoteSheet(title: $nav.draftTitle, text: $nav.draftBody, focus: $focus, titlePrompt: "Title", bodyPrompt: "Note", bodyMax: 160)
-                            ColorBalls(selection: $nav.draftColor, allowNone: true, size: 11).padding(.horizontal, 5).padding(.bottom, 4)
                         }
                     } else {
                         ZStack(alignment: .leading) {
@@ -126,6 +131,12 @@ struct NoteCompose: View {
     }
 }
 
+/// The new-note box for whichever window it is drawn in: the panel, or a desk panel.
+struct NotesTop: View {
+    @Environment(\.panelSpace) private var space
+    var body: some View { NoteCompose(notes: NotesStore.shared, space: space) }
+}
+
 struct NotesTabView: View {
     @ObservedObject var notes: NotesStore
     @Environment(\.panelSpace) private var space
@@ -165,7 +176,7 @@ private struct NotesList: View {
                     }
                 }
             } else if !notes.live.isEmpty {
-                Text("No notes in the chosen colours.").font(PT.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
+                Text(nav.query.isEmpty ? "No notes in the chosen colours." : "No notes match \u{201C}\(nav.query)\u{201D}.").font(PT.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
             }
             NotesFolderLink()
             if !notes.expired.isEmpty {
@@ -200,8 +211,33 @@ private struct NotesList: View {
 struct NoteFilterBar: View {
     @ObservedObject var nav: NotesNav
     let hidden: Int
+    @FocusState private var searching: Bool
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // search: "/" from anywhere on the list; Escape empties it, then leaves
+            HStack(spacing: 5) {
+                Image(systemName: "magnifyingglass").font(.sbIcon(10)).foregroundStyle(.secondary)
+                TextField("Search notes  /", text: $nav.query).textFieldStyle(.plain).font(PT.caption)
+                    .focused($searching)
+                if !nav.query.isEmpty {
+                    Button { nav.query = "" } label: { Image(systemName: "xmark.circle.fill").font(.sbIcon(10)) }
+                        .buttonStyle(.borderless).foregroundStyle(.tertiary).help("Clear the search")
+                }
+            }
+            .inputBox(focused: searching)
+            .onChange(of: searching) { on in
+                if on, nav.focus != .search {
+                    if nav.focus == .none || clickedNow() { nav.focus = .search } else { searching = false }
+                }
+                else if !on, nav.focus == .search { nav.focus = .none }
+            }
+            .onChange(of: nav.focus) { f in if (f == .search) != searching { searching = f == .search } }
+            dots
+        }
+    }
+
+    private var dots: some View {
         HStack(spacing: 7) {
             Text("All").font(.sb(10.5, weight: nav.filter.isEmpty ? .semibold : .regular))
                 .foregroundStyle(nav.filter.isEmpty ? Color.primary : .secondary)
@@ -275,6 +311,7 @@ struct NoteRow: View {
     /// The last save was refused because the note was empty.
     @State private var refused = false
     @State private var focus: NoteSheet.Field?
+    @FocusState private var tagsFocused: Bool
     /// Snapshots open the first note's editor so its look can be checked.
     static var startOpen = false
 
@@ -286,6 +323,25 @@ struct NoteRow: View {
         return snapshotOpen ? (nil, true) : nil
     }
     private var open: Bool { openState != nil }
+    /// The part of this note the keyboard is on, when it is open.
+    private var part: NoteBlock? { openState?.block }
+    /// The ring that says the keyboard is on this part (reading, not typing in it).
+    private func ringed(_ b: NoteBlock) -> Bool { part == b && !(openState?.typing ?? false) }
+
+    /// The note's colour, saved at once wherever it is changed.
+    private var colorBinding: Binding<String?> {
+        Binding(get: { (draft ?? note).color }, set: { c in
+            if draft != nil { draft?.color = c }
+            var n = draft ?? note; n.color = c; notes.update(n)
+        })
+    }
+    /// Whether this open note's expiry, reminder or colour picker shows; the keyboard opens them too.
+    private func pickerBinding(_ b: NoteBlock) -> Binding<Bool> {
+        Binding(get: { open && nav.picker == b }, set: { on in
+            nav.picker = on ? b : (nav.picker == b ? nil : nav.picker)
+            if on, open { nav.focus = .open(note.id, b, typing: false) }
+        })
+    }
 
     var body: some View {
         rows
@@ -293,31 +349,48 @@ struct NoteRow: View {
                 if o { begin() } else { save() }
                 if o { EditingState.shared.note = note.id } else if EditingState.shared.note == note.id { EditingState.shared.note = nil }
             }
-            .onChange(of: nav.focus) { _ in
-                let want: NoteSheet.Field? = openState?.block.map { $0 == .title ? .title : .body }
-                if focus != want { focus = want }
-            }
+            .onChange(of: nav.focus) { _ in syncFields() }
             .onChange(of: focus) { f in
                 // a click into a field of this note: the keyboard is here, typing
                 guard let f, let s = openState else { return }
                 let b: NoteBlock = f == .title ? .title : .body
                 if s.block != b { nav.focus = .open(note.id, b, typing: s.typing) }
             }
+            .onChange(of: tagsFocused) { on in
+                // as with the new-note box: a click, or the keyboard path, puts typing here; macOS handing focus back does not
+                guard on, open, part != .tags else { return }
+                if clickedNow() { nav.focus = .open(note.id, .tags, typing: true) } else { tagsFocused = false }
+            }
             .onChange(of: nav.saveTick) { _ in if open { save() } }
+            // a colour or pin set by a key while the note is open goes into the open copy,
+            // or its next save would put the old value back
+            .onChange(of: note.color) { c in if draft != nil { draft?.color = c } }
+            .onChange(of: note.pinned) { p in if draft != nil { draft?.pinned = p } }
             .onAppear {
                 // the note ⌘↩ just saved is drawn already open, so nothing above fires for it
                 guard open, draft == nil else { return }
                 begin()
                 EditingState.shared.note = note.id
-                focus = openState?.block.map { $0 == .title ? .title : .body }
+                syncFields()
             }
+    }
+
+    /// Hands the keyboard to the text part the keyboard path is on: the title or
+    /// body (also while reading, read-only, so ⌘A and ⌘C work), or the tags while typing.
+    private func syncFields() {
+        let want: NoteSheet.Field? = part == .title ? .title : part == .body ? .body : nil
+        if focus != want { focus = want }
+        let tags = part == .tags && (openState?.typing ?? false)
+        if tagsFocused != tags { tagsFocused = tags }
     }
 
     private var rows: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 6) {
                 grip
-                if let c = note.color { Circle().fill(timerColor(c)).frame(width: si(8), height: si(8)) }
+                // the note's one colour: shown here, and changed here
+                ColorDot(selection: colorBinding, size: si(9), isOpen: open ? pickerBinding(.color) : nil)
+                    .keyRing(ringed(.color), radius: 8)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(note.heading).font(PT.label).fixedSize(horizontal: false, vertical: true)
                         .strikethrough(note.expired)
@@ -336,23 +409,19 @@ struct NoteRow: View {
                     }
                 }
                 Spacer(minLength: 4)
-                // copy actions stay out of the way until the row is pointed at
-                let has = InputRules.copyButtons(title: note.title, body: note.body)
-                HStack(spacing: 2) {
-                    copyButton("link", "Copy the file's full path", note.path)
-                    if has.body { copyButton("doc.on.doc", "Copy the note's text", note.body) }
-                    if has.title { copyButton("textformat", "Copy the title", note.title) }
-                }
-                .opacity(hovering || open ? 1 : 0)
+                // two actions, out of the way until the row is pointed at, open or has the keyboard
+                let shown = hovering || open || nav.focus == .row(note.id)
+                copyMenu
+                    .keyRing(ringed(.copy), radius: 5)
+                    .opacity(shown ? 1 : 0)
                 // a pinned note shows on the menu-bar quick page
                 Button { setPinned(!note.pinned) } label: {
                     Image(systemName: note.pinned ? "pin.fill" : "pin").font(.sbIcon(11))
                         .foregroundStyle(note.pinned ? Color.accentColor : .secondary).frame(width: si(16))
                 }
-                .buttonStyle(.borderless).help(note.pinned ? "Unpin: leave the menu-bar quick page" : "Pin to the menu-bar quick page")
-                .opacity(note.pinned || hovering || open ? 1 : 0)
-                Image(systemName: "chevron.right").font(.sbIcon(9, weight: .semibold))
-                    .rotationEffect(.degrees(open ? 90 : 0)).foregroundStyle(.secondary)
+                .buttonStyle(.borderless).help(note.pinned ? "Unpin: leave the menu-bar quick page (P)" : "Pin to the menu-bar quick page (P)")
+                .keyRing(ringed(.pin), radius: 5)
+                .opacity(note.pinned || shown ? 1 : 0)
             }
             .padding(.leading, 4).padding(.trailing, PT.rowH).padding(.vertical, PT.rowV)
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(hovering && !open ? 0.05 : 0)))
@@ -446,7 +515,6 @@ struct NoteRow: View {
     /// Save button to find; collapsing the row saves too.
     private var editor: some View {
         let d = Binding(get: { draft ?? note }, set: { draft = $0 })
-        let f = Self.longDate
         return VStack(alignment: .leading, spacing: 8) {
             // title and body are one sheet, like a note app, not two boxed fields
             VStack(alignment: .leading, spacing: 0) {
@@ -458,62 +526,27 @@ struct NoteRow: View {
                         tagsText = t
                         d.wrappedValue.tags = t.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
                     })).textFieldStyle(.plain).font(PT.caption)
+                        .focused($tagsFocused)
                 }
-                .padding(.horizontal, 8).padding(.bottom, 7)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .keyRing(ringed(.tags), radius: 5)
+                .padding(.bottom, 4)
             }
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08)))
-            // when it expires and when it reminds: one row, each an action until it is set
-            HStack(spacing: 6) {
-                WhenButton(title: "Expire this note at", presets: WhenPreset.long,
-                           extra: d.wrappedValue.expires == nil ? [] : [("No expiry", { d.wrappedValue.expires = nil; expireWithReminder = false })],
-                           initial: d.wrappedValue.expires,
-                           onPick: { t, _ in d.wrappedValue.expires = t; expireWithReminder = false }) {
-                    chip(icon: "hourglass", d.wrappedValue.expires.map { "Expires " + f.string(from: $0) } ?? "Add expiry",
-                         set: d.wrappedValue.expires != nil)
+            // everything else about the note on one line: expiry, reminder, save state, delete
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) { whenChips(d); Spacer(minLength: 6); saveState; trash }
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) { whenChips(d); Spacer(minLength: 0) }
+                    HStack(spacing: 6) { saveState; Spacer(); trash }
                 }
-                if d.wrappedValue.expires != nil {
-                    clearButton("Remove the expiry") { d.wrappedValue.expires = nil; expireWithReminder = false }
-                }
-                WhenButton(title: "Remind me in macOS Reminders", presets: WhenPreset.long,
-                           choices: ["Once", "Every day", "Every week", "Every month"],
-                           extra: d.wrappedValue.remindAt == nil ? [] : [("No reminder", { d.wrappedValue.remindAt = nil; expireWithReminder = false })],
-                           initial: d.wrappedValue.remindAt,
-                           initialChoice: [.never, .daily, .weekly, .monthly].firstIndex(of: d.wrappedValue.remindRepeat) ?? 0,
-                           onPick: { t, i in
-                               d.wrappedValue.remindAt = t
-                               d.wrappedValue.remindRepeat = [.never, .daily, .weekly, .monthly][i]
-                               if expireWithReminder { d.wrappedValue.expires = t }
-                           }) {
-                    chip(icon: "bell", d.wrappedValue.remindAt.map { "Reminds " + f.string(from: $0)
-                        + (d.wrappedValue.remindRepeat == .never ? "" : ", " + d.wrappedValue.remindRepeat.rawValue) } ?? "Add reminder",
-                         set: d.wrappedValue.remindAt != nil)
-                }
-                if d.wrappedValue.remindAt != nil {
-                    clearButton("Remove the reminder") { d.wrappedValue.remindAt = nil; expireWithReminder = false }
-                }
-                Spacer()
             }
             if d.wrappedValue.remindAt != nil, d.wrappedValue.remindRepeat == .never {
                 Toggle("Expire the note when it fires", isOn: Binding(get: { expireWithReminder }, set: { on in
                     expireWithReminder = on
                     d.wrappedValue.expires = on ? d.wrappedValue.remindAt : nil
                 })).toggleStyle(.checkbox).font(PT.caption)
-            }
-            ColorBalls(selection: d.color, allowNone: true, size: 12)
-            HStack(spacing: 10) {
-                Text(refused ? "Empty notes are not saved; delete removes a note"
-                     : savedAt.map { "Saved " + age($0) } ?? "Saves as you type")
-                    .font(PT.caption).foregroundStyle(refused ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
-                Spacer()
-                Button {
-                    let a = NSAlert(); a.messageText = "Delete \u{201C}\(note.heading)\u{201D}?"
-                    a.informativeText = "The file and any reminder it set are removed."
-                    a.addButton(withTitle: "Delete"); a.addButton(withTitle: "Cancel")
-                    NSApp.activate(ignoringOtherApps: true)
-                    if a.runModal() == .alertFirstButtonReturn { notes.delete(note) }
-                } label: { Image(systemName: "trash") }
-                    .buttonStyle(.borderless).foregroundStyle(.secondary).help("Delete the note")
             }
         }
         .padding(.horizontal, PT.rowH).padding(.bottom, 10).padding(.top, 2)
@@ -551,17 +584,78 @@ struct NoteRow: View {
         savedAt = Date()
     }
 
-    private func copyButton(_ icon: String, _ help: String, _ text: String) -> some View {
-        Button {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
-            copied = icon
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if copied == icon { copied = nil } }
-        } label: {
-            Image(systemName: copied == icon ? "checkmark" : icon).font(.sbIcon(11))
-                .foregroundStyle(copied == icon ? Color(nsColor: menuGreen) : .secondary)
-                .frame(width: si(16))
+    /// The expiry and reminder: each reads as an action until it is set, then as its date.
+    @ViewBuilder private func whenChips(_ d: Binding<Note>) -> some View {
+        let f = Self.shortDate
+        WhenButton(title: "Expire this note at", presets: WhenPreset.long,
+                   extra: d.wrappedValue.expires == nil ? [] : [("No expiry", { d.wrappedValue.expires = nil; expireWithReminder = false })],
+                   initial: d.wrappedValue.expires,
+                   onPick: { t, _ in d.wrappedValue.expires = t; expireWithReminder = false },
+                   isOpen: pickerBinding(.expiry)) {
+            chip(icon: "hourglass", d.wrappedValue.expires.map { "Expires " + f.string(from: $0) } ?? "Expiry",
+                 set: d.wrappedValue.expires != nil)
         }
-        .buttonStyle(.borderless).help(help)
+        .keyRing(ringed(.expiry), radius: 11)
+        if d.wrappedValue.expires != nil {
+            clearButton("Remove the expiry") { d.wrappedValue.expires = nil; expireWithReminder = false }
+        }
+        WhenButton(title: "Remind me in macOS Reminders", presets: WhenPreset.long,
+                   choices: ["Once", "Every day", "Every week", "Every month"],
+                   extra: d.wrappedValue.remindAt == nil ? [] : [("No reminder", { d.wrappedValue.remindAt = nil; expireWithReminder = false })],
+                   initial: d.wrappedValue.remindAt,
+                   initialChoice: [.never, .daily, .weekly, .monthly].firstIndex(of: d.wrappedValue.remindRepeat) ?? 0,
+                   onPick: { t, i in
+                       d.wrappedValue.remindAt = t
+                       d.wrappedValue.remindRepeat = [.never, .daily, .weekly, .monthly][i]
+                       if expireWithReminder { d.wrappedValue.expires = t }
+                   },
+                   isOpen: pickerBinding(.reminder)) {
+            chip(icon: "bell", d.wrappedValue.remindAt.map { "Reminds " + f.string(from: $0)
+                + (d.wrappedValue.remindRepeat == .never ? "" : ", " + d.wrappedValue.remindRepeat.rawValue) } ?? "Reminder",
+                 set: d.wrappedValue.remindAt != nil)
+        }
+        .keyRing(ringed(.reminder), radius: 11)
+        if d.wrappedValue.remindAt != nil {
+            clearButton("Remove the reminder") { d.wrappedValue.remindAt = nil; expireWithReminder = false }
+        }
     }
+
+    private var saveState: some View {
+        Text(refused ? "Empty notes are not saved" : savedAt.map { "Saved " + age($0) } ?? "Saves as you type")
+            .font(PT.caption).foregroundStyle(refused ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var trash: some View {
+        Button {
+            let a = NSAlert(); a.messageText = "Delete \u{201C}\(note.heading)\u{201D}?"
+            a.informativeText = "The file and any reminder it set are removed."
+            a.addButton(withTitle: "Delete"); a.addButton(withTitle: "Cancel")
+            NSApp.activate(ignoringOtherApps: true)
+            if a.runModal() == .alertFirstButtonReturn { notes.delete(note) }
+        } label: { Image(systemName: "trash").font(.sbIcon(11)) }
+            .buttonStyle(.borderless).foregroundStyle(.secondary).help("Delete the note (⌫)")
+            .keyRing(ringed(.delete), radius: 5)
+    }
+
+    /// One button for every copy: the whole note, its title, its text, or its file's path.
+    private var copyMenu: some View {
+        Menu {
+            Button("Copy title and text") { KeyRouter.copyNote(note, .all) }
+            if !note.title.isEmpty { Button("Copy title (T)") { KeyRouter.copyNote(note, .title) } }
+            if !note.body.isEmpty { Button("Copy text (X)") { KeyRouter.copyNote(note, .text) } }
+            Button("Copy file path (L)") { KeyRouter.copyNote(note, .path) }
+        } label: {
+            Image(systemName: "doc.on.doc").font(.sbIcon(11)).foregroundStyle(.secondary)
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .help("Copy the note, its title, its text or its path (C copies it all)")
+    }
+}
+
+/// True while a mouse click is being handled, so a field taking the keyboard
+/// can tell a click from macOS handing focus back on its own.
+func clickedNow() -> Bool {
+    guard let t = NSApp.currentEvent?.type else { return false }
+    return t == .leftMouseDown || t == .leftMouseUp
 }

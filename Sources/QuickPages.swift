@@ -586,6 +586,8 @@ struct QuickCard: View {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Image(systemName: n.pinned ? "pin.fill" : "clock.arrow.circlepath").font(.sbIcon(9.5)).foregroundStyle(.secondary)
                         .help(n.pinned ? "Pinned" : "Edited in the last two hours")
+                    // the note's colour, as the Notes tab shows it
+                    if let c = n.color { Circle().fill(timerColor(c)).frame(width: si(7), height: si(7)) }
                     Text(n.heading).font(.sb(11.5)).fixedSize(horizontal: false, vertical: true)
                     Spacer()
                     Button {

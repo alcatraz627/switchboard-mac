@@ -17,11 +17,13 @@ enum Key: Equatable {
     case up, down, left, right, enter, escape, space, delete
     /// ⇧← and ⇧→: the second slider on a row (a bulb's warmth).
     case shiftLeft, shiftRight
+    /// Tab and ⇧Tab: the next or previous part of an open note.
+    case tab, backTab
     /// ⌘↩: save now.
     case save
     /// ⇧⌘C: copy title and body together.
     case copyAll
-    /// A plain character with no modifier (letters, digits).
+    /// A plain character with no modifier (letters, digits, "/", "+").
     case char(Character)
 
     /// The key an event stands for, or nil for one the rules never look at.
@@ -33,6 +35,8 @@ enum Key: Equatable {
             if mods.isEmpty { self = .enter; return }
             return nil
         case kVK_Escape: self = .escape; return
+        case kVK_Tab where mods.isEmpty: self = .tab; return
+        case kVK_Tab where mods == .shift: self = .backTab; return
         case kVK_UpArrow where mods.isEmpty: self = .up; return
         case kVK_DownArrow where mods.isEmpty: self = .down; return
         case kVK_LeftArrow where mods.isEmpty: self = .left; return
@@ -45,26 +49,44 @@ enum Key: Equatable {
         default: break
         }
         guard mods.isEmpty || mods == .shift, let c = e.charactersIgnoringModifiers?.lowercased().first,
-              c.isLetter || c.isNumber || c == "+" || c == "=" else { return nil }
+              c.isLetter || c.isNumber || "+=/".contains(c) else { return nil }
         self = .char(c)
     }
 }
 
 // ── Notes: where the keyboard is, and what each key does there ──────────────
 
-enum NoteBlock: Equatable { case title, body }
+/// The parts of an open note, in the order the keyboard walks them.
+enum NoteBlock: CaseIterable, Equatable {
+    case title, body, tags, expiry, reminder, color, pin, copy, delete
+    /// Parts that are typed into; the rest are acted on.
+    var isText: Bool { self == .title || self == .body || self == .tags }
+    /// Parts whose action opens a small picker.
+    var opensPicker: Bool { self == .expiry || self == .reminder || self == .color }
+    func step(_ by: Int) -> NoteBlock {
+        let all = Self.allCases
+        let i = all.firstIndex(of: self)!
+        return all[max(0, min(all.count - 1, i + by))]
+    }
+}
+
+/// Which part of a note a copy takes.
+enum NotePart: Equatable { case all, title, text, path }
 
 enum NoteFocus: Equatable {
     /// Nothing on the tab has the keyboard.
     case none
     /// Writing the new note at the top.
     case compose
+    /// Typing in the search box.
+    case search
     /// A dot on the colour filter row; 0 is "all".
     case filter(Int)
     /// A note in the list, closed.
     case row(String)
-    /// A note open. `typing` false is reading (select and copy, nothing changes);
-    /// true is editing. A block of nil means no field is chosen yet (a click opened it).
+    /// A note open on one of its parts. `typing` false is reading (select and
+    /// copy, nothing changes); true is editing a text part. A part of nil means
+    /// nothing is chosen yet (a click opened it).
     case open(String, NoteBlock?, typing: Bool)
 
     var noteID: String? {
@@ -79,36 +101,48 @@ enum NoteFocus: Equatable {
 enum NoteEffect: Equatable {
     case saveCompose
     case saveNote(String)
-    case copy(String)
+    case copy(String, NotePart)
     case togglePin(String)
     /// A colour by its place in the eight; 0 clears it.
     case color(String, Int)
     case delete(String)
     case toggleFilter(Int)
+    /// Opens the expiry, reminder or colour picker of the open note.
+    case openPicker(NoteBlock)
+    case clearSearch
 }
 
 enum NotesKeys {
     struct Context {
-        /// The notes the list shows, top to bottom, after the filter.
+        /// The notes the list shows, top to bottom, after the filter and search.
         var ids: [String]
         /// Dots on the filter row, "all" included.
         var filterCount = timerColors.count + 1
         /// An editable text field has the keyboard right now.
         var typing = false
+        /// Something is typed in the search box.
+        var searching = false
+    }
+
+    /// The part `by` steps away, and whether the keyboard types there.
+    private static func walk(_ id: String, from b: NoteBlock?, by: Int, typing: Bool) -> NoteFocus {
+        let to = b.map { $0.step(by) } ?? .title
+        return .open(id, to, typing: typing && to.isText)
     }
 
     /// One key at one place: where the keyboard goes, what else happens, and
     /// whether the key was used (an unused key goes on to the text field).
     static func reduce(_ f: NoteFocus, _ k: Key, _ c: Context) -> (NoteFocus, [NoteEffect], Bool) {
         let first = c.ids.first.map(NoteFocus.row) ?? .filter(0)
-        // a field the rules did not hand the keyboard to (a tags box, a search) keeps every key but Escape
-        if c.typing, !f.isTyping { return k == .escape ? (f, [], false) : (f, [], false) }
+        // a field the rules did not hand the keyboard to keeps every key
+        if c.typing, !f.isTyping { return (f, [], false) }
         switch f {
         case .none:
             switch k {
             case .down: return (.compose, [], true)
             case .up: return (c.ids.last.map(NoteFocus.row) ?? .compose, [], true)
             case .enter: return (.compose, [], true)
+            case .char("/"): return (.search, [], true)
             default: return (f, [], false)
             }
 
@@ -120,14 +154,24 @@ enum NotesKeys {
             default: return (f, [], false)
             }
 
+        case .search:
+            switch k {
+            // Escape empties the search first, then leaves it
+            case .escape: return c.searching ? (f, [.clearSearch], true) : (first, [], true)
+            case .down, .enter: return (first, [], true)
+            case .up: return (.compose, [], true)
+            default: return (f, [], false)
+            }
+
         case .filter(let i):
             switch k {
             case .left: return (.filter(max(0, i - 1)), [], true)
             case .right: return (.filter(min(c.filterCount - 1, i + 1)), [], true)
             case .space, .enter: return (f, [.toggleFilter(i)], true)
-            case .up: return (.compose, [], true)
+            case .up: return (.search, [], true)
             case .down: return (c.ids.first.map(NoteFocus.row) ?? f, [], true)
             case .escape: return (.none, [], true)
+            case .char("/"): return (.search, [], true)
             default: return (f, [], false)
             }
 
@@ -143,8 +187,9 @@ enum NotesKeys {
             case .right, .enter, .space: return (.open(id, .title, typing: false), [], true)
             case .left: return (f, [], true)
             case .escape: return (.none, [], true)
+            case .char("/"): return (.search, [], true)
             case .char("p"): return (f, [.togglePin(id)], true)
-            case .char("c"), .copyAll: return (f, [.copy(id)], true)
+            case .char("c"), .copyAll: return (f, [.copy(id, .all)], true)
             case .char(let d) where d.isNumber:
                 let n = d.wholeNumberValue ?? 0
                 return n <= timerColors.count ? (f, [.color(id, n)], true) : (f, [], true)
@@ -154,12 +199,27 @@ enum NotesKeys {
 
         case .open(let id, let b, typing: false):
             switch k {
-            case .up: return (.open(id, .title, typing: false), [], true)
-            case .down: return (.open(id, b == nil ? .title : .body, typing: false), [], true)
-            case .right, .enter: return (.open(id, b ?? .title, typing: true), [], true)
+            case .up, .backTab: return (b == nil || b == .title ? .open(id, .title, typing: false) : walk(id, from: b, by: -1, typing: false), [], true)
+            case .down, .tab: return (walk(id, from: b ?? .title, by: b == nil ? 0 : 1, typing: false), [], true)
+            case .right, .enter:
+                let part = b ?? .title
+                if part.isText { return (.open(id, part, typing: true), [], true) }
+                switch part {
+                case .pin: return (f, [.togglePin(id)], true)
+                case .copy: return (f, [.copy(id, .all)], true)
+                case .delete: return (f, [.delete(id)], true)
+                default: return (f, [.openPicker(part)], true)
+                }
             case .left, .escape: return (.row(id), [], true)
-            case .copyAll: return (f, [.copy(id)], true)
-            // ⌘A and ⌘C belong to the chosen block's text, which holds the keyboard read-only
+            case .copyAll: return (f, [.copy(id, .all)], true)
+            // on the copy part, a letter picks what to copy
+            case .char("t") where b == .copy: return (f, [.copy(id, .title)], true)
+            case .char("x") where b == .copy: return (f, [.copy(id, .text)], true)
+            case .char("l") where b == .copy: return (f, [.copy(id, .path)], true)
+            case .char(let d) where d.isNumber && b == .color:
+                let n = d.wholeNumberValue ?? 0
+                return n <= timerColors.count ? (f, [.color(id, n)], true) : (f, [], true)
+            // ⌘A and ⌘C belong to the chosen text part, which holds the keyboard read-only
             default: return (f, [], false)
             }
 
@@ -169,6 +229,9 @@ enum NotesKeys {
             case .escape:
                 return (b == nil ? .row(id) : .open(id, b, typing: false), [.saveNote(id)], true)
             case .save: return (f, [.saveNote(id)], true)
+            // Tab carries on to the next part: typing if it is text, reading if not
+            case .tab: return (walk(id, from: b, by: 1, typing: true), [.saveNote(id)], true)
+            case .backTab: return (walk(id, from: b, by: -1, typing: true), [.saveNote(id)], true)
             default:
                 // a note opened by a click with no field chosen still answers the arrows
                 if b == nil, !c.typing {
@@ -188,15 +251,16 @@ extension NoteFocus {
     /// Whether the rules expect a text field to have the keyboard here.
     var isTyping: Bool {
         switch self {
-        case .compose: return true
+        case .compose, .search: return true
         case .open(_, _, let t): return t
         default: return false
         }
     }
 }
 
-/// Where the keyboard is on one window's Notes tab, the colour filter, and
-/// the new note being written (kept across Escape and tab changes).
+/// Where the keyboard is on one window's Notes tab: the search, the colour
+/// filter, which picker is open, and the new note being written (kept across
+/// Escape and tab changes).
 final class NotesNav: ObservableObject {
     private static var spaces: [String: NotesNav] = [:]
     static func forSpace(_ s: String) -> NotesNav {
@@ -206,9 +270,12 @@ final class NotesNav: ObservableObject {
 
     @Published var focus: NoteFocus = .none
     @Published var filter: Set<String> = []
+    @Published var query = ""
     @Published var draftTitle = ""
     @Published var draftBody = ""
     @Published var draftColor: String?
+    /// The open note's expiry, reminder or colour picker, while it shows.
+    @Published var picker: NoteBlock?
     /// Which field of the new note was last typed in.
     var composeField: NoteBlock = .title
     /// Where the cursor lands when typing moves into a note from outside.
@@ -216,8 +283,15 @@ final class NotesNav: ObservableObject {
     /// Bumped to ask the open note to save now (⌘↩).
     @Published var saveTick = 0
 
+    /// The notes the list shows: in a chosen colour, if any, and matching every word searched for.
     func visible(_ notes: [Note]) -> [Note] {
-        filter.isEmpty ? notes : notes.filter { n in n.color.flatMap(tagColorName).map(filter.contains) ?? false }
+        let words = query.lowercased().split(separator: " ").map(String.init)
+        return notes.filter { n in
+            (filter.isEmpty || (n.color.flatMap(tagColorName).map(filter.contains) ?? false))
+                && words.allSatisfy { w in
+                    n.title.lowercased().contains(w) || n.body.lowercased().contains(w) || n.tags.contains { $0.lowercased().contains(w) }
+                }
+        }
     }
 
     /// Saves the new note. The saved note opens for typing in the same field,
@@ -227,8 +301,8 @@ final class NotesNav: ObservableObject {
         guard InputRules.canSave(title: draftTitle, body: draftBody),
               let n = store.add(title: draftTitle, body: draftBody, color: draftColor) else { return nil }
         draftTitle = ""; draftBody = ""; draftColor = nil
-        // a filter that would hide the note just written is lifted
-        if !filter.isEmpty, !(n.color.flatMap(tagColorName).map(filter.contains) ?? false) { filter = [] }
+        // a filter or search that would hide the note just written is lifted
+        if !visible([n]).contains(where: { $0.id == n.id }) { filter = []; query = "" }
         caret = at
         focus = .open(n.id, composeField, typing: true)
         return n
@@ -378,17 +452,15 @@ enum KeyRouter {
         let store = NotesStore.shared
         let tv = window?.firstResponder as? NSTextView
         let typing = tv?.isEditable == true
-        let ctx = NotesKeys.Context(ids: nav.visible(store.live).map(\.id), typing: typing)
+        let ctx = NotesKeys.Context(ids: nav.visible(store.live).map(\.id), typing: typing, searching: !nav.query.isEmpty)
         let (to, effects, used) = NotesKeys.reduce(nav.focus, k, ctx)
         for fx in effects {
             switch fx {
             case .saveCompose: nav.saveCompose(store, caret: tv?.selectedRange().location)
             case .saveNote: nav.saveTick += 1
-            case .copy(let id):
+            case .copy(let id, let part):
                 guard let n = store.notes.first(where: { $0.id == id }) else { break }
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(n.content, forType: .string)
-                Toast.shared.show("Copied \u{201C}\(n.heading)\u{201D}")
+                copyNote(n, part)
             case .togglePin(let id):
                 guard var n = store.notes.first(where: { $0.id == id }) else { break }
                 n.pinned.toggle(); store.update(n)
@@ -407,17 +479,38 @@ enum KeyRouter {
                     nav.focus = next.map(NoteFocus.row) ?? .filter(0)
                 }
             case .toggleFilter(let i): nav.toggleFilter(i)
+            case .openPicker(let part): nav.picker = part
+            case .clearSearch: nav.query = ""
             }
         }
         // a save that moved the keyboard into the new note wins over the rules' answer
         if !effects.contains(.saveCompose), to != nav.focus { nav.focus = to }
         if let id = nav.focus.noteID { FocusScroll.shared.show("note-" + id) }
+        // a picker belongs to its part: moving off the part closes it
+        if let p = nav.picker, nav.focus != .open(nav.focus.noteID ?? "", p, typing: false) { nav.picker = nil }
         // leaving the text fields takes the keyboard off them, so the panel hears the arrows;
-        // a note going from typing to reading keeps it, read-only, on the same block
+        // a title or body going from typing to reading keeps it, read-only, on the same text
         if typing, !nav.focus.isTyping {
-            if case .open(_, .some, typing: false) = nav.focus { tv?.isEditable = false } else { window?.makeFirstResponder(nil) }
+            if case .open(_, let b?, typing: false) = nav.focus, b == .title || b == .body, tv is EditorTextView {
+                tv?.isEditable = false
+            } else { window?.makeFirstResponder(nil) }
         }
         return used
+    }
+
+    /// Copies one part of a note and says so at the bottom of the panel.
+    static func copyNote(_ n: Note, _ part: NotePart) {
+        let (text, what): (String, String) = {
+            switch part {
+            case .all: return (n.content, "\u{201C}\(n.heading)\u{201D}")
+            case .title: return (n.title, "the title")
+            case .text: return (n.body, "the text")
+            case .path: return (n.path, "the file's path")
+            }
+        }()
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        Toast.shared.show("Copied " + what)
     }
 }
 
@@ -612,7 +705,7 @@ func probeKeys() -> [String] {
     // list
     check("↓ walks the list and stops at the end", step(step(step(.row("a"), .down), .down), .down) == .row("c"))
     check("↑ from the first note reaches the colour filter", step(.row("a"), .up) == .filter(0))
-    check("↑ from the filter reaches the new note", step(.filter(3), .up) == .compose)
+    check("↑ from the filter reaches search, and ↑ from search the new note", step(.filter(3), .up) == .search && NotesKeys.reduce(.search, .up, NotesKeys.Context(ids: ["a"], typing: true)).0 == .compose)
     check("← and → move along the filter", step(step(.filter(0), .right), .right) == .filter(2) && step(.filter(0), .left) == .filter(0))
     check("Space on a filter dot toggles it", NotesKeys.reduce(.filter(2), .space, c).1 == [.toggleFilter(2)])
     // read
@@ -631,9 +724,40 @@ func probeKeys() -> [String] {
           NotesKeys.reduce(.open("b", .title, typing: true), .save, typingCtx) == (.open("b", .title, typing: true), [.saveNote("b")], true))
     // row actions
     check("P pins, C copies, a digit colours, ⌫ deletes",
-          NotesKeys.reduce(.row("a"), .char("p"), c).1 == [.togglePin("a")] && NotesKeys.reduce(.row("a"), .char("c"), c).1 == [.copy("a")]
+          NotesKeys.reduce(.row("a"), .char("p"), c).1 == [.togglePin("a")] && NotesKeys.reduce(.row("a"), .char("c"), c).1 == [.copy("a", .all)]
           && NotesKeys.reduce(.row("a"), .char("3"), c).1 == [.color("a", 3)] && NotesKeys.reduce(.row("a"), .delete, c).1 == [.delete("a")])
     check("a search or tags box keeps its keys", NotesKeys.reduce(.row("a"), .down, typingCtx).2 == false)
+
+    // every part of an open note, by Tab or arrows
+    var at = NoteFocus.open("b", .title, typing: false)
+    var path: [NoteBlock] = []
+    for _ in 0..<9 { if case .open(_, let p?, _) = at { path.append(p) }; at = step(at, .tab) }
+    check("Tab walks title, body, tags, expiry, reminder, colour, pin, copy, delete", path == NoteBlock.allCases)
+    check("⇧Tab walks back", step(.open("b", .color, typing: false), .backTab) == .open("b", .reminder, typing: false))
+    check("Tab while typing the title goes on typing in the body",
+          NotesKeys.reduce(.open("b", .title, typing: true), .tab, typingCtx).0 == .open("b", .body, typing: true))
+    check("Tab while typing the tags stops typing on the expiry",
+          NotesKeys.reduce(.open("b", .tags, typing: true), .tab, typingCtx).0 == .open("b", .expiry, typing: false))
+    check("Return on expiry, reminder or colour opens its picker",
+          [NoteBlock.expiry, .reminder, .color].allSatisfy { NotesKeys.reduce(.open("b", $0, typing: false), .enter, c).1 == [.openPicker($0)] })
+    check("Return on pin pins, on copy copies, on delete deletes",
+          NotesKeys.reduce(.open("b", .pin, typing: false), .enter, c).1 == [.togglePin("b")]
+          && NotesKeys.reduce(.open("b", .copy, typing: false), .enter, c).1 == [.copy("b", .all)]
+          && NotesKeys.reduce(.open("b", .delete, typing: false), .enter, c).1 == [.delete("b")])
+    check("on copy, T, X and L copy the title, the text and the path",
+          NotesKeys.reduce(.open("b", .copy, typing: false), .char("t"), c).1 == [.copy("b", .title)]
+          && NotesKeys.reduce(.open("b", .copy, typing: false), .char("l"), c).1 == [.copy("b", .path)])
+    check("Return on tags starts typing them", step(.open("b", .tags, typing: false), .enter) == .open("b", .tags, typing: true))
+    // search
+    check("/ on a note goes to search", step(.row("a"), .char("/")) == .search)
+    var sc = c; sc.typing = true; sc.searching = true
+    check("Escape in a search with text empties it and stays", NotesKeys.reduce(.search, .escape, sc) == (.search, [.clearSearch], true))
+    sc.searching = false
+    check("Escape in an empty search goes to the first note", NotesKeys.reduce(.search, .escape, sc).0 == .row("a"))
+    check("↓ from search goes to the first note", NotesKeys.reduce(.search, .down, sc).0 == .row("a"))
+    let sn = NotesNav(); sn.query = "deploy prod"
+    let hits = sn.visible([Note(id: "s1", title: "Deploy", body: "check prod first", tags: [], created: Date()), Note(id: "s2", title: "Deploy", body: "staging", tags: [], created: Date())]).count
+    check("search keeps notes holding every word, in title, text or tags", hits == 1)
 
     // the filter and the save that follows the cursor into the new note
     let nav = NotesNav()

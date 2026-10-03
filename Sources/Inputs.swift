@@ -280,6 +280,105 @@ struct NoteSheet: View {
     }
 }
 
+// ── The colour dot ──────────────────────────────────────────────────────────
+
+/// A thing's one colour, shown and chosen in one place: the dot. A click (or
+/// Return, when the keyboard is on it) opens the eight colours as a 4 by 2
+/// grid; no colour is a faint grey ring. Arrows move in the grid, Return or a
+/// digit picks (0 is none), Escape closes.
+struct ColorDot: View {
+    @Binding var selection: String?
+    var allowNone = true
+    var size: CGFloat = 10
+    /// Lets the owner open it from the keyboard.
+    var isOpen: Binding<Bool>? = nil
+    @State private var open = false
+
+    var body: some View {
+        let shown = isOpen ?? $open
+        Button { shown.wrappedValue.toggle() } label: {
+            Group {
+                if let s = selection { Circle().fill(timerColor(s)) }
+                else { Circle().strokeBorder(Color.primary.opacity(0.22), lineWidth: 1.2).background(Circle().fill(Color.primary.opacity(0.06))) }
+            }
+            .frame(width: size, height: size)
+            .padding(3)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(selection == nil ? "No colour; click to choose one" : "Colour; click to change it")
+        .popover(isPresented: shown, arrowEdge: .bottom) {
+            ColorGrid(selection: $selection, allowNone: allowNone, dismiss: { shown.wrappedValue = false })
+        }
+    }
+}
+
+/// The eight colours in two rows of four, plus "none", for the dot's popover.
+struct ColorGrid: View {
+    @Binding var selection: String?
+    let allowNone: Bool
+    let dismiss: () -> Void
+    @State private var at = 0
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+                ForEach(0..<2, id: \.self) { r in
+                    GridRow {
+                        ForEach(0..<4, id: \.self) { c in
+                            let i = r * 4 + c
+                            let (name, color) = timerColors[i]
+                            Circle().fill(color).frame(width: 16, height: 16)
+                                .overlay(Circle().strokeBorder(Color.primary.opacity(selection == name ? 0.85 : 0), lineWidth: 2).padding(-3))
+                                .keyRing(at == i, radius: 11)
+                                .contentShape(Circle())
+                                .onTapGesture { pick(name) }
+                                .help("\(i + 1)")
+                                .accessibilityLabel(name)
+                        }
+                    }
+                }
+            }
+            if allowNone {
+                Button { pick(nil) } label: {
+                    HStack(spacing: 5) {
+                        Circle().strokeBorder(Color.primary.opacity(0.3), lineWidth: 1.2).frame(width: 10, height: 10)
+                        Text("No colour").font(.sb(11))
+                    }
+                    .padding(.horizontal, 4).padding(.vertical, 2)
+                    .keyRing(at == 8, radius: 5)
+                }
+                .buttonStyle(.plain).foregroundStyle(.secondary).help("0")
+            }
+        }
+        .padding(10)
+        .focusable()
+        .focusEffectDisabled()
+        .focused($focused)
+        .onAppear {
+            at = selection.flatMap { s in timerColors.firstIndex { $0.0 == tagColorName(s) } } ?? 0
+            focused = true
+        }
+        .onKeyPress(.leftArrow) { at = at == 8 ? 3 : (at % 4 == 0 ? at : at - 1); return .handled }
+        .onKeyPress(.rightArrow) { at = at == 8 ? 8 : (at % 4 == 3 ? at : at + 1); return .handled }
+        .onKeyPress(.upArrow) { at = at == 8 ? 4 : (at >= 4 ? at - 4 : at); return .handled }
+        .onKeyPress(.downArrow) { at = at < 4 ? at + 4 : (allowNone ? 8 : at); return .handled }
+        .onKeyPress(.return) { pick(at == 8 ? nil : timerColors[at].0); return .handled }
+        .onKeyPress(.escape) { dismiss(); return .handled }
+        .onKeyPress(characters: .decimalDigits) { k in
+            guard let n = Int(k.characters), n <= timerColors.count, n > 0 || allowNone else { return .ignored }
+            pick(n == 0 ? nil : timerColors[n - 1].0)
+            return .handled
+        }
+    }
+
+    private func pick(_ name: String?) {
+        selection = name
+        dismiss()
+    }
+}
+
 // ── Colour balls ────────────────────────────────────────────────────────────
 
 /// The eight colour balls; the chosen one carries a ring. Colours are only

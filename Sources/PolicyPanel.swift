@@ -144,7 +144,7 @@ enum SwitchboardConcerns {
                                footerIcon: "doc.text",
                                content: AnyView(NotesTabView(notes: NotesStore.shared)),
                                refresh: { NotesStore.shared.loadInBackground() },
-                               pinned: AnyView(NoteCompose(notes: NotesStore.shared))),
+                               pinned: AnyView(NotesTop())),
             catalogTab(policy, id: "rules", title: "Hooks", subtitle: "Rules, gates and hook scripts", icon: Icons.tab["rules"]!,
                        footer: "Problems sort first: a hook with no event, or one whose file is gone.",
                        search: "Search rules, gates and hooks", read: RulesCatalog.groups),

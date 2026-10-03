@@ -210,20 +210,24 @@ struct DeskTab: View {
     let concern: SwitchboardConcern
     let space: String
     var body: some View {
-        // the tab's own window space, so its wheel and middle-click places never mix with the popover's
-        ScrollViewReader { proxy in
-            ScrollView(.vertical) { concern.content.padding(.bottom, sc(8)) }
-                .onReceive(FocusScroll.shared.$key) { k in
-                    guard let k else { return }
-                    DispatchQueue.main.async { withAnimation(Motion.fast) { proxy.scrollTo(k) } }
-                }
-        }
+        // the tab's top slot (a new-note box, a search) comes along, as in the panel;
+        // the tab's own window space keeps its wheel and middle-click places apart from the popover's
+        VStack(spacing: 0) {
+            if let top = concern.pinned { top }
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) { concern.content.padding(.bottom, sc(8)) }
+                    .onReceive(FocusScroll.shared.$key) { k in
+                        guard let k else { return }
+                        DispatchQueue.main.async { withAnimation(Motion.fast) { proxy.scrollTo(k) } }
+                    }
+            }
             .scrollContentFrame()
-            // a resized panel grows the list with it
-            .frame(minWidth: PT.width, idealWidth: PT.width, maxWidth: .infinity,
-                   minHeight: sw(160), idealHeight: min(PT.maxHeight, sw(520)), maxHeight: .infinity)
-            .coordinateSpace(name: space)
-            .environment(\.panelSpace, space)
+        }
+        // a resized panel grows the list with it
+        .frame(minWidth: PT.width, idealWidth: PT.width, maxWidth: .infinity,
+               minHeight: sw(160), idealHeight: min(PT.maxHeight, sw(520)), maxHeight: .infinity)
+        .coordinateSpace(name: space)
+        .environment(\.panelSpace, space)
     }
 }
 

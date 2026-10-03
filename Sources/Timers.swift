@@ -251,6 +251,8 @@ private struct TimersList: View {
             // New timer: a name, a colour, then when. Enter in the name opens "when".
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
+                    // the timer's colour, the same dot a note wears; a timer always has one
+                    ColorDot(selection: $color, allowNone: false, size: si(10))
                     TextField("Label, or \"25m tea\" to start at once", text: $label).textFieldStyle(.plain).font(PT.label)
                         .focused($focused)
                         // "25m tea" starts straight away; a plain name opens the picker
@@ -273,7 +275,6 @@ private struct TimersList: View {
                     }
                     .help("Pick how long; the timer starts at once (Enter in the label opens this)")
                 }
-                ColorBalls(selection: $color)
                 if !timers.recent.isEmpty {
                     // the last few timers, to start again in one click
                     FlowLayout(spacing: 5) {

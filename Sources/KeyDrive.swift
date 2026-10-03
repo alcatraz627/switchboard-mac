@@ -128,9 +128,9 @@ final class KeyDrive {
             self.key(kVK_LeftArrow); self.key(kVK_LeftArrow); self.key(kVK_LeftArrow); self.key(kVK_LeftArrow)
             self.key(kVK_Space)
         }
-        step("All clears it; ↑ goes back to the new note") {
+        step("All clears it; ↑ goes to search, ↑ again to the new note") {
             self.check(self.nav.filter.isEmpty, "\(self.nav.filter)")
-            self.key(kVK_UpArrow)
+            self.key(kVK_UpArrow); self.key(kVK_UpArrow)
         }
         step("the new note has the keyboard again; Escape keeps a draft") {
             self.check(self.nav.focus == .compose, "\(self.nav.focus)")
@@ -146,6 +146,62 @@ final class KeyDrive {
             if case .open(_, .title, typing: true) = self.nav.focus { self.check(true) } else { self.check(false, "\(self.nav.focus)") }
             let tv = self.editing
             self.check(tv?.selectedRange().location == (tv?.string as NSString?)?.length, "cursor at \(tv?.selectedRange().location ?? -1)")
+            self.key(kVK_Tab)
+        }
+        step("Tab from the title goes on typing in the body") {
+            if case .open(_, .body, typing: true) = self.nav.focus { self.check(true) } else { self.check(false, "\(self.nav.focus)") }
+            self.check(self.editing != nil, "the body does not have the keyboard")
+            self.key(kVK_Tab)
+        }
+        step("Tab from the body types in the tags") {
+            if case .open(_, .tags, typing: true) = self.nav.focus { self.check(true) } else { self.check(false, "\(self.nav.focus)") }
+            self.check(self.editing?.isFieldEditor == true, "the tags box does not have the keyboard")
+            self.type("ops")
+            self.key(kVK_Tab)
+        }
+        step("Tab from the tags reaches the expiry, saved, no longer typing") {
+            if case .open(_, .expiry, typing: false) = self.nav.focus { self.check(true) } else { self.check(false, "\(self.nav.focus)") }
+            self.check(self.editing == nil, "a field still takes typing")
+            self.key(kVK_Return)
+        }
+        step("Return on the expiry opens its picker") {
+            self.check(self.nav.picker == .expiry, "\(String(describing: self.nav.picker))")
+            // the picker is its own window and takes the keys; Escape there closes it, as this does
+            self.nav.picker = nil
+        }
+        step("the picker closed, the keyboard is back on the expiry") {
+            if case .open(_, .expiry, typing: false) = self.nav.focus { self.check(true) } else { self.check(false, "\(self.nav.focus)") }
+            self.check(self.editing == nil, "a field took the keyboard: \(String(describing: self.responder.map { Swift.type(of: $0) }))")
+            self.key(kVK_Tab); self.key(kVK_Tab)
+        }
+        step("Tab Tab reaches the colour") {
+            if case .open(_, .color, typing: false) = self.nav.focus { self.check(true) } else { self.check(false, "\(self.nav.focus)") }
+            self.key(kVK_ANSI_3, chars: "3")
+        }
+        step("a digit on the colour sets it; the tags were saved") {
+            let n = self.store.live.first { $0.title == "Alpha more" }
+            self.check(n?.color == "yellow", n?.color ?? "none")
+            self.check(n?.tags == ["ops"], "\(n?.tags ?? [])")
+            self.key(kVK_Escape)
+            self.key(kVK_ANSI_Slash, chars: "/")
+        }
+        step("/ goes to search; the colour set before Escape is still there") {
+            self.check(self.store.live.first { $0.title == "Alpha more" }?.color == "yellow",
+                       self.store.live.first { $0.title == "Alpha more" }?.color ?? "none")
+            self.check(self.nav.focus == .search, "\(self.nav.focus)")
+            self.check(self.editing?.isFieldEditor == true, "the search box does not have the keyboard")
+            self.type("two")
+        }
+        step("only the matching note is listed") {
+            self.check(self.nav.visible(self.store.live).map(\.title) == ["Second"], "\(self.nav.visible(self.store.live).map(\.title))")
+            self.key(kVK_Escape)
+        }
+        step("Escape empties the search and stays in it") {
+            self.check(self.nav.query.isEmpty && self.nav.focus == .search, "query \(self.nav.query), \(self.nav.focus)")
+            self.key(kVK_Escape)
+        }
+        step("Escape again goes to the first note") {
+            if case .row = self.nav.focus { self.check(true) } else { self.check(false, "\(self.nav.focus)") }
             self.showTimers()
         }
 
@@ -188,6 +244,11 @@ final class KeyDrive {
         step("↑ from the first timer goes back to the label") {
             self.check(self.rows.focus == .field, "\(self.rows.focus)")
             self.check(self.editing != nil, "the label does not have the keyboard")
+            self.showDeskNotes()
+        }
+        step("a pinned Notes tab carries its new-note box and search") {
+            let fields = self.textFields(in: self.window.contentView)
+            self.check(fields >= 2, "\(fields) text fields drawn")
         }
     }
 
@@ -195,6 +256,22 @@ final class KeyDrive {
     private var firedAt: Date?
     private var timerIDs: [String] = []
     private var rows: RowNav { RowNav.forSpace(space, "timers") }
+
+    /// The desk panel's own view around a Notes tab, as a pinned Notes window draws it.
+    private func showDeskNotes() {
+        window.makeFirstResponder(nil)
+        let c = SwitchboardConcern(id: "notes", title: "Notes", subtitle: "", icon: "note.text", footer: "", footerIcon: "doc.text",
+                                   content: AnyView(NotesTabView(notes: NotesStore.shared)), pinned: AnyView(NotesTop()))
+        (window.contentView as? NSHostingView<AnyView>)?.rootView = AnyView(ScaledRoot {
+            DeskTab(concern: c, space: "desk-tab-notes").background(Color(nsColor: .windowBackgroundColor))
+        })
+    }
+
+    /// Text inputs drawn in a view tree: the new-note box and the search box each count once or more.
+    private func textFields(in v: NSView?) -> Int {
+        guard let v else { return 0 }
+        return (v is NSTextView || v is NSTextField ? 1 : 0) + v.subviews.reduce(0) { $0 + textFields(in: $1) }
+    }
 
     private func showTimers() {
         let ts = TimerStore.shared
@@ -257,6 +334,7 @@ final class KeyDrive {
         case kVK_Escape: return "\u{1b}"
         case kVK_Space: return " "
         case kVK_ANSI_A: return "a"
+        case kVK_Tab: return "\t"
         case kVK_UpArrow: return String(UnicodeScalar(UInt32(NSUpArrowFunctionKey))!)
         case kVK_DownArrow: return String(UnicodeScalar(UInt32(NSDownArrowFunctionKey))!)
         case kVK_LeftArrow: return String(UnicodeScalar(UInt32(NSLeftArrowFunctionKey))!)
