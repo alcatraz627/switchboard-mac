@@ -267,6 +267,8 @@ h1 { font: 650 var(--t-xl)/1.2 var(--sans); letter-spacing: -.014em; margin: 0; 
 /* tail lines wrap (the house rule: text wraps, it is never cut with an ellipsis) */
 .p-line { display: flex; gap: 8px; color: var(--dim); }
 .p-line + .p-line { margin-top: 2px; }
+.p-line[data-seq] { border-radius: 4px; transition: background var(--t-fast) var(--ease); }
+.p-line[data-seq]:hover { background: var(--sel); }
 .p-line .tx { min-width: 0; overflow-wrap: anywhere; }
 .p-line .g { flex: none; width: 2ch; text-align: center; }
 .p-line .g.u { color: var(--you); font-weight: 700; }
@@ -846,6 +848,12 @@ document.addEventListener('click', e => {
         cwd: (s.cwd || '').replace(/^\/Users\/[^/]+/, '~') })); } catch (err) {}
     document.querySelectorAll('[style*="view-transition-name"]').forEach(el => { el.style.viewTransitionName = ''; });
     nameCardParts(a);
+    // a line of the preview opens the transcript at that line, not at its top
+    const line = e.target.closest('.p-line[data-seq]');
+    if (line && a.getAttribute('href') && !a.getAttribute('href').includes('#')) {
+        e.preventDefault();
+        location.href = a.getAttribute('href') + '#r' + line.dataset.seq;
+    }
 });
 /* The card's state dot, title and model travel to the same three on the
    transcript's header; everything else crossfades. */
@@ -885,7 +893,7 @@ document.addEventListener('click', e => {
         document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (err) {} ta.remove(); done(); }
 }, true);
 const lineHTML = (l, extra) =>
-    `<div class="p-line${extra || ''}"><span class="g ${l.c}">${l.g}</span><span class="tx">${l.html ? l.tx : esc(l.tx)}</span></div>`;
+    `<div class="p-line${extra || ''}"${l.seq ? ` data-seq="${l.seq}" title="Open the transcript at this line"` : ''}><span class="g ${l.c}">${l.g}</span><span class="tx">${l.html ? l.tx : esc(l.tx)}</span></div>`;
 
 /* ---------------- peeks density ---------------- */
 function paneHTML(s, hit) {
@@ -1027,7 +1035,7 @@ function ipcChipHTML(s) {
         + (stale ? ` · stale, as of ${fmtAgeS(s.ipc.age_s)} ago` : '')
         + (bad ? ' · ' + esc(st) : '')
         + (Number.isInteger(s.ipc.waiting_on) && s.ipc.waiting_on > 0 ? ` · waiting on ${s.ipc.waiting_on}` : '');
-    return `<span class="ipcchip${bad ? ' bad' : ''}${stale ? ' stale' : ''}" title="${title}">☍ ${esc(s.ipc.alias)}${mail}${owes}</span>${dis}`;
+    return `<span class="ipcchip${bad ? ' bad' : ''}${stale ? ' stale' : ''}" data-copy="${esc(s.ipc.alias)}" title="${title} · click to copy the alias">☍ ${esc(s.ipc.alias)}${mail}${owes}</span>${dis}`;
 }
 function endedPaneHTML(s, hit) {
     return `<a class="pane ended${openable(s) ? '' : ' noopen'}"${openable(s) ? ` href="/s/${encodeURIComponent(s.session_id)}${hit && hit.seq ? `#r${hit.seq}&q=${encodeURIComponent(hit.w)}` : ''}"` : ''}${noOpenAttrs(s)} data-sid="${esc(s.session_id)}" data-peek="1">` +

@@ -54,6 +54,14 @@ if sys.argv[1:] == ["chapters"]:
               a("## Review\nLooks fine.", 3),
               u("<command-name>/model</command-name><command-args></command-args>")]
 
+if sys.argv[1:] == ["replied"]:
+    # a command Claude has already answered is a chapter of its own: the next
+    # typed message starts the next chapter rather than taking this one over
+    LINES = [u("<command-message>catchup</command-message><command-name>/catchup</command-name><command-args>at x.md</command-args>",
+               origin={"kind": "human"}),
+             u("Base directory for this skill: /skills/catchup", isMeta=True),
+             a("Resumed from the checkpoint.", 1), u("the goal is stupid", origin={"kind": "human"}), a("ok", 2)]
+
 if sys.argv[1:] == ["modes"]:
     # Claude Code writes a "mode" line (always "normal", the input mode) beside
     # every "permission-mode" line; only the second is a permission mode.
@@ -74,11 +82,11 @@ try:
         flips = [r["text"].split("→ ")[-1] for r in recs if r.get("event_type") == "mode-change"]
         print(" ".join(flips), "| now", res["meta"]["permission_mode"])
         sys.exit(0)
-    if sys.argv[1:] in (["chapters"], ["tail"]):
+    if sys.argv[1:] in (["chapters"], ["tail"], ["replied"]):
         rp = os.path.join(root, "records.json")
         with open(rp, "w") as fh:
             json.dump(recs, fh)
-        run = subprocess.run(["node", os.path.join(HERE, sys.argv[1] + "-probe.js"), rp],
+        run = subprocess.run(["node", os.path.join(HERE, ("chapters" if sys.argv[1] == "replied" else sys.argv[1]) + "-probe.js"), rp],
                              capture_output=True, text=True)
         print((run.stdout or run.stderr).strip())
         sys.exit(0)

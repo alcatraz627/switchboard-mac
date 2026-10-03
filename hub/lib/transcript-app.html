@@ -1188,7 +1188,9 @@ function turnOf(r) {
 }
 function firstLine(s) {
     // a heading or list marker is formatting, not part of what was said
-    return (String(s || '').split('\n').find(l => l.trim()) || '').replace(/^#+\s*/, '')
+    // nor is a code fence on its own line, or the border of a drawn box
+    const words = l => l.replace(/^[\s─-╿]+|[\s─-╿]+$/g, '').replace(/\s*[─-╿]{3,}\s*/g, ' · ');
+    return words(String(s || '').split('\n').find(l => words(l) && !/^\s*(```|~~~)\w*\s*$/.test(l)) || '').replace(/^#+\s*/, '')
         .replace(/^\s*(?:[-*+•]|\d{1,2}[.)])\s+/, '').trim();
 }
 function chTitle(r) {
@@ -1210,7 +1212,8 @@ function buildChapters() {
         divider = null;
         chs.push(cur);
     };
-    const unclaimed = () => cur && !cur.user && cur.cmds.length;
+    // a command waits for your next message only until Claude answers it; after that it is a chapter of its own
+    const unclaimed = () => cur && !cur.user && cur.cmds.length && !cur.items.some(x => x.role === 'assistant');
     annotate(state.records);
     for (const r of state.records) {
         if (r.role === 'user') {
@@ -1842,7 +1845,21 @@ function ensureFilled(seq) {
 function jumpToSeq(seq) {
     const ch = ensureFilled(seq);
     let el = document.querySelector(`#chapters [data-seq="${seq}"]`);
-    if (!el) { // seq may be inside a collapsed ledger → jump to its chapter
+    if (!el && ch >= 0) {
+        // inside a folded run of tool calls: open the run that holds it, so the jump lands on the call itself
+        const startOf = new Map(state.records.map(r => ['lg:' + r.id, r.seq]));
+        let best = null;
+        document.querySelectorAll('#chapters [data-lg^="lg:"]').forEach(b => {
+            const s = startOf.get(b.dataset.lg);
+            if (s != null && s <= seq && (!best || s > best.s)) best = { k: b.dataset.lg, s };
+        });
+        if (best && !state.expanded.has(best.k)) { state.expanded.add(best.k); fillChapter(ch); }
+        // a call inside a run is marked by its record's id, not its number
+        const rec = state.records.find(r => r.seq === seq);
+        el = document.querySelector(`#chapters [data-seq="${seq}"]`)
+            || (rec && document.querySelector(`#chapters .trow[data-ref="${CSS.escape(rec.id)}"]`));
+    }
+    if (!el) { // still not drawn (an event row, say) → jump to its chapter
         if (ch >= 0) jumpToChapter(ch);
         return;
     }
@@ -1951,6 +1968,21 @@ addEventListener('scroll', () => {
 }, { passive: true });
 $('#chPrev').onclick = () => jumpToChapter(Math.max(0, state.curCh - 1));
 $('#chNext').onclick = () => jumpToChapter(Math.min(state.chapters.length - 1, state.curCh + 1));
+/* The wheel over the top bar or the chapter pager turns chapters: one per push,
+   down for the next, the way the page itself scrolls; a long swipe's tail does nothing. */
+(function wheelChapters() {
+    let acc = 0, quietUntil = 0;
+    const onWheel = e => {
+        e.preventDefault();
+        const now = performance.now();
+        if (now < quietUntil) return;
+        acc += e.deltaY;
+        if (Math.abs(acc) < 40) return;
+        (acc > 0 ? $('#chNext') : $('#chPrev')).click();
+        acc = 0; quietUntil = now + 350;
+    };
+    ['.topbar', '#chbar'].forEach(sel => { const el = document.querySelector(sel); if (el) el.addEventListener('wheel', onWheel, { passive: false }); });
+})();
 document.addEventListener('click', e => {
     const ol = e.target.closest('.ol-item');
     if (ol) { jumpToChapter(+ol.dataset.ch); closeOutline(); return; }

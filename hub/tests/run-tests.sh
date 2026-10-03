@@ -245,6 +245,10 @@ t_grep "Edit renders as a diff"        lib/transcript-app.html 'dl del'
 t_grep "copy works over insecure http" lib/transcript-app.html 'execCommand'
 t_grep "chapters are built on approach"   lib/transcript-app.html 'new IntersectionObserver'
 t_grep "a toggle rebuilds one chapter"    lib/transcript-app.html 'fillChapter\(\+lg.closest'
+t_grep "the wheel over the top bar or pager turns chapters" lib/transcript-app.html "\['.topbar', '#chbar'\].forEach"
+t_grep "a jump to a call inside a folded run opens the run" lib/transcript-app.html 'state.expanded.add\(best.k\)'
+t_grep "a preview line opens the transcript at its record"  lib/hub-index.html "location.href = a.getAttribute\('href'\) \+ '#r'"
+t_grep "the ipc alias copies on click"                     lib/hub-index.html 'class="ipcchip.*data-copy'
 t_check "page reads liveness from /data, not the fleet scan" bash -c '! rg -q "/api/sessions" lib/transcript-app.html'
 t_grep "failed polls raise the disconnected bar" lib/transcript-app.html 'Disconnected, retrying'
 t_check "page loads nothing from a CDN" bash -c '! rg -q "https?://cdn" lib/transcript-app.html'
@@ -620,8 +624,11 @@ t_eq "the input-mode line beside each permission-mode line is not a mode change"
      "$(python3 "$REPO_ROOT/tests/fixtures/turns-probe.py" modes)"
 if command -v node >/dev/null 2>&1; then
     t_eq "chapters are your messages; harness turns fold in, commands wait for your next message" \
-         "fix the tab bug cmds=/catchup at x.md h=task:1,hook:1,peer:1 div=clear | second ask | Review cmds=/review,/model" \
+         "fix the tab bug cmds=/catchup at x.md h=task:1,hook:1,peer:1 div=clear | second ask | Review cmds=/review" \
          "$(python3 "$REPO_ROOT/tests/fixtures/turns-probe.py" chapters)"
+    t_eq "a command Claude already answered keeps its chapter; your next message starts the next one" \
+         "Resumed from the checkpoint. cmds=/catchup at x.md | the goal is stupid" \
+         "$(python3 "$REPO_ROOT/tests/fixtures/turns-probe.py" replied)"
     t_eq "every URL and path in a transcript becomes a link; trailing punctuation and D1a/D2b do not" \
          "https://github.com/x/y/pull/9 => https://github.com/x/y/pull/9 | /Users/me/Code/app/lib/scan.sh => /f?p=%2FUsers%2Fme%2FCode%2Fapp%2Flib%2Fscan.sh | ~/.claude/rules/git.md => /f?p=~%2F.claude%2Frules%2Fgit.md | lib/hub-index.html => /f?p=%2FUsers%2Fme%2FCode%2Fapp%2Flib%2Fhub-index.html&rel=lib%2Fhub-index.html" \
          "$(node "$REPO_ROOT/tests/fixtures/links-probe.js")"
