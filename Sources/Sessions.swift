@@ -313,16 +313,19 @@ struct SessionsPage: View {
             if let f = failed {
                 Text(f).font(.sb(10.5)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
-            Divider().padding(.horizontal, -12)
-            HStack {
-                Button {
-                    failed = nil
-                    SessionActions.openHub { failed = $0 }
-                } label: { Label("Hub", systemImage: "rectangle.grid.2x2") }
-                    .buttonStyle(.borderless).font(.sb(11.5))
-                    .help("Open the session hub's board: every session, past ones too, with search. Middle-click to open it in the browser.")
-                    .onMiddleClick("shub", space: cardSpace) { failed = nil; SessionActions.openHub(inBrowser: true) { failed = $0 } }
-                Spacer()
+            // the hover card's footer carries Hub under every page; a desk panel has no footer
+            if cardSpace != ScrollTargets.cardSpace {
+                Divider().padding(.horizontal, -12)
+                HStack {
+                    Button {
+                        failed = nil
+                        SessionActions.openHub { failed = $0 }
+                    } label: { Label("Hub", systemImage: "rectangle.grid.2x2") }
+                        .buttonStyle(.borderless).font(.sb(11.5))
+                        .help("Open the session hub's board: every session, past ones too, with search. Middle-click to open it in the browser.")
+                        .onMiddleClick("shub", space: cardSpace) { failed = nil; SessionActions.openHub(inBrowser: true) { failed = $0 } }
+                    Spacer()
+                }
             }
         }
         // the hover card reads every 3 s while open; a desk panel stays up, so it keeps the calmer 15 s pace

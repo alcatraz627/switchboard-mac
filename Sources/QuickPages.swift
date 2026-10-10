@@ -330,6 +330,8 @@ struct QuickCard: View {
     var openReveal: (String, String) -> Void = { _, _ in }
     /// Pins a page to the desktop as a desk panel.
     var pin: ((QuickPage) -> Void)? = nil
+    /// Why the footer's Hub button could not open the hub, if it could not.
+    @State private var hubFailed: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -358,9 +360,10 @@ struct QuickCard: View {
             }
             .id(state.page)
             .transition(Motion.turn(forward: state.forward))
-            if policy.approvalsUnderEveryPage && state.page != .approvals && state.pages.contains(.approvals) {
+            // the owner's footer, the same under every page: Hub, what waits, the Claude week
+            if !state.onDesk {
                 Divider().padding(.horizontal, -12)
-                approvalsCard
+                footer
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
@@ -518,33 +521,49 @@ struct QuickCard: View {
         }
     }
 
-    // ── What waits, under every page ────────────────────────────────────────
-    /// One line per push, ask or Claude prompt waiting on the owner; the button
-    /// in its title bar goes to the Approvals page with the full rows and buttons.
-    private var approvalsCard: some View {
+    // ── The footer, under every page ────────────────────────────────────────
+    /// Hub, then each push, ask or Claude prompt waiting on the owner as a line with
+    /// its own answer buttons, then the Claude week bar, always. Nothing waiting
+    /// shows no line at all, rather than a sentence saying so.
+    private var footer: some View {
         // only what a live session waits on; leftovers from ended sessions stay on the Approvals page
         let live: Set<String> = ["Pushes", "Policy asks", "Claude asks"]
-        let rows = policy.needGroups.filter { live.contains($0.title) }.flatMap { g in g.rows.filter { !$0.buttons.isEmpty } }
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: "hand.raised").font(.sbIcon(10, weight: .semibold))
-                    .foregroundStyle(rows.isEmpty ? Color.secondary : Color(nsColor: menuYellow))
-                Text(rows.isEmpty ? "Nothing waits on you" : "Waiting on you · \(rows.count)")
-                    .font(.sb(10.5, weight: .semibold)).foregroundStyle(rows.isEmpty ? .tertiary : .secondary)
-                Spacer()
-                Button { state.page = .approvals } label: {
-                    Image(systemName: "arrow.right.circle").font(.sbIcon(11, weight: .medium))
+        let rows = state.page == .approvals || !policy.approvalsUnderEveryPage ? []
+            : policy.needGroups.filter { live.contains($0.title) }.flatMap { g in g.rows.filter { !$0.buttons.isEmpty } }
+        // the Limits page already draws the week
+        let week = state.page == .limits ? nil : usage.claude.first { $0.id == "seven_day" }
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 12) {
+                Button { hubFailed = nil; SessionActions.openHub { hubFailed = $0 } } label: {
+                    Label("Hub", systemImage: "rectangle.grid.2x2")
                 }
-                .buttonStyle(.borderless).foregroundStyle(.secondary).help("Open the Approvals page")
+                .buttonStyle(.borderless).font(.sb(11.5))
+                .help("Open the session hub's board. Middle-click to open it in the browser.")
+                .onMiddleClick("fhub", space: state.space) { hubFailed = nil; SessionActions.openHub(inBrowser: true) { hubFailed = $0 } }
+                if !rows.isEmpty {
+                    Button { state.page = .approvals } label: {
+                        Label("\(rows.count) waiting on you", systemImage: "hand.raised.fill")
+                    }
+                    .buttonStyle(.borderless).font(.sb(11.5, weight: .medium)).foregroundStyle(Color(nsColor: menuYellow))
+                    .help("Open the Approvals page")
+                }
+                Spacer()
             }
-            ForEach(Array(rows.prefix(4))) { r in
-                Text(r.label).font(.sb(11)).fixedSize(horizontal: false, vertical: true)
-                    .onMiddleClick("acard-" + (r.key ?? r.label), space: state.space) { openReveal("approvals", r.key ?? r.label) }
+            if let f = hubFailed { Text(f).font(.sb(10.5)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            ForEach(Array(rows.prefix(3))) { r in
+                QuickNeedRow(row: r)
+                    .onMiddleClick("fneed-" + (r.key ?? r.label), space: state.space) { openReveal("approvals", r.key ?? r.label) }
             }
-            if rows.count > 4 {
-                Button { state.page = .approvals } label: { Text("\(rows.count - 4) more").font(.sb(10.5)) }.buttonStyle(.link)
+            if rows.count > 3 { more(rows.count - 3, tab: "approvals") }
+            if let w = week {
+                HoverLinesView(lines: [.bar(label: "7d", pct: w.pct,
+                                            color: w.pct >= usage.dangerPct ? .red : w.pct >= usage.warnPct ? .orange : .green,
+                                            resets: w.resetsAt.map { $0 > Date() ? "in " + countdownText(to: $0, now: Date()) : "" } ?? "",
+                                            icon: Icons.section["Claude"] ?? "sparkle")], labelWidth: 40)
+                    .help("Claude's weekly limit")
             }
         }
+        .onAppear { usage.loadClaude() }
     }
 
     // ── Bulbs ───────────────────────────────────────────────────────────────
