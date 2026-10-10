@@ -76,7 +76,7 @@ if args.contains("--probe-timers-tab") {
 }
 if args.contains("--probe-notes") {
     let report = probeNotes()
-    let sync = probeNotesSync()
+    let sync = probeNotesSync() + probeMarkdown()
     print(report)
     print(sync.joined(separator: "\n"))
     exit(report.hasSuffix("all passed") && !sync.contains { $0.hasPrefix("FAIL") } ? 0 : 1)
@@ -200,6 +200,7 @@ if let out = argAfter("--snapshot") {
     let tab = argAfter("--tab") ?? "agents"
     BulbRow.startExpanded = args.contains("--expand")
     SystemRowView.startExpanded = args.contains("--expand")
+    NoteRow.startReading = args.contains("--reading")
     // Demo timers go under a key of their own, set before the store first loads.
     if args.contains("--demo-states") {
         TimerStore.key = "switchboard.timers.countdowns.demo"

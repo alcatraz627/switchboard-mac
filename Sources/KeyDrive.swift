@@ -92,17 +92,12 @@ final class KeyDrive {
             let n = self.store.live.first { $0.title.hasPrefix("Alpha") }
             self.check(n?.title == "Alpha more", n?.title ?? "nil")
             self.check(self.nav.focus == .open(n?.id ?? "", .title, typing: false), "\(self.nav.focus)")
-            self.check(self.responder?.isEditable == false,
-                       "editable field \"\(self.responder?.string ?? "")\", field editor \(self.responder?.isFieldEditor ?? false)")
+            self.check(self.editing == nil, "a field still takes typing: \"\(self.editing?.string ?? "")\"")
             self.key(kVK_DownArrow)
         }
-        step("↓ moves to the body; ⌘A selects all of it") {
+        step("↓ moves to the body, laid out for reading; nothing takes typing") {
             if case .open(_, .body, typing: false) = self.nav.focus { self.check(true) } else { self.check(false, "\(self.nav.focus)") }
-            self.key(kVK_ANSI_A, [.command])
-        }
-        step("the whole body is selected") {
-            let tv = self.responder
-            self.check(tv != nil && tv?.selectedRange().length == (tv?.string as NSString?)?.length, "selected \(tv?.selectedRange().length ?? -1)")
+            self.check(self.editing == nil, "a field still takes typing")
             self.key(kVK_LeftArrow)
         }
         step("← closes the note and leaves the ring on it") {

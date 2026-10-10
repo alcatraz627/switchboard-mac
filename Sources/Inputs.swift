@@ -307,7 +307,7 @@ struct ColorDot: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .help(selection == nil ? "No colour; click to choose one" : "Colour; click to change it")
+        .help(selection.map { "\(tagColorName($0) ?? $0); click to change it" } ?? "No colour; click to choose one")
         .popover(isPresented: shown, arrowEdge: .bottom) {
             ColorGrid(selection: $selection, allowNone: allowNone, dismiss: { shown.wrappedValue = false })
         }

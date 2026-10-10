@@ -48,6 +48,11 @@ struct NoteCompose: View {
     }
 
     private var content: some View {
+        // while a note is open the tab is that note; the new-note box waits in the list
+        Group { if case .open = nav.focus { EmptyView() } else if NoteRow.startOpen { EmptyView() } else { composeBox } }
+    }
+
+    private var composeBox: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top, spacing: 6) {
                 // the new note's colour, the same dot every note wears
@@ -150,9 +155,25 @@ private struct NotesList: View {
     @ObservedObject var nav: NotesNav
     @State private var showExpired = false
 
+    /// The open note, when one is: the tab then shows only that note, at full size.
+    private var openNote: Note? {
+        var id: String?
+        if case .open(let i, _, _) = nav.focus { id = i } else if NoteRow.startOpen { id = notes.live.first?.id }
+        return id.flatMap { i in notes.notes.first { $0.id == i } }
+    }
+
     var body: some View {
+        if let n = openNote {
+            Card { NoteRow(note: n, notes: notes, nav: nav, grip: AnyView(EmptyView()), takeover: true).id("note-" + n.id) }
+                .padding(PT.gap)
+        } else {
+            list
+        }
+    }
+
+    private var list: some View {
         let shown = nav.visible(notes.live)
-        VStack(alignment: .leading, spacing: PT.gap) {
+        return VStack(alignment: .leading, spacing: PT.gap) {
             if let e = notes.error {
                 ReadingStatus(state: .failed(e)).padding(.horizontal, 4)
             }
@@ -233,6 +254,8 @@ struct NoteFilterBar: View {
                 else if !on, nav.focus == .search { nav.focus = .none }
             }
             .onChange(of: nav.focus) { f in if (f == .search) != searching { searching = f == .search } }
+            // the list can come back (a note closed) with the keyboard already sent to the search
+            .onAppear { if nav.focus == .search, !searching { DispatchQueue.main.async { searching = true } } }
             dots
         }
     }
@@ -301,6 +324,8 @@ struct NoteRow: View {
     @ObservedObject var notes: NotesStore
     @ObservedObject var nav: NotesNav
     let grip: AnyView
+    /// The note is the whole tab: a way back to the list, Write and Read, and room for the text.
+    let takeover: Bool
     /// Snapshots draw the first note open without touching where the keyboard is.
     @State private var snapshotOpen = false
     @State private var draft: Note?
@@ -318,14 +343,18 @@ struct NoteRow: View {
     @State private var versions: [NoteVersion] = []
     /// Snapshots open the first note's editor so its look can be checked.
     static var startOpen = false
+    /// Snapshots draw the open note laid out for reading rather than being typed in.
+    static var startReading = false
 
     @State private var hovering = false
 
     /// This note's place in the keyboard's path: open (and which block, reading or typing) or not.
     private var openState: (block: NoteBlock?, typing: Bool)? {
         if case .open(let id, let b, let t) = nav.focus, id == note.id { return (b, t) }
-        return snapshotOpen ? (nil, true) : nil
+        return snapshotOpen ? (.body, !Self.startReading) : nil
     }
+    /// Reading: the body is laid out, nothing takes typing. Esc while typing gets here; Return or a click leaves it.
+    private var reading: Bool { takeover && !(openState?.typing ?? true) }
     private var open: Bool { openState != nil }
     /// The part of this note the keyboard is on, when it is open.
     private var part: NoteBlock? { openState?.block }
@@ -373,6 +402,8 @@ struct NoteRow: View {
             // the same note open in another window, or pulled from the Pi: its text lands here
             // unless something typed here is not saved yet, so two windows never save over each other
             .onChange(of: note) { n in adopt(n) }
+            // the row leaves the tree when the list comes back; what was typed in the last moment is kept
+            .onDisappear { if open { save() } }
             .onAppear {
                 // the note ⌘↩ just saved is drawn already open, so nothing above fires for it
                 guard open, draft == nil else { return }
@@ -394,10 +425,81 @@ struct NoteRow: View {
     private var rows: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 6) {
-                grip
+                if takeover { backToList; readWriteSwitch } else { grip }
                 // the note's one colour: shown here, and changed here
                 ColorDot(selection: colorBinding, size: si(9), isOpen: open ? pickerBinding(.color) : nil)
                     .keyRing(ringed(.color), radius: 8)
+                if !takeover { heading }
+                Spacer(minLength: 4)
+                // two actions, out of the way until the row is pointed at, open or has the keyboard
+                let shown = hovering || open || nav.focus == .row(note.id)
+                copyMenu
+                    .keyRing(ringed(.copy), radius: 5)
+                    .opacity(shown ? 1 : 0)
+                // a pinned note shows on the menu-bar quick page
+                Button { setPinned(!note.pinned) } label: {
+                    Image(systemName: note.pinned ? "pin.fill" : "pin").font(.sbIcon(11))
+                        .foregroundStyle(note.pinned ? Color.accentColor : .secondary).frame(width: si(16))
+                }
+                .buttonStyle(.borderless).help(note.pinned ? "Unpin: leave the menu-bar quick page (P)" : "Pin to the menu-bar quick page (P)")
+                .keyRing(ringed(.pin), radius: 5)
+                .opacity(note.pinned || shown ? 1 : 0)
+            }
+            .padding(.leading, 4).padding(.trailing, PT.rowH).padding(.vertical, PT.rowV)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(hovering && !open ? 0.05 : 0)))
+            .keyRing(nav.focus == .row(note.id))
+            .contentShape(Rectangle())
+            .onTapGesture { if !takeover { toggleOpen() } }
+            .onHover { hovering = $0 }
+            .contextMenu {
+                Button(note.pinned ? "Unpin" : "Pin to the quick page") { setPinned(!note.pinned) }
+                Divider()
+                if !note.title.isEmpty { Button("Copy title") { copy(note.title) } }
+                if !note.body.isEmpty { Button("Copy text") { copy(note.body) } }
+                Button("Copy title and text") { copy(note.content) }
+                Button("Copy file path") { copy(note.path) }
+            }
+            if open, draft != nil { editor.transition(Motion.arrive) }
+        }
+    }
+
+    /// ← or Esc: the list, with the ring on this note.
+    private var backToList: some View {
+        Button { save(); withAnimation(Motion.slow) { nav.focus = .row(note.id) } } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "chevron.left").font(.sbIcon(10, weight: .semibold))
+                Text("All notes").font(PT.caption)
+                KeyPill(text: "Esc")
+            }
+            .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain).help("Back to the list (Esc or ←); the note stays as you left it")
+    }
+
+    /// Write is the text as typed; Read lays it out. Return starts writing, Esc goes back to reading.
+    private var readWriteSwitch: some View {
+        let typing = openState?.typing ?? false
+        return HStack(spacing: 0) {
+            modeButton("pencil", "Write", on: typing) { nav.focus = .open(note.id, .body, typing: true) }
+            modeButton("book", "Read", on: !typing) { save(); nav.focus = .open(note.id, .body, typing: false) }
+        }
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+        .help("Write: the text as typed. Read: laid out. Return writes, Esc reads")
+    }
+    private func modeButton(_ icon: String, _ text: String, on: Bool, _ act: @escaping () -> Void) -> some View {
+        Button(action: act) {
+            HStack(spacing: 4) {
+                Image(systemName: icon).font(.sbIcon(10))
+                Text(text).font(.sb(11, weight: on ? .semibold : .regular))
+            }
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(on ? 0.12 : 0)))
+        }
+        .buttonStyle(.plain).foregroundStyle(on ? Color.primary : .secondary)
+    }
+
+    /// The closed row's text: the heading, the marks, a link, and a line of what is set.
+    private var heading: some View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
                         Text(note.heading).font(PT.label).fixedSize(horizontal: false, vertical: true)
@@ -423,37 +525,6 @@ struct NoteRow: View {
                         Text(summary).font(PT.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                Spacer(minLength: 4)
-                // two actions, out of the way until the row is pointed at, open or has the keyboard
-                let shown = hovering || open || nav.focus == .row(note.id)
-                copyMenu
-                    .keyRing(ringed(.copy), radius: 5)
-                    .opacity(shown ? 1 : 0)
-                // a pinned note shows on the menu-bar quick page
-                Button { setPinned(!note.pinned) } label: {
-                    Image(systemName: note.pinned ? "pin.fill" : "pin").font(.sbIcon(11))
-                        .foregroundStyle(note.pinned ? Color.accentColor : .secondary).frame(width: si(16))
-                }
-                .buttonStyle(.borderless).help(note.pinned ? "Unpin: leave the menu-bar quick page (P)" : "Pin to the menu-bar quick page (P)")
-                .keyRing(ringed(.pin), radius: 5)
-                .opacity(note.pinned || shown ? 1 : 0)
-            }
-            .padding(.leading, 4).padding(.trailing, PT.rowH).padding(.vertical, PT.rowV)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(hovering && !open ? 0.05 : 0)))
-            .keyRing(nav.focus == .row(note.id))
-            .contentShape(Rectangle())
-            .onTapGesture { toggleOpen() }
-            .onHover { hovering = $0 }
-            .contextMenu {
-                Button(note.pinned ? "Unpin" : "Pin to the quick page") { setPinned(!note.pinned) }
-                Divider()
-                if !note.title.isEmpty { Button("Copy title") { copy(note.title) } }
-                if !note.body.isEmpty { Button("Copy text") { copy(note.body) } }
-                Button("Copy title and text") { copy(note.content) }
-                Button("Copy file path") { copy(note.path) }
-            }
-            if open, draft != nil { editor.transition(Motion.arrive) }
-        }
     }
 
     /// The first body line, when it is a link (http or a file URL).
@@ -482,11 +553,12 @@ struct NoteRow: View {
         NSPasteboard.general.setString(s, forType: .string)
     }
 
-    init(note: Note, notes: NotesStore, nav: NotesNav, grip: AnyView) {
+    init(note: Note, notes: NotesStore, nav: NotesNav, grip: AnyView, takeover: Bool = false) {
         self.note = note
         self.notes = notes
         self.nav = nav
         self.grip = grip
+        self.takeover = takeover
         // Snapshots start the first note open; changing state mid-capture blanks the frame.
         if Self.startOpen, notes.live.first?.id == note.id {
             _snapshotOpen = State(initialValue: true)
@@ -523,17 +595,14 @@ struct NoteRow: View {
     /// A change from the store: taken here when nothing typed here is unsaved.
     private func adopt(_ n: Note) {
         guard draft != nil else { return }
-        if draft == base || draft == n {
-            draft = n
-            tagsText = n.tags.joined(separator: ", ")
-        }
+        if draft == base || draft == n { draft = n }
         base = n
     }
 
     private func begin() {
         draft = note
         base = note
-        tagsText = note.tags.joined(separator: ", ")
+        tagsText = ""
         expireWithReminder = note.remindAt != nil && note.expires == note.remindAt
         loadVersions()
         // the cursor position carried from the new note applies once
@@ -576,15 +645,26 @@ struct NoteRow: View {
         return VStack(alignment: .leading, spacing: 8) {
             // title and body are one sheet, like a note app, not two boxed fields
             VStack(alignment: .leading, spacing: 0) {
-                NoteSheet(title: d.title, text: d.body, focus: $focus, editable: openState?.typing ?? true, caret: nav.caret,
-                          onClickReadOnly: { f in nav.focus = .open(note.id, f == .title ? .title : .body, typing: true) })
-                HStack(spacing: 3) {
+                if reading {
+                    readView(d)
+                } else {
+                    NoteSheet(title: d.title, text: d.body, focus: $focus, bodyMax: takeover ? 460 : 220, editable: openState?.typing ?? true, caret: nav.caret,
+                              onClickReadOnly: { f in nav.focus = .open(note.id, f == .title ? .title : .body, typing: true) })
+                        .frame(minHeight: takeover ? 220 : 0, alignment: .top)
+                }
+                // tags as chips; the box after them takes the next one (comma or Return), ⌫ on an empty box drops the last
+                HStack(spacing: 4) {
                     Text("#").font(PT.caption).foregroundStyle(.tertiary)
-                    TextField("tags, separated by commas", text: Binding(get: { tagsText }, set: { t in
-                        tagsText = t
-                        d.wrappedValue.tags = t.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-                    })).textFieldStyle(.plain).font(PT.caption)
+                    ForEach(d.wrappedValue.tags, id: \.self) { t in tagChip(t, d) }
+                    TextField(d.wrappedValue.tags.isEmpty ? "tags" : "+ tag", text: $tagsText)
+                        .textFieldStyle(.plain).font(PT.caption).frame(minWidth: 44)
                         .focused($tagsFocused)
+                        .onSubmit { commitTag(d) }
+                        .onChange(of: tagsText) { t in if t.contains(",") { commitTag(d) } }
+                        .onKeyPress(.delete) {
+                            guard tagsText.isEmpty, !d.wrappedValue.tags.isEmpty else { return .ignored }
+                            d.wrappedValue.tags.removeLast(); return .handled
+                        }
                 }
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .keyRing(ringed(.tags), radius: 5)
@@ -632,7 +712,51 @@ struct NoteRow: View {
             .buttonStyle(.borderless).foregroundStyle(.tertiary).help(help)
     }
 
+    /// The note laid out: the title, then the body as headings, lists, code and pictures. A click starts writing there.
+    private func readView(_ d: Binding<Note>) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(d.wrappedValue.title.isEmpty ? "Untitled" : d.wrappedValue.title).font(.sb(13, weight: .semibold))
+                .foregroundStyle(d.wrappedValue.title.isEmpty ? Color.secondary : Color.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8).padding(.top, 7).padding(.bottom, 5)
+                .keyRing(ringed(.title), radius: 5)
+                .contentShape(Rectangle())
+                .onTapGesture { nav.focus = .open(note.id, .title, typing: true) }
+            Divider().opacity(0.5).padding(.horizontal, 8)
+            Group {
+                if d.wrappedValue.body.isEmpty {
+                    Text("Nothing written yet. Return or a click starts.").font(.sb(12)).foregroundStyle(.tertiary)
+                } else {
+                    MarkdownBody(text: d.wrappedValue.body, dir: NotesStore.dir)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 200, alignment: .topLeading)
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .keyRing(ringed(.body), radius: 5)
+            .contentShape(Rectangle())
+            .onTapGesture { nav.focus = .open(note.id, .body, typing: true) }
+        }
+    }
+
+    private func tagChip(_ t: String, _ d: Binding<Note>) -> some View {
+        HStack(spacing: 3) {
+            Text("#" + t).font(.sb(10.5))
+            Button { d.wrappedValue.tags.removeAll { $0 == t } } label: { Image(systemName: "xmark").font(.sbIcon(7, weight: .semibold)) }
+                .buttonStyle(.plain).foregroundStyle(.tertiary).help("Remove #\(t)")
+        }
+        .padding(.leading, 6).padding(.trailing, 4).padding(.vertical, 2)
+        .background(Capsule().fill(Color.primary.opacity(0.08)))
+    }
+
+    /// What is in the tag box becomes chips: one per comma, no repeats, nothing empty.
+    private func commitTag(_ d: Binding<Note>) {
+        let new = tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        for t in new where !d.wrappedValue.tags.contains(t) { d.wrappedValue.tags.append(t) }
+        tagsText = ""
+    }
+
     private func save() {
+        if !tagsText.isEmpty, draft != nil { commitTag(Binding(get: { draft ?? note }, set: { draft = $0 })) }
         guard var n = draft, n != note else { refused = false; return }
         // a note with neither title nor text is refused, not saved; Delete is how a note goes
         guard InputRules.canSave(title: n.title, body: n.body) else { refused = true; return }
