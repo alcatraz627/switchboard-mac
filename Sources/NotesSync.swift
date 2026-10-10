@@ -100,7 +100,8 @@ final class NotesSync: ObservableObject {
             }
             let fetch = self.git(["fetch", "-q", Self.remoteName, Self.branch])
             guard fetch.code == 0 else { failure = "the Pi did not answer: \(fetch.err.components(separatedBy: "\n").first ?? "")"; return }
-            let merge = self.git(["merge", "-q", "--no-edit", "\(Self.remoteName)/\(Self.branch)"])
+            // the Pi's folder starts with its own first commit (the import), so the first merge joins two histories
+            let merge = self.git(["merge", "-q", "--no-edit", "--allow-unrelated-histories", "\(Self.remoteName)/\(Self.branch)"])
             if merge.code != 0 {
                 // both sides stay in the file, marked; the row shows it
                 _ = self.git(["add", "-A"])
