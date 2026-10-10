@@ -1028,12 +1028,19 @@ struct SystemRowView: View {
         }
     }
 
-    private func plainRowButton(_ b: RowButton) -> some View {
+    @ViewBuilder private func plainRowButton(_ b: RowButton) -> some View {
         let copied = copiedButton == b.label
-        return iconButton(copied ? "checkmark" : (b.icon ?? Self.symbol(for: b.label)),
-                          tip: copied ? (b.doneTip ?? "Copied") : (b.help.isEmpty ? b.label : "\(b.label): \(b.help)"),
-                          tint: copied ? Color(nsColor: .systemGreen) : nil) { press(b) }
-            .disabled(busyButton != nil)
+        let symbol = copied ? "checkmark" : (b.icon ?? Self.symbol(for: b.label))
+        let tip = copied ? (b.doneTip ?? "Copied") : (b.help.isEmpty ? b.label : "\(b.label): \(b.help)")
+        if b.words {
+            Button { press(b) } label: {
+                Label(b.label, systemImage: symbol).labelStyle(.titleAndIcon).font(.sb(11))
+            }
+            .sbControlSize(.small).help(tip).disabled(busyButton != nil)
+        } else {
+            iconButton(symbol, tip: tip, tint: copied ? Color(nsColor: .systemGreen) : nil) { press(b) }
+                .disabled(busyButton != nil)
+        }
     }
 
     private func press(_ b: RowButton) {

@@ -433,7 +433,7 @@ final class KeyDrive {
         if trace != nil { FileHandle.standardError.write("step: \(current)\n".data(using: .utf8)!) }
         steps[i].1()
         // the views settle, then the picture and the next step
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             self.snap()
             self.next(i + 1)
         }

@@ -304,7 +304,7 @@ struct SettingsTabView: View {
         r.key = "settings-notes-remote"
         r.showsBadge = false
         r.labelIsName = true
-        r.buttons = [RowButton(label: "Set", kind: .ask(placeholder: "user@host:Notes.git", { line in
+        r.buttons = [RowButton(label: "Set remote", kind: .ask(placeholder: "user@host:Notes", { line in
             UserDefaults.standard.set(line.trimmingCharacters(in: .whitespaces), forKey: NotesSync.remoteKey)
             DispatchQueue.main.async { NotesSync.shared.sync(); store.objectWillChange.send() }
             return nil
@@ -313,6 +313,7 @@ struct SettingsTabView: View {
             r.buttons.append(RowButton(label: "Sync", kind: .run({ DispatchQueue.main.async { NotesSync.shared.sync() }; return nil }),
                                        help: "Pull the Pi's edits and push yours now", icon: "arrow.clockwise"))
         }
+        for i in r.buttons.indices { r.buttons[i].words = true }
         return r
     }
 
@@ -337,7 +338,7 @@ struct SettingsTabView: View {
                 }
             }
             return nil
-        }), help: "Choose another folder for notes", icon: "folder.badge.gearshape")]
+        }), help: "Choose another folder for notes", icon: "folder.badge.gearshape", words: true)]
         if custom {
             r.buttons.append(RowButton(label: "Reset", kind: .run({
                 DispatchQueue.main.async {
@@ -346,7 +347,7 @@ struct SettingsTabView: View {
                     store.objectWillChange.send()
                 }
                 return nil
-            }), help: "Go back to the default folder", icon: "arrow.uturn.backward"))
+            }), help: "Go back to the default folder", icon: "arrow.uturn.backward", words: true))
         }
         return r
     }

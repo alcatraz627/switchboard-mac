@@ -273,6 +273,8 @@ struct RowButton {
     var help: String = ""
     /// An SF Symbol shown in place of the label.
     var icon: String? = nil
+    /// Draw the label beside the icon: for a row whose buttons would otherwise be two bare glyphs side by side.
+    var words = false
     /// What the button does, for its failure line: "Couldn't <doing>: why".
     var doing: String? = nil
     /// Asked before running, for an action that is easy to regret.
