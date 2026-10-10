@@ -651,9 +651,9 @@ struct QuickCard: View {
                     Image(systemName: "bell.and.waves.left.and.right.fill").font(.sbIcon(10.5)).foregroundStyle(timerColor(t.color))
                     Text(t.label).font(.sb(11.5, weight: .semibold)).nameFit(t.label)
                     Spacer(minLength: 6)
-                    Button { timers.silence() } label: { Label("Stop", systemImage: "bell.slash.fill") }
+                    Button { timers.stopRinging(t.id) } label: { Label("Stop", systemImage: "bell.slash.fill") }
                         .buttonStyle(.borderedProminent).tint(timerColor(t.color)).sbControlSize(.small).help("Stop the ring")
-                    Button { timers.silence(); timers.extend(t, by: 60) } label: { Label("1 min", systemImage: "plus") }
+                    Button { timers.extend(t, by: 60) } label: { Label("1 min", systemImage: "plus") }
                         .sbControlSize(.small).help("Stop the ring and run it a minute more")
                 }
             }

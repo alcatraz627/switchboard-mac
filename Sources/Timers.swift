@@ -115,7 +115,7 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
         ring = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             guard let self else { return }
             left -= 1; beat += 1
-            if left <= 0 { self.silence(); return }
+            if left <= 0 { self.ring?.invalidate(); self.ring = nil; self.ringing = []; return }   // timed out: the notification stays up
             self.chime()
             if beat % 10 == 0 { for id in self.ringing { if let r = self.timers.first(where: { $0.id == id }) { self.notify(r) } } }
         }
@@ -226,7 +226,7 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
     }
 
     /// Stops one timer's ring; the chime goes quiet once none is left ringing.
-    private func stopRinging(_ id: String) {
+    func stopRinging(_ id: String) {
         guard ringing.contains(id) else { return }
         ringing.remove(id)
         if Bundle.main.bundleIdentifier != nil {
@@ -443,7 +443,7 @@ struct TimerRow: View {
                     if timer.running {
                         Text(clock(left)).font(.sb(13, weight: .semibold).monospacedDigit())
                     } else if timers.ringing.contains(timer.id) {
-                        Button { timers.silence() } label: { Label("Stop", systemImage: "bell.slash.fill") }
+                        Button { timers.stopRinging(timer.id) } label: { Label("Stop", systemImage: "bell.slash.fill") }
                             .buttonStyle(.borderedProminent).tint(timerColor(timer.color)).sbControlSize(.small)
                             .help("Stop the ring")
                     } else {
