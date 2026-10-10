@@ -101,5 +101,28 @@ func probeFormat() -> [String] {
     check("a pasted picture is saved as PNG under attachments, named for the note", rel?.hasPrefix("attachments/n1-") == true
           && rel.map { FileManager.default.fileExists(atPath: dir + "/" + $0) } == true, rel ?? "nil")
     try? FileManager.default.removeItem(atPath: dir)
+
+    // Many shapes, the same promises: the selection stays inside the text, a wrap adds or
+    // removes exactly its marks, a prefix never changes the line count, a link keeps the words.
+    var seed: UInt64 = 0x5EED
+    func rnd(_ n: Int) -> Int { seed = seed &* 6364136223846793005 &+ 1442695040888963407; return Int((seed >> 33) % UInt64(max(1, n))) }
+    let alphabet = Array("ab cé中\n-*[]()`_ 12\n")
+    var bad: [String] = []
+    for _ in 0..<300 {
+        let text = String((0..<rnd(40)).map { _ in alphabet[rnd(alphabet.count)] })
+        let len = (text as NSString).length
+        let loc = rnd(len + 1), r = NSRange(location: loc, length: rnd(len - loc + 1))
+        for (name, e, promise) in [
+            ("bold", NoteFormat.wrap(text, r, "**"), { (e: NoteFormat.Edit) in abs((e.text as NSString).length - len) == 4 }),
+            ("code", NoteFormat.wrap(text, r, "`"), { abs(($0.text as NSString).length - len) == 2 }),
+            ("list", NoteFormat.prefixLines(text, r, "- "), { $0.text.filter { $0 == "\n" }.count == text.filter { $0 == "\n" }.count }),
+            ("link", NoteFormat.link(text, r, clipboard: "https://a.b"), { $0.text.contains("](https://a.b)") }),
+            ("image", NoteFormat.image(text, r, path: "attachments/p.png", name: "p"), { $0.text.contains("![p](attachments/p.png)\n") }),
+        ] as [(String, NoteFormat.Edit, (NoteFormat.Edit) -> Bool)] {
+            let inside = e.selection.location >= 0 && e.selection.location + e.selection.length <= (e.text as NSString).length
+            if !inside || !promise(e) { bad.append("\(name) on \(text.debugDescription) at \(r): \(e)") }
+        }
+    }
+    check("300 random texts and selections keep every edit's promise", bad.isEmpty, bad.prefix(2).joined(separator: " · "))
     return lines
 }

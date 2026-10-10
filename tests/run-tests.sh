@@ -74,6 +74,9 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   check "a note's history picker renders" "$BIN" --snapshot-history "$WORK/history.png"
   check "the Notes tab renders with an editor open" env SWITCHBOARD_STATE="$WORK/notes-state" "$BIN" --snapshot "$WORK/notes.png" --tab notes --expand
   check "the open note renders laid out for reading" env SWITCHBOARD_STATE="$WORK/notes-state" "$BIN" --snapshot "$WORK/notes-read.png" --tab notes --expand --reading
+  for z in small medium large; do
+    check "awkward notes render as a list, written and read, at size $z" bash -c "env SWITCHBOARD_STATE=\"$WORK/notes-demo-$z\" \"$BIN\" --snapshot \"$WORK/notes-demo-list-$z.png\" --tab notes --demo-notes --size $z && env SWITCHBOARD_STATE=\"$WORK/notes-demo-$z\" \"$BIN\" --snapshot \"$WORK/notes-demo-write-$z.png\" --tab notes --expand --size $z && env SWITCHBOARD_STATE=\"$WORK/notes-demo-$z\" \"$BIN\" --snapshot \"$WORK/notes-demo-read-$z.png\" --tab notes --expand --reading --size $z"
+  done
   check "every eject helper answer is JSON with ok" python3 -c "import json,subprocess;r=subprocess.run(['python3','Resources/lib/drives.py','eject','disk99'],capture_output=True,text=True);assert json.loads(r.stdout)['ok'] is False"
   # A helper that fails shows its group with the reason instead of dropping it.
   BADLIB="$WORK/badlib"; cp -Rf "$ROOT/Resources/lib" "$BADLIB"

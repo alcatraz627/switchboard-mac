@@ -34,6 +34,9 @@ final class KeyDrive {
                     SBTimer(label: "Bread", color: "orange", start: Date(), fireAt: Date().addingTimeInterval(900))]
         UserDefaults.standard.set(try? JSONEncoder().encode(seed), forKey: TimerStore.key)
         store.load()
+        // an awkward note sits in the list the whole way: non-Latin, an emoji, a title past the width, markdown in the body
+        _ = store.add(title: "Café ☕ 中文 — a title that goes on past the width of the panel to see what the row does with it",
+                      body: "- [ ] task\n`code` and **bold**", color: "red")
         _ = store.add(title: "Second", body: "line two", color: "green")
         _ = store.add(title: "First", body: "the body\nsecond line", color: nil)
 
@@ -178,6 +181,9 @@ final class KeyDrive {
             self.check(n?.color == "yellow", n?.color ?? "none")
             self.check(n?.tags == ["ops"], "\(n?.tags ?? [])")
             self.key(kVK_Escape)
+        }
+        step("Escape closes the note; the list is back with the ring on it") {
+            if case .row = self.nav.focus { self.check(true) } else { self.check(false, "\(self.nav.focus)") }
             self.key(kVK_ANSI_Slash, chars: "/")
         }
         step("/ goes to search; the colour set before Escape is still there") {
@@ -188,7 +194,8 @@ final class KeyDrive {
             self.type("two")
         }
         step("only the matching note is listed") {
-            self.check(self.nav.visible(self.store.live).map(\.title) == ["Second"], "\(self.nav.visible(self.store.live).map(\.title))")
+            self.check(self.nav.visible(self.store.live).map(\.title) == ["Second"],
+                       "\(self.nav.visible(self.store.live).map(\.title)) query \"\(self.nav.query)\" field \"\(self.responder?.string ?? "-")\" \(self.nav.focus)")
             self.key(kVK_Escape)
         }
         step("Escape empties the search and stays in it") {
@@ -225,12 +232,25 @@ final class KeyDrive {
             self.check(self.editing?.string == "from one and two", self.editing?.string ?? "no field")
             let n = self.store.live.first { $0.title == "Alpha more" }
             self.check(n?.body == "from one and two", n?.body ?? "nil")
+            // the second window is the key one now; the text view gets the key as the key window would hand it over
             self.editing?.setSelectedRange(NSRange(location: 5, length: 3))
-            self.key(kVK_ANSI_B, [.command], chars: "b")
+            if let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command], timestamp: ProcessInfo.processInfo.systemUptime,
+                                        windowNumber: self.window.windowNumber, context: nil, characters: "b", charactersIgnoringModifiers: "b",
+                                        isARepeat: false, keyCode: UInt16(kVK_ANSI_B)) {
+                self.editing?.keyDown(with: e)
+            }
         }
         step("⌘B wraps the selected word in bold and keeps it selected") {
             self.check(self.editing?.string == "from **one** and two", self.editing?.string ?? "no field")
             self.check(self.editing?.selectedRange() == NSRange(location: 7, length: 3), "\(String(describing: self.editing?.selectedRange()))")
+            self.editing?.setSelectedRange(NSRange(location: (self.editing?.string as NSString?)?.length ?? 0, length: 0))
+            self.type((1...14).map { "\nline \($0) of a body long enough to need the whole height of the sheet" }.joined())
+        }
+        step("a long body grows the sheet with it; nothing draws over the last lines") {
+            guard let tv = self.editing, let lm = tv.layoutManager, let tc = tv.textContainer, let sv = tv.enclosingScrollView else { self.check(false, "no body"); return }
+            lm.ensureLayout(for: tc)
+            let used = lm.usedRect(for: tc).height
+            self.check(sv.frame.height >= min(460 * UIScale.text, used) - 1, "scroll view \(Int(sv.frame.height)) for \(Int(used)) of text")
             self.nav2.focus = .none
             self.nav.focus = .none
             self.window2.orderOut(nil)

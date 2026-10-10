@@ -2027,7 +2027,13 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
         TimerStore.shared.add(label: "Tea", color: "green", fireAt: Date().addingTimeInterval(245))
         TimerStore.shared.add(label: "Stand-up", color: "purple", fireAt: Date().addingTimeInterval(1800))
     }
-    if tab == "notes" { NotesStore.remindersOff = true; NotesStore.shared.load(); NoteRow.startOpen = CommandLine.arguments.contains("--expand"); NoteCompose.startExpanded = NoteRow.startOpen }
+    if tab == "notes" {
+        NotesStore.remindersOff = true
+        NotesStore.shared.load()
+        if CommandLine.arguments.contains("--demo-notes") { NotesFixture.seed(NotesStore.shared) }
+        NoteRow.startOpen = CommandLine.arguments.contains("--expand")
+        NoteCompose.startExpanded = NoteRow.startOpen
+    }
     if let f = CommandLine.arguments.firstIndex(of: "--filter").flatMap({ $0 + 1 < CommandLine.arguments.count ? CommandLine.arguments[$0 + 1] : nil }) {
         store.queries[tab + "::scope"] = f
     }

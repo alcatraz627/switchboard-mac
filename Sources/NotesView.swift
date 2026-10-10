@@ -754,8 +754,9 @@ struct NoteRow: View {
     /// Every edit is also a key; the line is where they are found. Icons with words when the width allows.
     private var formatRow: some View {
         HStack(spacing: 4) {
+            // B, I and code are their own glyphs; the rest carry their word while the width allows
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 4) { ForEach(Self.tools, id: \.text) { t in tool(t, words: true) } }
+                HStack(spacing: 4) { ForEach(Self.tools, id: \.text) { t in tool(t, words: t.kind != .bold && t.kind != .italic && t.kind != .code) } }
                 HStack(spacing: 4) { ForEach(Self.tools, id: \.text) { t in tool(t, words: false) } }
             }
             Spacer(minLength: 4)
