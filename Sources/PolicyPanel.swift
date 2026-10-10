@@ -1919,9 +1919,8 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             UserDefaults.standard.set(tab, forKey: PolicyPanel.tabKey)
             Visibility.rememberTab(tab)
         }
-        // Looking at the panel answers a ringing timer, and picks up a
-        // notification setting changed in System Settings.
-        TimerStore.shared.silence()
+        // Picks up a notification setting changed in System Settings. A ringing timer
+        // keeps ringing until its Stop is pressed (owner: it stopped after a few seconds).
         TimerStore.shared.checkNotifications()
         let t0 = Date()
         popover.show(relativeTo: b.bounds, of: b, preferredEdge: .minY)

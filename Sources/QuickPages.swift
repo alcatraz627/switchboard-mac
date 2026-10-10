@@ -353,7 +353,9 @@ struct QuickCard: View {
                 case .approvals: approvals
                 case .bulbs: bulbs
                 case .notes: pinned
-                case .timers: timerPage
+                // ticks each second while the card is open, as Sessions does; the store's own
+                // tick did not redraw an open card (owner: "only on close and reopen")
+                case .timers: TimelineView(.periodic(from: .now, by: 1)) { t in timerPage(now: t.date) }
                 case .controls: controlsPage
                 case .models: modelsPage
                 }
@@ -611,6 +613,8 @@ struct QuickCard: View {
                     if let c = n.color { Circle().fill(timerColor(c)).frame(width: si(7), height: si(7)) }
                     Text(n.heading).font(.sb(11.5)).fixedSize(horizontal: false, vertical: true)
                     Spacer()
+                    Button { openReveal("notes", "note-" + n.id) } label: { Image(systemName: "square.and.pencil").font(.sbIcon(10.5)) }
+                        .buttonStyle(.borderless).foregroundStyle(.secondary).help("Open the note to read or edit")
                     Button {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(n.content, forType: .string)
@@ -623,6 +627,7 @@ struct QuickCard: View {
                 }
                 .onMiddleClick("qnote-" + n.id, space: state.space) { openReveal("notes", "note-" + n.id) }
             }
+            createButton("New note", tab: "notes")
             if !rest.isEmpty {
                 ChipFlow(items: rest.map { n in
                     ChipItem(id: n.id, icon: "pin", text: chipLabel(n.heading), enabled: true, help: "Pin \u{201C}\(n.heading)\u{201D}. Middle-click to open it in Notes.",
@@ -637,16 +642,28 @@ struct QuickCard: View {
     }
 
     // ── Timers ──────────────────────────────────────────────────────────────
-    private var timerPage: some View {
+    private func timerPage(now: Date) -> some View {
         let running = timers.timers.filter(\.running)
+        let ringing = timers.timers.filter { timers.ringing.contains($0.id) }
         return VStack(alignment: .leading, spacing: 7) {
-            if running.isEmpty { empty("No timers running") }
+            ForEach(ringing) { t in
+                HStack(spacing: 7) {
+                    Image(systemName: "bell.and.waves.left.and.right.fill").font(.sbIcon(10.5)).foregroundStyle(timerColor(t.color))
+                    Text(t.label).font(.sb(11.5, weight: .semibold)).nameFit(t.label)
+                    Spacer(minLength: 6)
+                    Button { timers.silence() } label: { Label("Stop", systemImage: "bell.slash.fill") }
+                        .buttonStyle(.borderedProminent).tint(timerColor(t.color)).sbControlSize(.small).help("Stop the ring")
+                    Button { timers.silence(); timers.extend(t, by: 60) } label: { Label("1 min", systemImage: "plus") }
+                        .sbControlSize(.small).help("Stop the ring and run it a minute more")
+                }
+            }
+            if running.isEmpty && ringing.isEmpty { empty("No timers running") }
             ForEach(running) { t in
                 HStack(spacing: 7) {
                     Circle().fill(timerColor(t.color)).frame(width: si(8), height: si(8))
                     Text(t.label).font(.sb(11.5)).nameFit(t.label)
                     Spacer(minLength: 6)
-                    Text(clock(t.fireAt.timeIntervalSince(timers.now))).font(.sb(12, weight: .semibold).monospacedDigit())
+                    Text(clock(t.fireAt.timeIntervalSince(now))).font(.sb(12, weight: .semibold).monospacedDigit())
                     Button { timers.extend(t, by: 60) } label: { Image(systemName: "plus.circle").font(.sbIcon(11)) }
                         .buttonStyle(.borderless).foregroundStyle(.secondary).help("Add a minute")
                     Button { timers.remove(t) } label: { Image(systemName: "xmark.circle").font(.sbIcon(11)) }
@@ -657,6 +674,7 @@ struct QuickCard: View {
                 .scrollSteps("q-timer-" + t.id, card: state.space, stepper: .slider()) { st in timers.nudge(t, minutes: -st) }
                 .onMiddleClick("qtimer-" + t.id, space: state.space) { openReveal("timers", "timer-" + t.id) }
             }
+            createButton("New timer", tab: "timers")
             if !timers.recent.isEmpty {
                 ChipFlow(items: timers.recent.map { r in
                     ChipItem(id: "again-" + r.label + "\(r.seconds)", icon: "arrow.clockwise", text: "\(clock(r.seconds)) \(r.label)",
@@ -666,6 +684,13 @@ struct QuickCard: View {
                 })
             }
         }
+    }
+
+    /// The create action on a page: opens the full tab, whose create field takes the keyboard on open.
+    private func createButton(_ title: String, tab: String) -> some View {
+        Button { openTab(tab) } label: { Label(title, systemImage: "plus") }
+            .buttonStyle(.borderedProminent).tint(Color(nsColor: .controlAccentColor)).sbControlSize(.small)
+            .help("\(title): opens the panel with the input ready")
     }
 
     // ── Controls ────────────────────────────────────────────────────────────
