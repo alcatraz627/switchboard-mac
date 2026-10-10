@@ -258,7 +258,7 @@ struct SettingsTabView: View {
                 ForEach(TimerStore.ringChoices, id: \.seconds) { Text($0.title).tag($0.seconds) }
             }
             .pickerStyle(.menu).labelsHidden().fixedSize().sbControlSize(.small)
-            .help("How long a timer rings before it stops on its own")
+            .help("How long a timer rings before it stops on its own; Until stopped ends after an hour")
         }
         .padding(.horizontal, PT.rowH).padding(.vertical, PT.rowV + 2)
     }

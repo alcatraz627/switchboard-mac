@@ -94,7 +94,7 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
     /// How long a timer rings; 0 rings until stopped, capped so a forgotten one ends.
     static var ringSeconds: Int { UserDefaults.standard.object(forKey: ringKey) as? Int ?? 0 }
     static let ringChoices: [(seconds: Int, title: String)] = [(30, "30 s"), (60, "1 min"), (300, "5 min"), (0, "Until stopped")]
-    static let ringCap = 15 * 60
+    static let ringCap = 60 * 60
     /// Every sound macOS ships, for the picker.
     static var sounds: [String] {
         ((try? FileManager.default.contentsOfDirectory(atPath: "/System/Library/Sounds")) ?? [])
@@ -221,7 +221,18 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
         timers[i].fireAt = base.addingTimeInterval(seconds)
         if !timers[i].running { timers[i].start = Date() }
         timers[i].firedAt = nil
+        stopRinging(t.id)   // restarting a ringing timer answers it
         save(); resume()
+    }
+
+    /// Stops one timer's ring; the chime goes quiet once none is left ringing.
+    private func stopRinging(_ id: String) {
+        guard ringing.contains(id) else { return }
+        ringing.remove(id)
+        if Bundle.main.bundleIdentifier != nil {
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [id])
+        }
+        if ringing.isEmpty { ring?.invalidate(); ring = nil }
     }
 
     func rename(_ t: SBTimer, to label: String) {
@@ -232,6 +243,7 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
     }
 
     func remove(_ t: SBTimer) {
+        stopRinging(t.id)   // a cleared timer must not keep ringing with nothing on screen to stop it
         timers.removeAll { $0.id == t.id }
         save()
     }
@@ -277,7 +289,7 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
         guard Bundle.main.bundleIdentifier != nil else { return }   // the notification centre needs an app bundle
         let c = UNMutableNotificationContent()
         c.title = t.label
-        c.body = "Timer done. Still ringing."
+        c.body = "Timer done."
         c.categoryIdentifier = Self.category
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: t.id, content: c, trigger: nil)) { err in
             if let err = err { dwarn("timer notification not added: \(fmtErr(err))") }
@@ -514,6 +526,21 @@ func probeTimers() -> String {
     check("+ restarts a finished timer for a minute", s.running.count == 1 && abs(s.running[0].fireAt.timeIntervalSinceNow - 60) < 2)
     s.remove(s.timers[0])
     check("clearing removes it", s.timers.isEmpty)
+
+    // Answering a ring by restarting or clearing the timer stops the chime (review T-1, T-2).
+    for (name, answer) in [("restarting a ringing timer stops its ring", { (t: SBTimer) in s.extend(t, by: 60) }),
+                           ("clearing a ringing timer stops its ring", { (t: SBTimer) in s.remove(t) })] {
+        s.add(label: "Ring", color: "blue", fireAt: Date().addingTimeInterval(1))
+        let due = Date().addingTimeInterval(3)
+        while Date() < due && s.ringing.isEmpty { pump(0.1) }
+        guard let t = s.timers.first(where: { s.ringing.contains($0.id) }) else { check(name + " (it never rang)", false); continue }
+        answer(t)
+        let before = s.chimes
+        let wait = Date().addingTimeInterval(2.5)
+        while Date() < wait { pump(0.1) }
+        check(name, s.ringing.isEmpty && s.chimes == before)
+        for left in s.timers { s.remove(left) }
+    }
     check("clock reads minutes and hours", clock(65) == "1:05" && clock(3725) == "1:02:05")
 
     // One that came due ten minutes ago, while the app was closed.

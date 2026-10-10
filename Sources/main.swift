@@ -221,6 +221,17 @@ if let out = argAfter("--snapshot") {
     exit(ok ? 0 : 1)
 }
 
+// Each note in a folder as Switchboard reads it, one tab-separated line per file, for a test to diff.
+if let dir = argAfter("--dump-notes") {
+    let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).filter { $0.hasSuffix(".md") }.sorted()
+    for f in files {
+        guard let text = try? String(contentsOfFile: dir + "/" + f, encoding: .utf8),
+              let n = NotesStore.parse(id: String(f.dropLast(3)), text) else { print("\(f)\t<unreadable>"); continue }
+        print([f, n.heading.replacingOccurrences(of: "\t", with: "\\t"), n.color ?? "", n.pinned ? "pinned" : ""].joined(separator: "\t"))
+    }
+    exit(0)
+}
+
 if let out = argAfter("--drive-notes") {
     // the Notes tab by keyboard, end to end, on the scratch state folder; runs its own steps and exits
     NotesStore.remindersOff = true

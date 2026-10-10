@@ -395,18 +395,25 @@ final class NotesStore: ObservableObject {
         return lines.joined(separator: "\n") + "\n" + n.body + (n.body.isEmpty ? "" : "\n")
     }
 
-    static func parse(id: String, _ text: String) -> Note? {
+    static func parse(id: String, _ raw: String) -> Note? {
+        // a file saved on Windows or by some editors ends lines with \r\n; the Pi and bfb read it as \n
+        let text = raw.replacingOccurrences(of: "\r\n", with: "\n")
         var fields: [String: String] = [:]
         var body = text
-        if text.hasPrefix("---\n"), let end = text.range(of: "\n---\n", range: text.index(text.startIndex, offsetBy: 4)..<text.endIndex) {
-            for line in text[text.index(text.startIndex, offsetBy: 4)..<end.lowerBound].components(separatedBy: "\n") {
+        // from offset 3, so an empty block ("---" then "---") closes too
+        if text.hasPrefix("---\n"), let end = text.range(of: "\n---\n", range: text.index(text.startIndex, offsetBy: 3)..<text.endIndex) {
+            let start = text.index(text.startIndex, offsetBy: 4)
+            for line in (start < end.lowerBound ? text[start..<end.lowerBound] : "").components(separatedBy: "\n") {
                 guard let c = line.firstIndex(of: ":") else { continue }
                 var v = String(line[line.index(after: c)...]).trimmingCharacters(in: .whitespaces)
                 if v.hasPrefix("\""), let d = try? JSONSerialization.jsonObject(with: Data("[\(v)]".utf8)) as? [String], let s = d.first { v = s }
+                // YAML single quotes, as other editors write them: '' is a literal quote
+                else if v.count >= 2, v.hasPrefix("'"), v.hasSuffix("'") { v = String(v.dropFirst().dropLast()).replacingOccurrences(of: "''", with: "'") }
                 fields[String(line[..<c]).trimmingCharacters(in: .whitespaces)] = v
             }
             body = String(text[end.upperBound...])
         }
+        if let t = fields["title"] { fields["title"] = t.trimmingCharacters(in: .whitespaces).isEmpty ? nil : t.trimmingCharacters(in: .whitespaces) }
         body = body.trimmingCharacters(in: .whitespacesAndNewlines)
         // A file written by hand has no title field: its first line is the
         // title (a markdown heading loses its #) and the rest stays the body.
