@@ -52,7 +52,8 @@ final class NotesSync: ObservableObject {
         guard r.code == 0 else { problem = "git init failed: \(r.err)"; return false }
         _ = git(["config", "user.name", "Switchboard"])
         _ = git(["config", "user.email", "switchboard@local"])
-        try? "order.json\n.DS_Store\n.import/\n".write(toFile: dir + "/.gitignore", atomically: true, encoding: .utf8)
+        // .trash/ is bfb's local undo for deletes; the delete itself is what syncs.
+        try? "order.json\n.DS_Store\n.import/\n.trash/\n".write(toFile: dir + "/.gitignore", atomically: true, encoding: .utf8)
         return true
     }
 

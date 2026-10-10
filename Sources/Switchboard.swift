@@ -435,6 +435,17 @@ enum Services {
         run(exe, args, timeout: timeout).out
     }
 
+    /// The app's environment with the tool folders a terminal has put first. Opened
+    /// from the Dock, the app gets only /usr/bin:/bin, so `python3` was Apple's 3.9
+    /// and `tailscale` was missing, and csync doctor reported both as failing.
+    static let toolEnvironment: [String: String] = {
+        var env = ProcessInfo.processInfo.environment
+        let home = NSHomeDirectory()
+        env["PATH"] = ["/opt/homebrew/bin", "/usr/local/bin", home + "/.local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+                       env["PATH"] ?? ""].filter { !$0.isEmpty }.joined(separator: ":")
+        return env
+    }()
+
     /// Run a command and say how it went: its output, its exit status, and
     /// whether it could not start or ran out of time.
     ///
@@ -449,7 +460,7 @@ enum Services {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: exe)
         p.arguments = args
-        if let env = environment { p.environment = env }
+        p.environment = environment ?? toolEnvironment
         let outPipe = Pipe(), errPipe = Pipe()
         p.standardOutput = outPipe
         p.standardError = errPipe
