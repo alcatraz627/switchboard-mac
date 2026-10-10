@@ -304,6 +304,8 @@ struct NoteRow: View {
     /// Snapshots draw the first note open without touching where the keyboard is.
     @State private var snapshotOpen = false
     @State private var draft: Note?
+    /// The note as the store last had it, so a change from outside can be told from typing here.
+    @State private var base: Note?
     @State private var tagsText = ""
     @State private var expireWithReminder = false
     @State private var copied: String?
@@ -368,6 +370,9 @@ struct NoteRow: View {
             // or its next save would put the old value back
             .onChange(of: note.color) { c in if draft != nil { draft?.color = c } }
             .onChange(of: note.pinned) { p in if draft != nil { draft?.pinned = p } }
+            // the same note open in another window, or pulled from the Pi: its text lands here
+            // unless something typed here is not saved yet, so two windows never save over each other
+            .onChange(of: note) { n in adopt(n) }
             .onAppear {
                 // the note ⌘↩ just saved is drawn already open, so nothing above fires for it
                 guard open, draft == nil else { return }
@@ -515,8 +520,19 @@ struct NoteRow: View {
         }
     }
 
+    /// A change from the store: taken here when nothing typed here is unsaved.
+    private func adopt(_ n: Note) {
+        guard draft != nil else { return }
+        if draft == base || draft == n {
+            draft = n
+            tagsText = n.tags.joined(separator: ", ")
+        }
+        base = n
+    }
+
     private func begin() {
         draft = note
+        base = note
         tagsText = note.tags.joined(separator: ", ")
         expireWithReminder = note.remindAt != nil && note.expires == note.remindAt
         loadVersions()

@@ -202,6 +202,37 @@ final class KeyDrive {
         }
         step("Escape again goes to the first note") {
             if case .row = self.nav.focus { self.check(true) } else { self.check(false, "\(self.nav.focus)") }
+            self.showSecondWindow()
+        }
+
+        // The same note open in two windows, as the panel and a pinned Notes tab are.
+        step("the same note is open for typing in both windows") {
+            let n = self.store.live.first { $0.title == "Alpha more" }!
+            self.nav.focus = .open(n.id, .body, typing: true)
+            self.nav2.focus = .open(n.id, .body, typing: true)
+        }
+        step("typing in the first window") {
+            self.check(self.editing != nil, "the first window's body does not have the keyboard")
+            self.check(self.editing2 != nil, "the second window's body does not have the keyboard")
+            self.type("from one")
+        }
+        step("the save lands a moment later") {}
+        step("and a moment more") {}
+        step("the second window shows what the first typed; the file holds it") {
+            self.check(self.editing2?.string == "from one", self.editing2?.string ?? "no field")
+            let n = self.store.live.first { $0.title == "Alpha more" }
+            self.check(n?.body == "from one", n?.body ?? "nil")
+            self.type2(" and two")
+        }
+        step("the second window's typing saves") {}
+        step("and a moment more") {}
+        step("the first window shows both, and nothing was saved over") {
+            self.check(self.editing?.string == "from one and two", self.editing?.string ?? "no field")
+            let n = self.store.live.first { $0.title == "Alpha more" }
+            self.check(n?.body == "from one and two", n?.body ?? "nil")
+            self.nav2.focus = .none
+            self.nav.focus = .none
+            self.window2.orderOut(nil)
             self.showTimers()
         }
 
@@ -399,6 +430,28 @@ final class KeyDrive {
 
     private var responder: NSTextView? { window.firstResponder as? NSTextView }
     private var editing: NSTextView? { responder.flatMap { $0.isEditable ? $0 : nil } }
+    private var editing2: NSTextView? { (window2?.firstResponder as? NSTextView).flatMap { $0.isEditable ? $0 : nil } }
+
+    private var window2: NSWindow!
+    private var nav2: NotesNav { NotesNav.forSpace("drive2") }
+
+    /// A second window on the same notes, as a pinned Notes tab is beside the panel.
+    private func showSecondWindow() {
+        let root = ScaledRoot {
+            ScrollView { NotesTabView(notes: NotesStore.shared) }.frame(height: 520)
+                .frame(width: PT.width).environment(\.panelSpace, "drive2")
+                .background(Color(nsColor: .windowBackgroundColor))
+        }
+        let host = NSHostingView(rootView: AnyView(root))
+        window2 = NSWindow(contentRect: NSRect(x: -4000, y: -3300, width: PT.width, height: 540),
+                           styleMask: [.titled], backing: .buffered, defer: false)
+        window2.contentView = host
+        window2.orderFrontRegardless()
+    }
+
+    private func type2(_ s: String) {
+        for ch in s { editing2?.insertText(String(ch), replacementRange: editing2?.selectedRange() ?? NSRange(location: 0, length: 0)) }
+    }
 
     /// A key as the panel would get it: the router first, then the window.
     private func key(_ code: Int, _ mods: NSEvent.ModifierFlags = [], chars: String? = nil) {
