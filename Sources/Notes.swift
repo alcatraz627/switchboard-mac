@@ -208,7 +208,9 @@ final class NotesStore: ObservableObject {
     static func migrateIfNeeded() {
         let fm = FileManager.default
         let old = AppPaths.stateDir + "/notes", new = NSHomeDirectory() + "/Notes"
-        guard ProcessInfo.processInfo.environment["SWITCHBOARD_STATE"] == nil, !fm.fileExists(atPath: new),
+        // `dir` creates an empty ~/Notes on first touch, so "nothing moved yet" means no .md there, not "absent"
+        let already = ((try? fm.contentsOfDirectory(atPath: new)) ?? []).contains { $0.hasSuffix(".md") }
+        guard ProcessInfo.processInfo.environment["SWITCHBOARD_STATE"] == nil, !already,
               let names = try? fm.contentsOfDirectory(atPath: old), names.contains(where: { $0.hasSuffix(".md") }) else { return }
         try? fm.createDirectory(atPath: new, withIntermediateDirectories: true)
         for f in names where f.hasSuffix(".md") || f == "order.json" { try? fm.copyItem(atPath: old + "/" + f, toPath: new + "/" + f) }

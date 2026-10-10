@@ -1608,6 +1608,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         // Notes: the folder moves to ~/Notes once, becomes a repository, and syncs with the Pi on a timer.
         NotesStore.migrateIfNeeded()
         NotesSync.shared.ensureRepo()
+        NotesSync.shared.commit("start")   // whatever arrived while the app was closed becomes a version too
         NotesSync.shared.start()
         NotesSync.shared.sync()
         // The palette and the hint strip read this; the probe and the docs read the same table.
