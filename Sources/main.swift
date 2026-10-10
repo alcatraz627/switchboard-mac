@@ -76,7 +76,7 @@ if args.contains("--probe-timers-tab") {
 }
 if args.contains("--probe-notes") {
     let report = probeNotes()
-    let sync = probeNotesSync() + probeMarkdown()
+    let sync = probeNotesSync() + probeMarkdown() + probeFormat()
     print(report)
     print(sync.joined(separator: "\n"))
     exit(report.hasSuffix("all passed") && !sync.contains { $0.hasPrefix("FAIL") } ? 0 : 1)

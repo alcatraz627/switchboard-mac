@@ -83,6 +83,34 @@ final class EditorTextView: NSTextView {
     var onFocus: ((Bool) -> Void)?
     /// A click on text that is open only to read: the owner means to edit it.
     var onClickReadOnly: (() -> Void)?
+    /// ⌘B, ⌘I, ⌘E: the formatting line's bold, italic and code, from the keys.
+    var onFormat: ((NoteFormat.Kind) -> Void)?
+    /// A picture pasted into the text; the owner of the view saves it and links it.
+    var onImage: ((Data) -> Void)?
+
+    /// ⌘B, ⌘I, ⌘E, whether they arrive as a key equivalent or as a plain key down.
+    private func formatKey(_ e: NSEvent) -> Bool {
+        guard let onFormat, isEditable, e.modifierFlags.intersection([.command, .shift, .option, .control]) == .command else { return false }
+        switch e.charactersIgnoringModifiers {
+        case "b": onFormat(.bold)
+        case "i": onFormat(.italic)
+        case "e": onFormat(.code)
+        default: return false
+        }
+        return true
+    }
+    override func performKeyEquivalent(with e: NSEvent) -> Bool {
+        formatKey(e) || super.performKeyEquivalent(with: e)
+    }
+    override func keyDown(with e: NSEvent) {
+        if formatKey(e) { return }
+        super.keyDown(with: e)
+    }
+    override func paste(_ sender: Any?) {
+        let pb = NSPasteboard.general
+        if let onImage, pb.string(forType: .string) == nil, let d = pb.data(forType: .png) ?? pb.data(forType: .tiff) { onImage(d); return }
+        super.paste(sender)
+    }
     override func mouseDown(with e: NSEvent) {
         if !isEditable { onClickReadOnly?() }
         super.mouseDown(with: e)
@@ -117,6 +145,8 @@ struct EditorText: NSViewRepresentable {
     /// Where the cursor goes when the keyboard is handed over from outside, if not the default.
     var caret: Int? = nil
     var onClickReadOnly: (() -> Void)? = nil
+    var onFormat: ((NoteFormat.Kind) -> Void)? = nil
+    var onImage: ((Data) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -141,6 +171,8 @@ struct EditorText: NSViewRepresentable {
         tv.isEditable = editable
         tv.delegate = context.coordinator
         tv.onFocus = { [weak coord = context.coordinator] on in coord?.focusChanged(on) }
+        tv.onFormat = onFormat
+        tv.onImage = onImage
         let sv = NSScrollView()
         sv.documentView = tv
         sv.hasVerticalScroller = false
@@ -164,6 +196,8 @@ struct EditorText: NSViewRepresentable {
             }
         }
         tv.onClickReadOnly = onClickReadOnly
+        tv.onFormat = onFormat
+        tv.onImage = onImage
         let has = tv.window?.firstResponder === tv
         let coord = context.coordinator
         // Each hand-over runs a moment later and checks it is still wanted then: two
@@ -244,6 +278,9 @@ struct NoteSheet: View {
     var caret: Int? = nil
     /// A click on a block that is open to read.
     var onClickReadOnly: ((Field) -> Void)? = nil
+    /// The body's formatting keys and pasted pictures, handled by whoever owns the sheet.
+    var onFormat: ((NoteFormat.Kind) -> Void)? = nil
+    var onImage: ((Data) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -259,7 +296,8 @@ struct NoteSheet: View {
             Divider().opacity(0.5).padding(.horizontal, 8)
             placeholder(bodyPrompt, empty: text.isEmpty, size: 12, weight: .regular) {
                 EditorText(text: $text, focused: bind(.body), font: .systemFont(ofSize: 12 * UIScale.text), maxHeight: bodyMax,
-                           caretAtStart: true, editable: editable, caret: caret, onClickReadOnly: { onClickReadOnly?(.body) })
+                           caretAtStart: true, editable: editable, caret: caret, onClickReadOnly: { onClickReadOnly?(.body) },
+                           onFormat: onFormat, onImage: onImage)
                     .frame(minHeight: 54, alignment: .top)
             }
             .padding(.horizontal, 8).padding(.vertical, 6)

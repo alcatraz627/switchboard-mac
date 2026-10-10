@@ -225,6 +225,12 @@ final class KeyDrive {
             self.check(self.editing?.string == "from one and two", self.editing?.string ?? "no field")
             let n = self.store.live.first { $0.title == "Alpha more" }
             self.check(n?.body == "from one and two", n?.body ?? "nil")
+            self.editing?.setSelectedRange(NSRange(location: 5, length: 3))
+            self.key(kVK_ANSI_B, [.command], chars: "b")
+        }
+        step("⌘B wraps the selected word in bold and keeps it selected") {
+            self.check(self.editing?.string == "from **one** and two", self.editing?.string ?? "no field")
+            self.check(self.editing?.selectedRange() == NSRange(location: 7, length: 3), "\(String(describing: self.editing?.selectedRange()))")
             self.nav2.focus = .none
             self.nav.focus = .none
             self.window2.orderOut(nil)

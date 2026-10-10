@@ -648,8 +648,10 @@ struct NoteRow: View {
                 if reading {
                     readView(d)
                 } else {
+                    if takeover { formatRow }
                     NoteSheet(title: d.title, text: d.body, focus: $focus, bodyMax: takeover ? 460 : 220, editable: openState?.typing ?? true, caret: nav.caret,
-                              onClickReadOnly: { f in nav.focus = .open(note.id, f == .title ? .title : .body, typing: true) })
+                              onClickReadOnly: { f in nav.focus = .open(note.id, f == .title ? .title : .body, typing: true) },
+                              onFormat: { format($0) }, onImage: { pasteImage($0) })
                         .frame(minHeight: takeover ? 220 : 0, alignment: .top)
                 }
                 // tags as chips; the box after them takes the next one (comma or Return), ⌫ on an empty box drops the last
@@ -738,6 +740,86 @@ struct NoteRow: View {
         }
     }
 
+    // ── The formatting line ──
+
+    private static let tools: [(icon: String, text: String, help: String, kind: NoteFormat.Kind)] = [
+        ("bold", "Bold", "⌘B", .bold), ("italic", "Italic", "⌘I", .italic),
+        ("chevron.left.forwardslash.chevron.right", "Code", "⌘E", .code),
+        ("list.bullet", "List", "a dash on each line of the selection; again takes it off", .list),
+        ("checklist", "Task", "a box on each line of the selection; again takes it off", .task),
+        ("link", "Link", "the clipboard's address around the selection", .link),
+        ("photo", "Picture", "the clipboard's picture, saved under attachments and shown in Read; pasting one does the same", .image),
+    ]
+
+    /// Every edit is also a key; the line is where they are found. Icons with words when the width allows.
+    private var formatRow: some View {
+        HStack(spacing: 4) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 4) { ForEach(Self.tools, id: \.text) { t in tool(t, words: true) } }
+                HStack(spacing: 4) { ForEach(Self.tools, id: \.text) { t in tool(t, words: false) } }
+            }
+            Spacer(minLength: 4)
+            HStack(spacing: 4) { KeyPill(text: "⌘↩"); Text("save").font(PT.caption).foregroundStyle(.tertiary) }
+        }
+        .padding(.horizontal, 8).padding(.top, 7)
+    }
+    private func tool(_ t: (icon: String, text: String, help: String, kind: NoteFormat.Kind), words: Bool) -> some View {
+        Button { format(t.kind) } label: {
+            HStack(spacing: 4) {
+                Image(systemName: t.icon).font(.sbIcon(10))
+                if words { Text(t.text).font(.sb(10.5)) }
+            }
+            .padding(.horizontal, 6).padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.07)))
+        }
+        .buttonStyle(.plain).foregroundStyle(.secondary).help("\(t.text): \(t.help)")
+    }
+
+    /// The body's text view, while it is being typed in.
+    private var bodyView: EditorTextView? {
+        guard let tv = NSApp.keyWindow?.firstResponder as? EditorTextView, !tv.isFieldEditor, tv.isEditable else { return nil }
+        return tv
+    }
+
+    private func format(_ k: NoteFormat.Kind) {
+        guard let tv = bodyView else { nav.focus = .open(note.id, .body, typing: true); hint("Click into the text, then again"); return }
+        let r = tv.selectedRange()
+        switch k {
+        case .bold: apply(NoteFormat.wrap(tv.string, r, "**"), to: tv)
+        case .italic: apply(NoteFormat.wrap(tv.string, r, "_"), to: tv)
+        case .code: apply(NoteFormat.wrap(tv.string, r, "`"), to: tv)
+        case .list: apply(NoteFormat.prefixLines(tv.string, r, "- "), to: tv)
+        case .task: apply(NoteFormat.prefixLines(tv.string, r, "- [ ] "), to: tv)
+        case .link: apply(NoteFormat.link(tv.string, r, clipboard: NSPasteboard.general.string(forType: .string)), to: tv)
+        case .image:
+            let pb = NSPasteboard.general
+            guard let d = pb.data(forType: .png) ?? pb.data(forType: .tiff) else { hint("No picture on the clipboard"); return }
+            pasteImage(d)
+        }
+    }
+
+    /// One replacement of the whole text, so undo takes it back in one step.
+    private func apply(_ e: NoteFormat.Edit, to tv: NSTextView) {
+        let all = NSRange(location: 0, length: (tv.string as NSString).length)
+        guard tv.shouldChangeText(in: all, replacementString: e.text) else { return }
+        tv.replaceCharacters(in: all, with: e.text)
+        tv.didChangeText()
+        tv.setSelectedRange(e.selection)
+    }
+
+    private func pasteImage(_ d: Data) {
+        guard let tv = bodyView else { return }
+        guard let rel = NoteFormat.savePNG(d, noteID: note.id, dir: NotesStore.dir) else { hint("The picture could not be saved"); return }
+        apply(NoteFormat.image(tv.string, tv.selectedRange(), path: rel, name: "picture"), to: tv)
+        NotesSync.shared.commit("picture")
+    }
+
+    @State private var hintText: String?
+    private func hint(_ s: String) {
+        withAnimation { hintText = s }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { withAnimation { if hintText == s { hintText = nil } } }
+    }
+
     private func tagChip(_ t: String, _ d: Binding<Note>) -> some View {
         HStack(spacing: 3) {
             Text("#" + t).font(.sb(10.5))
@@ -803,8 +885,8 @@ struct NoteRow: View {
     }
 
     private var saveState: some View {
-        Text(refused ? "Empty notes are not saved" : savedAt.map { "Saved " + age($0) } ?? "Saves as you type")
-            .font(PT.caption).foregroundStyle(refused ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
+        Text(hintText ?? (refused ? "Empty notes are not saved" : savedAt.map { "Saved " + age($0) } ?? "Saves as you type"))
+            .font(PT.caption).foregroundStyle(refused || hintText != nil ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
             .fixedSize(horizontal: false, vertical: true)
     }
 
