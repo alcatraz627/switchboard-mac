@@ -24,6 +24,36 @@ struct SettingsTabView: View {
             .filter { t in matches(t.title) || (Visibility.sections[t.id] ?? []).contains(where: matches) }
     }
 
+    /// The Settings page's own sub-tabs; a search looks across all of them.
+    static let sections: [(id: String, title: String, icon: String)] = [
+        ("general", "General", "gearshape"), ("tabs", "Tabs", "square.grid.2x2"),
+        ("hover", "Hover card", "rectangle.on.rectangle"), ("desk", "Desk", "note.text"),
+    ]
+    @AppStorage("switchboard.settings.section") private var savedSection = "general"
+    /// Set by a snapshot, so a picture never changes the owner's last sub-tab.
+    static var sectionOverride: String?
+    private var section: String {
+        get { Self.sectionOverride ?? savedSection }
+        nonmutating set { Self.sectionOverride = nil; savedSection = newValue }
+    }
+    /// Whether a group on sub-tab `id` shows: always while searching, else only on its own sub-tab.
+    private func on(_ id: String) -> Bool { !query.isEmpty || section == id }
+
+    private var sectionBar: some View {
+        HStack(spacing: 6) {
+            ForEach(Self.sections, id: \.id) { s in
+                Button { section = s.id } label: {
+                    Label(s.title, systemImage: s.icon).font(.sb(11.5, weight: section == s.id ? .semibold : .regular))
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(section == s.id ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.06)))
+                        .contentShape(RoundedRectangle(cornerRadius: 7))
+                }
+                .buttonStyle(.plain).help(s.title)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
     var body: some View {
         // a search for "hover" (what the hover card's settings button opens) shows all of the hover's settings
         let hoverAll = matches("hover")
@@ -34,16 +64,27 @@ struct SettingsTabView: View {
         let sizes = matches("size") || matches("small") || matches("medium") || matches("large") || matches("zoom")
         let prompts = matches("permission") || matches("prompt") || matches("claude asks") || matches("approvals")
         let keys = matches("keyboard") || matches("shortcut") || matches("hotkey") || matches("keys")
+        let timerSettings = matches("timer") || matches("sound") || matches("ring") || matches("notes")
         VStack(alignment: .leading, spacing: PT.gap) {
-            if sizes {
-                group("Size", note: "How big everything is drawn: the panel, the hover card, its pages and the menu bar icon. Text grows most, icons a little less, inputs least.",
+            if query.isEmpty { sectionBar }
+            if sizes && on("general") {
+                group("Size", note: "How big the panel, the hover card and the menu bar icon are drawn.",
                       rows: [sizeRow])
             }
-            if keys {
-                group("Keyboard", note: "Hold ⌘ for a moment to see the keys that work where you are, or click ⓘ in the header to keep them up; ⇧⌘P finds any action or place, ⌘J goes to a tab, note or timer. ⌥Space (or ⌘⌘) opens the panel on the last tab; again shows a letter for each tab; a third time closes it. In the panel: ⌘1 to ⌘5 pick a space (also from the hover card), ⌘⌥← and ⌘⌥→ walk the tabs of a space, ⌃Tab walks every tab, Tab moves between the spaces, the tabs, the box above the list and the rows, ⌘L or ⌘F jumps to the search box, ⌘P keeps the panel open, ⌘D pins the tab to the desktop, ⌘R reloads it, Escape steps back out and finally returns you to the app you came from. On any tab: ↑ and ↓ move between rows, Return does what a click does, Space flips a switch, → and ← open and close a row or step a slider or choice. Approvals: Return opens a request, then ⌘↩ allows and ⌫ denies. Notes: → opens and → again edits, Tab walks a note's parts, / searches, ⌘↩ saves, P pins, C copies, 1 to 8 colours.",
-                      rows: [commandWatchRow])
+            if keys && on("general") {
+                VStack(alignment: .leading, spacing: 5) {
+                    GroupHeader(name: "Keyboard")
+                    note("Hold ⌘ anywhere in the panel to see the keys that work there.")
+                    Card { keyTable }
+                    Card { SystemRowView(row: commandWatchRow, store: store) }
+                }
             }
-            if !orderedTabs.isEmpty {
+            if prompts && on("general") {
+                group("Claude's permission prompts",
+                      note: "When on, a prompt Claude Code would ask in the terminal waits under Claude asks in Approvals for \(PermissionRoute.wait) seconds first.",
+                      rows: [promptsRow])
+            }
+            if !orderedTabs.isEmpty && on("tabs") {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack {
                         GroupHeader(name: "Tabs")
@@ -82,7 +123,7 @@ struct SettingsTabView: View {
                     }
                 }
             }
-            if !pages.isEmpty {
+            if !pages.isEmpty && on("hover") {
                 VStack(alignment: .leading, spacing: 5) {
                     GroupHeader(name: "Hover pages")
                     note(query.isEmpty ? "The pages the hover card moves through, in this order. Drag the grip to reorder; the switch hides a page."
@@ -102,30 +143,34 @@ struct SettingsTabView: View {
                     }
                 }
             }
-            if hoverAll || matches("approvals") || matches("waiting") {
-                group("Under every page", note: "What waits on you as a small card under whichever hover page is showing, one line each, with a button to the Approvals page.",
+            if (hoverAll || matches("approvals") || matches("waiting")) && on("hover") {
+                group("Footer", note: "Under every hover page: Hub, what waits on you with its buttons, and the Claude week.",
                       rows: [approvalsCardRow])
             }
-            if linger {
+            if linger && on("hover") {
                 VStack(alignment: .leading, spacing: 5) {
                     GroupHeader(name: "Mouse-away delay")
-                    note("How long the hover card stays after the pointer leaves the icon and the card.")
+                    note("How long the hover card stays after the pointer leaves it.")
                     Card { lingerSlider }
                 }
             }
-            if !hover.isEmpty {
-                group("Now page", note: "What the Now hover page shows as badges under its shortcuts, and the dot on the menu bar icon.",
+            if !hover.isEmpty && on("hover") {
+                group("Now page", note: "The badges on the Now page, and the dot on the menu bar icon.",
                       rows: hover.map(hoverRow))
             }
-            if folder {
-                group("Notes", note: "One markdown file per note, every save kept as a version; the Pi and the phone share the folder.", rows: [notesFolderRow, notesRemoteRow])
+            if (folder || timerSettings) && on("desk") {
+                group("Notes", note: "One markdown file per note, every save kept; the Pi and the phone share the folder.", rows: [notesFolderRow, notesRemoteRow])
+                VStack(alignment: .leading, spacing: 5) {
+                    GroupHeader(name: "Timers")
+                    note("What a timer does when it goes off.")
+                    Card {
+                        timerSoundRow
+                        Divider().padding(.leading, PT.rowH)
+                        ringLengthRow
+                    }
+                }
             }
-            if prompts {
-                group("Claude's permission prompts",
-                      note: "When on, a prompt Claude Code would ask in the terminal shows under Claude asks in Approvals first. It waits \(PermissionRoute.wait) seconds for your Approve or Deny there, then asks in the terminal as usual.",
-                      rows: [promptsRow])
-            }
-            if orderedTabs.isEmpty && hover.isEmpty && pages.isEmpty && !linger && !folder && !prompts && !sizes && !keys {
+            if orderedTabs.isEmpty && hover.isEmpty && pages.isEmpty && !linger && !folder && !prompts && !sizes && !keys && !timerSettings {
                 Text("Nothing in Settings matches \"\(query)\".").font(PT.caption).foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
             }
@@ -142,6 +187,80 @@ struct SettingsTabView: View {
         r.icon = "hand.raised"
         r.key = "settings-approvals-card"
         return r
+    }
+
+    /// The keys, one per line, grouped; replaces a paragraph nobody could read.
+    static let keyGroups: [(title: String, keys: [(String, String)])] = [
+        ("Anywhere", [("⌥Space  ⌘⌘", "Open; again for letters; again to close"),
+                      ("⇧⌘P", "Find any action or place"), ("⌘J", "Go to a tab, note or timer")]),
+        ("Panel", [("⌘1 – ⌘5", "Pick a space"), ("⌘⌥←  ⌘⌥→", "Tab before or after"),
+                   ("⌃Tab", "Next tab anywhere"), ("Tab", "Spaces, tabs, search, rows"),
+                   ("⌘L  ⌘F", "Search"), ("⌘P", "Keep the panel open"), ("⌘D", "Pin the tab to the desktop"),
+                   ("⌘R", "Reload"), ("Esc", "Step out, then back to your app")]),
+        ("Rows", [("↑  ↓", "Move"), ("Return", "What a click does"), ("Space", "Flip a switch"),
+                  ("→  ←", "Open, close, step a choice")]),
+        ("Approvals", [("Return", "Open a request"), ("⌘↩", "Allow"), ("⌫", "Deny")]),
+        ("Notes", [("→  → ", "Open, then edit"), ("Tab", "The note's parts"), ("/", "Search"), ("⌘↩", "Save"),
+                   ("P  C", "Pin, copy"), ("1 – 8", "Colour")]),
+    ]
+
+    private var keyTable: some View {
+        // one grid for every group, so the key column lines up down the whole table
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 3) {
+            ForEach(Self.keyGroups, id: \.title) { g in
+                GridRow {
+                    Text(g.title).font(.sb(10, weight: .semibold)).foregroundStyle(.tertiary)
+                        .padding(.top, g.title == Self.keyGroups.first?.title ? 0 : 6)
+                        .gridCellColumns(2)
+                }
+                ForEach(g.keys, id: \.0) { k, what in
+                    GridRow {
+                        Text(k).font(.sb(11, weight: .medium).monospaced())
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.08)))
+                            .fixedSize()
+                        Text(what).font(.sb(11.5)).lineLimit(1).fixedSize()
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, PT.rowH).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @AppStorage(TimerStore.soundKey) private var timerSound = "Glass"
+
+    /// The ring sound, from every sound macOS ships, with a play button to hear it.
+    private var timerSoundRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "speaker.wave.2").font(.sbIcon(11)).foregroundStyle(.secondary).frame(width: si(16))
+            Text("Ring sound").font(PT.label)
+            Spacer()
+            Picker("", selection: Binding(get: { timerSound }, set: { timerSound = $0; TimerStore.preview($0) })) {
+                ForEach(TimerStore.sounds, id: \.self) { Text($0).tag($0) }
+            }
+            .pickerStyle(.menu).labelsHidden().fixedSize().sbControlSize(.small)
+            Button { TimerStore.preview(timerSound) } label: { Label("Play", systemImage: "play.fill") }
+                .sbControlSize(.small).help("Play \(timerSound)")
+        }
+        .padding(.horizontal, PT.rowH).padding(.vertical, PT.rowV + 2)
+    }
+
+    @AppStorage(TimerStore.ringKey) private var ringSeconds = 0
+
+    /// How long a timer rings, as a menu beside the sound's, so the two rows read alike.
+    private var ringLengthRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "bell.and.waves.left.and.right").font(.sbIcon(11)).foregroundStyle(.secondary).frame(width: si(16))
+            Text("Ring for").font(PT.label)
+            Spacer()
+            Picker("", selection: $ringSeconds) {
+                ForEach(TimerStore.ringChoices, id: \.seconds) { Text($0.title).tag($0.seconds) }
+            }
+            .pickerStyle(.menu).labelsHidden().fixedSize().sbControlSize(.small)
+            .help("How long a timer rings before it stops on its own")
+        }
+        .padding(.horizontal, PT.rowH).padding(.vertical, PT.rowV + 2)
     }
 
     private var sizeRow: SystemRow {

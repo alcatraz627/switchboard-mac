@@ -93,7 +93,7 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
     static var soundName: String { UserDefaults.standard.string(forKey: soundKey) ?? "Glass" }
     /// How long a timer rings; 0 rings until stopped, capped so a forgotten one ends.
     static var ringSeconds: Int { UserDefaults.standard.object(forKey: ringKey) as? Int ?? 0 }
-    static let ringChoices: [(seconds: Int, title: String)] = [(30, "30 seconds"), (60, "1 minute"), (300, "5 minutes"), (0, "Until I stop it")]
+    static let ringChoices: [(seconds: Int, title: String)] = [(30, "30 s"), (60, "1 min"), (300, "5 min"), (0, "Until stopped")]
     static let ringCap = 15 * 60
     /// Every sound macOS ships, for the picker.
     static var sounds: [String] {

@@ -207,6 +207,7 @@ if let out = argAfter("--snapshot") {
         UserDefaults.standard.removeObject(forKey: TimerStore.key)
     }
     if args.contains("--notifications-off") { TimerStore.shared.notificationsOff = true }
+    SettingsTabView.sectionOverride = argAfter("--settings-section")
     // The palette open, or the hint strip as if ⌘ were held, for a picture of either.
     if args.contains("--palette") { ActionRegistry.shared.currentTab = { tab }; ActionRegistry.shared.open(.all) }
     if args.contains("--hints") { ActionRegistry.shared.currentTab = { tab }; ActionRegistry.shared.hints = true }
