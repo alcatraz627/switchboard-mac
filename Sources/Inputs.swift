@@ -21,8 +21,9 @@ enum InputRules {
     }
 
     /// A note needs a title or a body; one with neither is not saved (Delete removes a note).
-    static func canSave(title: String, body: String) -> Bool {
+    static func canSave(title: String, body: String, url: String = "") -> Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !url.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     /// The copy buttons a note row offers: the body's copy only when there is

@@ -392,8 +392,16 @@ struct NoteRow: View {
                 ColorDot(selection: colorBinding, size: si(9), isOpen: open ? pickerBinding(.color) : nil)
                     .keyRing(ringed(.color), radius: 8)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(note.heading).font(PT.label).fixedSize(horizontal: false, vertical: true)
-                        .strikethrough(note.expired)
+                    HStack(spacing: 5) {
+                        Text(note.heading).font(PT.label).fixedSize(horizontal: false, vertical: true)
+                            .strikethrough(note.expired)
+                        if note.conflicted {
+                            KeyPill(text: "both sides").help("Edited on two devices apart; both versions are in the body, marked")
+                        }
+                        if let a = note.agent {
+                            Image(systemName: "cpu").font(.sbIcon(9)).foregroundStyle(.secondary).help("Written by the \(a) agent")
+                        }
+                    }
                     if let url = firstLink {
                         // a note that starts with a link shows it as one, opening on click
                         Button { NSWorkspace.shared.open(url) } label: {
@@ -443,6 +451,8 @@ struct NoteRow: View {
 
     /// The first body line, when it is a link (http or a file URL).
     private var firstLink: URL? {
+        // a pin carries its link in the frontmatter; a plain note may start with one
+        if let u = note.url.flatMap(URL.init(string:)) { return u }
         guard let first = note.body.components(separatedBy: "\n").first(where: { !$0.isEmpty })?
                 .trimmingCharacters(in: .whitespaces),
               first.hasPrefix("http") || first.hasPrefix("file://"),

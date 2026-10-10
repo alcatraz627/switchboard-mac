@@ -118,7 +118,7 @@ struct SettingsTabView: View {
                       rows: hover.map(hoverRow))
             }
             if folder {
-                group("Notes folder", note: "Where each note is saved as a markdown file.", rows: [notesFolderRow])
+                group("Notes", note: "One markdown file per note, every save kept as a version; the Pi and the phone share the folder.", rows: [notesFolderRow, notesRemoteRow])
             }
             if prompts {
                 group("Claude's permission prompts",
@@ -287,6 +287,32 @@ struct SettingsTabView: View {
                               if store.hoverItems.contains(item) { store.hoverItems.remove(item) } else { store.hoverItems.insert(item) }
                           })
         r.key = "settings-hover-" + item.rawValue
+        return r
+    }
+
+    @ObservedObject private var sync = NotesSync.shared
+
+    /// The Pi's repository the notes folder syncs with; empty keeps history local only.
+    private var notesRemoteRow: SystemRow {
+        let remote = sync.remote
+        let when = sync.lastSync.map { "synced " + age($0) } ?? "not synced yet"
+        var r = SystemRow(label: remote.isEmpty ? "No sync remote" : remote,
+                          state: sync.problem == nil && !remote.isEmpty ? .ok : .off,
+                          note: remote.isEmpty ? "every save is still kept as a version here" : (sync.problem ?? when)
+                              + (sync.conflicts > 0 ? " · \(sync.conflicts) note\(sync.conflicts == 1 ? "" : "s") with both sides" : ""),
+                          tip: "A git remote on the Pi, user@host:Notes.git. Saves commit here; the Pi's edits come in on a timer.")
+        r.key = "settings-notes-remote"
+        r.showsBadge = false
+        r.labelIsName = true
+        r.buttons = [RowButton(label: "Set", kind: .ask(placeholder: "user@host:Notes.git", { line in
+            UserDefaults.standard.set(line.trimmingCharacters(in: .whitespaces), forKey: NotesSync.remoteKey)
+            DispatchQueue.main.async { NotesSync.shared.sync(); store.objectWillChange.send() }
+            return nil
+        }), help: "Set the remote and sync now", icon: "arrow.triangle.2.circlepath")]
+        if !remote.isEmpty {
+            r.buttons.append(RowButton(label: "Sync", kind: .run({ DispatchQueue.main.async { NotesSync.shared.sync() }; return nil }),
+                                       help: "Pull the Pi's edits and push yours now", icon: "arrow.clockwise"))
+        }
         return r
     }
 

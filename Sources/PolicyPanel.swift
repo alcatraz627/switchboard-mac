@@ -1605,6 +1605,11 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             return self.handleKey(e) ? nil : e
         }
         KeyRouter.lights = lights
+        // Notes: the folder moves to ~/Notes once, becomes a repository, and syncs with the Pi on a timer.
+        NotesStore.migrateIfNeeded()
+        NotesSync.shared.ensureRepo()
+        NotesSync.shared.start()
+        NotesSync.shared.sync()
         // The palette and the hint strip read this; the probe and the docs read the same table.
         let reg = ActionRegistry.shared
         reg.currentTab = { [weak self] in self?.currentTab ?? "agents" }
@@ -1914,6 +1919,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         popover.show(relativeTo: b.bounds, of: b, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
         dlog("policy panel shown in \(Int(Date().timeIntervalSince(t0) * 1000)) ms")
+        NotesSync.shared.sync()
         // Every concern refreshes on open: each is cheap or runs in the
         // background (a Codex re-ask only when its cache is stale).
         store.reload()

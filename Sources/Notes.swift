@@ -163,8 +163,16 @@ struct Note: Identifiable, Equatable {
     var pinned = false
     /// A colour tag, one of the timer colours by name; nil for none.
     var color: String? = nil
+    /// The agent that wrote or last edited it ("pi"); a person's edit never clears it.
+    var agent: String? = nil
+    /// Where an imported note came from ("csync").
+    var source: String? = nil
+    /// A pin is a note with a link: title, body and url are each optional, one is needed.
+    var url: String? = nil
 
     var expired: Bool { expires.map { $0 <= Date() } ?? false }
+    /// Both sides of a clash are in the body, marked by git; the owner sorts it out when they like.
+    var conflicted: Bool { NotesSync.conflicted(body) }
     /// When the note's file last changed, which is when it was last edited.
     var modified: Date? { (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date }
     /// Pinned, or edited in the last two hours: shown as a row on the hover card, not a chip.
@@ -191,7 +199,21 @@ final class NotesStore: ObservableObject {
 
     /// Where notes are kept: the folder chosen in Settings, or the state folder's notes.
     static let folderKey = "switchboard.notesFolder"
-    static var defaultDir: String { AppPaths.stateDir + "/notes" }
+    /// `~/Notes`, the one folder the Mac, the Pi and the phone share (contract 2026-10-10).
+    /// A probe's scratch state keeps its own folder so no check ever touches the owner's notes.
+    static var defaultDir: String {
+        ProcessInfo.processInfo.environment["SWITCHBOARD_STATE"] != nil ? AppPaths.stateDir + "/notes" : NSHomeDirectory() + "/Notes"
+    }
+    /// The first run after the move: the old state-folder notes come along once, then the old folder is left as it was.
+    static func migrateIfNeeded() {
+        let fm = FileManager.default
+        let old = AppPaths.stateDir + "/notes", new = NSHomeDirectory() + "/Notes"
+        guard ProcessInfo.processInfo.environment["SWITCHBOARD_STATE"] == nil, !fm.fileExists(atPath: new),
+              let names = try? fm.contentsOfDirectory(atPath: old), names.contains(where: { $0.hasSuffix(".md") }) else { return }
+        try? fm.createDirectory(atPath: new, withIntermediateDirectories: true)
+        for f in names where f.hasSuffix(".md") || f == "order.json" { try? fm.copyItem(atPath: old + "/" + f, toPath: new + "/" + f) }
+        dlog("notes moved to ~/Notes (\(names.filter { $0.hasSuffix(".md") }.count) files); the old folder is kept")
+    }
     static var dir: String {
         let chosen = UserDefaults.standard.string(forKey: folderKey)
         let d = (chosen?.isEmpty == false ? chosen! : defaultDir)
@@ -317,6 +339,7 @@ final class NotesStore: ObservableObject {
         }
         notes.removeAll { $0.id == n.id }
         saveOrder()
+        NotesSync.shared.commit("delete")
         // The note is gone either way; a reminder left behind would fire for nothing.
         if let p = reminderProblem { self.error = "The note was deleted, but its reminder was not removed: \(p)" }
     }
@@ -335,6 +358,7 @@ final class NotesStore: ObservableObject {
         do {
             try Self.render(n).write(toFile: n.path, atomically: true, encoding: .utf8)
             error = nil
+            NotesSync.shared.commit("save")
             return true
         } catch {
             self.error = "the note could not be saved: \(error.localizedDescription)"
@@ -362,6 +386,9 @@ final class NotesStore: ObservableObject {
         if let id = n.reminderID { lines.append("reminder_id: " + q(id)) }
         if n.pinned { lines.append("pinned: true") }
         if let c = n.color { lines.append("color: " + c) }
+        if let a = n.agent { lines.append("agent: " + q(a)) }
+        if let s = n.source { lines.append("source: " + q(s)) }
+        if let u = n.url { lines.append("url: " + q(u)) }
         lines.append("---")
         return lines.joined(separator: "\n") + "\n" + n.body + (n.body.isEmpty ? "" : "\n")
     }
@@ -395,7 +422,10 @@ final class NotesStore: ObservableObject {
                     remindRepeat: fields["remind_repeat"].flatMap(Note.Repeat.init) ?? .never,
                     reminderID: fields["reminder_id"],
                     pinned: fields["pinned"] == "true",
-                    color: fields["color"].flatMap(tagColorName))
+                    color: fields["color"].flatMap(tagColorName),
+                    agent: fields["agent"].flatMap { $0.isEmpty ? nil : $0 },
+                    source: fields["source"].flatMap { $0.isEmpty ? nil : $0 },
+                    url: fields["url"].flatMap { $0.isEmpty ? nil : $0 })
     }
 
     // ── Reminders ───────────────────────────────────────────────────────────
