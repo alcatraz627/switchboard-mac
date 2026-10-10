@@ -58,11 +58,11 @@ enum Key: Equatable {
 
 /// The parts of an open note, in the order the keyboard walks them.
 enum NoteBlock: CaseIterable, Equatable {
-    case title, body, tags, expiry, reminder, color, pin, copy, delete
+    case title, body, tags, expiry, reminder, history, color, pin, copy, delete
     /// Parts that are typed into; the rest are acted on.
     var isText: Bool { self == .title || self == .body || self == .tags }
     /// Parts whose action opens a small picker.
-    var opensPicker: Bool { self == .expiry || self == .reminder || self == .color }
+    var opensPicker: Bool { self == .expiry || self == .reminder || self == .history || self == .color }
     func step(_ by: Int) -> NoteBlock {
         let all = Self.allCases
         let i = all.firstIndex(of: self)!
@@ -911,15 +911,15 @@ func probeKeys() -> [String] {
     // every part of an open note, by Tab or arrows
     var at = NoteFocus.open("b", .title, typing: false)
     var path: [NoteBlock] = []
-    for _ in 0..<9 { if case .open(_, let p?, _) = at { path.append(p) }; at = step(at, .tab) }
-    check("Tab walks title, body, tags, expiry, reminder, colour, pin, copy, delete", path == NoteBlock.allCases)
-    check("⇧Tab walks back", step(.open("b", .color, typing: false), .backTab) == .open("b", .reminder, typing: false))
+    for _ in 0..<10 { if case .open(_, let p?, _) = at { path.append(p) }; at = step(at, .tab) }
+    check("Tab walks title, body, tags, expiry, reminder, history, colour, pin, copy, delete", path == NoteBlock.allCases)
+    check("⇧Tab walks back", step(.open("b", .color, typing: false), .backTab) == .open("b", .history, typing: false))
     check("Tab while typing the title goes on typing in the body",
           NotesKeys.reduce(.open("b", .title, typing: true), .tab, typingCtx).0 == .open("b", .body, typing: true))
     check("Tab while typing the tags stops typing on the expiry",
           NotesKeys.reduce(.open("b", .tags, typing: true), .tab, typingCtx).0 == .open("b", .expiry, typing: false))
-    check("Return on expiry, reminder or colour opens its picker",
-          [NoteBlock.expiry, .reminder, .color].allSatisfy { NotesKeys.reduce(.open("b", $0, typing: false), .enter, c).1 == [.openPicker($0)] })
+    check("Return on expiry, reminder, history or colour opens its picker",
+          [NoteBlock.expiry, .reminder, .history, .color].allSatisfy { NotesKeys.reduce(.open("b", $0, typing: false), .enter, c).1 == [.openPicker($0)] })
     check("Return on pin pins, on copy copies, on delete deletes",
           NotesKeys.reduce(.open("b", .pin, typing: false), .enter, c).1 == [.togglePin("b")]
           && NotesKeys.reduce(.open("b", .copy, typing: false), .enter, c).1 == [.copy("b", .all)]

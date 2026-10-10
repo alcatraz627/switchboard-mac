@@ -7,6 +7,14 @@
 
 import Foundation
 
+/// One saved version of a note: the commit's short hash, when it was made, and why.
+struct NoteVersion: Identifiable, Equatable {
+    let sha: String
+    let when: Date
+    let reason: String
+    var id: String { sha }
+}
+
 final class NotesSync: ObservableObject {
     static let shared = NotesSync()
     /// The remote the Pi serves, e.g. `alcatraz627@100.65.188.9:Notes.git`; empty means local history only.
@@ -101,13 +109,13 @@ final class NotesSync: ObservableObject {
         }
     }
 
-    /// The versions of one note, newest first: short hash, when, and the commit's reason.
-    func history(of id: String) -> [(sha: String, when: Date, reason: String)] {
+    /// The versions of one note, newest first.
+    func history(of id: String) -> [NoteVersion] {
         let r = git(["log", "--format=%h%x09%ct%x09%s", "--", id + ".md"])
         return r.out.split(separator: "\n").compactMap { line in
             let p = line.split(separator: "\t", maxSplits: 2).map(String.init)
             guard p.count == 3, let t = TimeInterval(p[1]) else { return nil }
-            return (p[0], Date(timeIntervalSince1970: t), p[2])
+            return NoteVersion(sha: p[0], when: Date(timeIntervalSince1970: t), reason: p[2])
         }
     }
 
@@ -172,6 +180,8 @@ func probeNotesSync() -> [String] {
     let h = sync.history(of: n.id)
     check("an edit is a second version, newest first", h.count == 2 && h[0].reason == "save")
     check("an old version reads back", sync.version(of: n.id, at: h[1].sha)?.contains("first body") == true)
+    check("an old version parses as the note it was, ready to bring back",
+          sync.version(of: n.id, at: h[1].sha).flatMap { NotesStore.parse(id: n.id, $0) }?.body == "first body")
     check("order.json is never committed", sync.git(["check-ignore", "order.json"]).code == 0)
     try? "---\ntitle: clash\n---\n<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> pi/main\n".write(toFile: NotesStore.dir + "/clash.md", atomically: true, encoding: .utf8)
     check("a file holding both sides counts as a clash", NotesSync.countConflicts(in: NotesStore.dir) == 1)

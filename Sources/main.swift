@@ -99,10 +99,8 @@ if args.contains("--dump-policy") {
     print(policyDump(store))
     exit(r.error == nil ? 0 : 1)
 }
-if let out = argAfter("--snapshot-when") {
-    let v = WhenPanel(title: "Switch later, keeping Allow until then", presets: WhenPreset.short,
-                      choices: ["To Ask", "To Block"], extra: [("Cancel the timed change", {})], onPick: { _, _ in })
-    let dark = !args.contains("--light")
+/// One popover panel drawn on its own, at its fitting size, for a picture.
+func snapshotPanel<V: View>(_ v: V, to out: String, dark: Bool) -> Bool {
     let host = NSHostingView(rootView: v.background(Color(nsColor: .windowBackgroundColor)))
     host.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
     host.frame = NSRect(origin: .zero, size: host.fittingSize)
@@ -111,7 +109,18 @@ if let out = argAfter("--snapshot-when") {
     host.layoutSubtreeIfNeeded()
     let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
     host.cacheDisplay(in: host.bounds, to: rep)
-    let ok = (try? rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: out))) != nil
+    return (try? rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: out))) != nil
+}
+if let out = argAfter("--snapshot-when") {
+    let v = WhenPanel(title: "Switch later, keeping Allow until then", presets: WhenPreset.short,
+                      choices: ["To Ask", "To Block"], extra: [("Cancel the timed change", {})], onPick: { _, _ in })
+    let ok = snapshotPanel(v, to: out, dark: !args.contains("--light"))
+    print(ok ? "wrote \(out)" : "snapshot failed")
+    exit(ok ? 0 : 1)
+}
+if let out = argAfter("--snapshot-history") {
+    let v = HistoryPanel(note: HistoryFixture.note, versions: HistoryFixture.versions, read: HistoryFixture.read, restore: { _ in })
+    let ok = snapshotPanel(v, to: out, dark: !args.contains("--light"))
     print(ok ? "wrote \(out)" : "snapshot failed")
     exit(ok ? 0 : 1)
 }

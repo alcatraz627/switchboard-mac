@@ -172,9 +172,9 @@ final class KeyDrive {
         step("the picker closed, the keyboard is back on the expiry") {
             if case .open(_, .expiry, typing: false) = self.nav.focus { self.check(true) } else { self.check(false, "\(self.nav.focus)") }
             self.check(self.editing == nil, "a field took the keyboard: \(String(describing: self.responder.map { Swift.type(of: $0) }))")
-            self.key(kVK_Tab); self.key(kVK_Tab)
+            self.key(kVK_Tab); self.key(kVK_Tab); self.key(kVK_Tab)
         }
-        step("Tab Tab reaches the colour") {
+        step("three Tabs pass the reminder and the history and reach the colour") {
             if case .open(_, .color, typing: false) = self.nav.focus { self.check(true) } else { self.check(false, "\(self.nav.focus)") }
             self.key(kVK_ANSI_3, chars: "3")
         }

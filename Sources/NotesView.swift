@@ -312,6 +312,8 @@ struct NoteRow: View {
     @State private var refused = false
     @State private var focus: NoteSheet.Field?
     @FocusState private var tagsFocused: Bool
+    /// The note's saved versions, read when it opens and again when the list is asked for.
+    @State private var versions: [NoteVersion] = []
     /// Snapshots open the first note's editor so its look can be checked.
     static var startOpen = false
 
@@ -517,8 +519,38 @@ struct NoteRow: View {
         draft = note
         tagsText = note.tags.joined(separator: ", ")
         expireWithReminder = note.remindAt != nil && note.expires == note.remindAt
+        loadVersions()
         // the cursor position carried from the new note applies once
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { nav.caret = nil }
+    }
+
+    /// git answers in a moment, off the main thread so typing never waits on it.
+    private func loadVersions() {
+        let id = note.id
+        DispatchQueue.global(qos: .utility).async {
+            let v = NotesSync.shared.history(of: id)
+            DispatchQueue.main.async { versions = v }
+        }
+    }
+
+    /// "3 versions": every save of this note, and the way back to any of them.
+    private var historyChip: some View {
+        Button { loadVersions(); pickerBinding(.history).wrappedValue.toggle() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "clock.arrow.circlepath").font(.sbIcon(10))
+                Text(versions.count == 1 ? "1 version" : "\(versions.count) versions").font(.sb(11))
+            }
+            .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain).help("Every save of this note; pick one to bring it back")
+        .keyRing(ringed(.history), radius: 6)
+        .onChange(of: nav.picker) { p in if p == .history { loadVersions() } }
+        .popover(isPresented: pickerBinding(.history), arrowEdge: .bottom) {
+            HistoryPanel(note: note, versions: versions,
+                         read: { NotesSync.shared.version(of: note.id, at: $0) },
+                         restore: { v in draft?.title = v.title; draft?.body = v.body },
+                         dismiss: { pickerBinding(.history).wrappedValue = false })
+        }
     }
 
     /// The editor saves by itself shortly after each change, so there is no
@@ -546,10 +578,10 @@ struct NoteRow: View {
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08)))
             // everything else about the note on one line: expiry, reminder, save state, delete
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 6) { whenChips(d); Spacer(minLength: 6); saveState; trash }
+                HStack(spacing: 6) { whenChips(d); historyChip; Spacer(minLength: 6); saveState; trash }
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) { whenChips(d); Spacer(minLength: 0) }
-                    HStack(spacing: 6) { saveState; Spacer(); trash }
+                    HStack(spacing: 6) { historyChip; saveState; Spacer(); trash }
                 }
             }
             if d.wrappedValue.remindAt != nil, d.wrappedValue.remindRepeat == .never {

@@ -72,7 +72,7 @@ enum KeyTable {
         a("notes.row.copy", "Copy title and body", "Copy", "C", "notes", "row"),
         a("notes.row.color", "Set a colour (0 clears)", "Colour", "1–8", "notes", "row"),
         a("notes.row.delete", "Delete, with a confirm", "Delete", "⌫", "notes", "row"),
-        a("notes.open.parts", "Move between title, body, tags, expiry, reminder, colour, pin, copy, delete", "Parts", "↑/↓ · Tab", "notes", "open"),
+        a("notes.open.parts", "Move between title, body, tags, expiry, reminder, history, colour, pin, copy, delete", "Parts", "↑/↓ · Tab", "notes", "open"),
         a("notes.open.edit", "Start typing in the chosen part", "Edit part", "→ · Return", "notes", "open"),
         a("notes.open.copyall", "Copy title and body together", "Copy all", "⇧⌘C", "notes", "open"),
         a("notes.open.close", "Close the note", "Close", "← · Esc", "notes", "open"),

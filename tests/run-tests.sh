@@ -71,6 +71,7 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   check "timers run, go off, extend and clear" "$BIN" --probe-timers-tab
   check "the Queue tab renders" "$BIN" --snapshot "$WORK/queue.png" --tab queue
   check "the time picker renders" "$BIN" --snapshot-when "$WORK/when.png"
+  check "a note's history picker renders" "$BIN" --snapshot-history "$WORK/history.png"
   check "the Notes tab renders with an editor open" env SWITCHBOARD_STATE="$WORK/notes-state" "$BIN" --snapshot "$WORK/notes.png" --tab notes --expand
   check "every eject helper answer is JSON with ok" python3 -c "import json,subprocess;r=subprocess.run(['python3','Resources/lib/drives.py','eject','disk99'],capture_output=True,text=True);assert json.loads(r.stdout)['ok'] is False"
   # A helper that fails shows its group with the reason instead of dropping it.
