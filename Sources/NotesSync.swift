@@ -36,7 +36,7 @@ final class NotesSync: ObservableObject {
     private var timer: Timer?
 
     /// Syncs on a timer, so an edit on the phone shows up without opening the panel.
-    func start(every seconds: TimeInterval = 90) {
+    func start(every seconds: TimeInterval = 30) {   // owner: "a note anywhere is everywhere inside a minute"
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: true) { [weak self] _ in self?.sync() }
         timer?.tolerance = 10
