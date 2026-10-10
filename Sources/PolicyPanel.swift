@@ -83,7 +83,7 @@ enum SwitchboardConcerns {
         // Settings lists every other tab, so it is built from the rest. Approvals
         // cannot be hidden: it is how a waiting push reaches you.
         let listed = tabs.filter { $0.id != "approvals" }.map { (id: $0.id, title: $0.title, icon: $0.icon) }
-        let settings = SwitchboardConcern(id: "settings", title: "Settings", subtitle: "What the panel shows", icon: Icons.tab["settings"]!,
+        let settings = SwitchboardConcern(id: "settings", title: "Settings", subtitle: "Panel setup", icon: Icons.tab["settings"]!,
                                           footer: "Hidden tabs and sections are not read, so they cost nothing.", footerIcon: "eye.slash",
                                           content: AnyView(SettingsTabView(store: policy, tabs: listed)),
                                           pinned: AnyView(SearchField(text: Binding(get: { policy.queries["settings"] ?? "" },
@@ -100,61 +100,61 @@ enum SwitchboardConcerns {
                                refresh: { policy.requestSystemRefresh() },
                                isShown: { !policy.needGroups.isEmpty },
                                badge: { policy.needsWaiting > 0 ? policy.needsWaiting : nil }),
-            SwitchboardConcern(id: "agents", title: "Agents", subtitle: "What agents may do", icon: Icons.tab["agents"]!,
+            SwitchboardConcern(id: "agents", title: "Agents", subtitle: "Agent permissions", icon: Icons.tab["agents"]!,
                                footer: "Applies to every session at once. Only you can change it.", footerIcon: "bolt.fill",
                                content: AnyView(AgentsTabView(store: policy)),
                                refresh: { policy.reload() }),
-            SwitchboardConcern(id: "usage", title: "Usage", subtitle: "Claude and Codex limits", icon: Icons.tab["usage"]!,
+            SwitchboardConcern(id: "usage", title: "Usage", subtitle: "Limits", icon: Icons.tab["usage"]!,
                                footer: "Bars mark the thresholds that act on them.", footerIcon: "line.diagonal",
                                content: AnyView(UsageTabView(usage: usage, policy: policy)),
                                refresh: { usage.reload() }),
-            SwitchboardConcern(id: "system", title: "Machine", subtitle: "This Mac's switches", icon: Icons.tab["system"]!,
+            SwitchboardConcern(id: "system", title: "Machine", subtitle: "This Mac", icon: Icons.tab["system"]!,
                                footer: "The timer icon flips a switch for a while.", footerIcon: "timer",
                                content: AnyView(SystemTabView(store: policy)),
                                refresh: { policy.requestSystemRefresh() }),
-            SwitchboardConcern(id: "home", title: "Home", subtitle: "Your home network", icon: Icons.tab["home"]!,
+            SwitchboardConcern(id: "home", title: "Home", subtitle: "Bulbs", icon: Icons.tab["home"]!,
                                footer: "Talks to the bulbs directly over the LAN.", footerIcon: "wifi",
                                content: AnyView(LightsTabView(lights: lights)),
                                refresh: { lights.discover() }),
-            SwitchboardConcern(id: "controls", title: "Controls", subtitle: "Sound, display, Wi-Fi, Bluetooth", icon: Icons.tab["controls"]!,
+            SwitchboardConcern(id: "controls", title: "Controls", subtitle: "Sound · screen · radios", icon: Icons.tab["controls"]!,
                                footer: "Talks to macOS directly; nothing to install.", footerIcon: "apple.logo",
                                content: AnyView(ControlsTabView(controls: controls)),
                                refresh: { controls.load(devices: true) }),
-            SwitchboardConcern(id: "remote", title: "Remote", subtitle: "Machines you drive with csync", icon: Icons.tab["remote"]!,
+            SwitchboardConcern(id: "remote", title: "Remote", subtitle: "Other machines", icon: Icons.tab["remote"]!,
                                footer: "Every action is a csync command, recorded in its log.", footerIcon: "terminal",
                                content: AnyView(SystemTabView(store: policy, source: .remote)),
                                refresh: { policy.requestSystemRefresh() }),
-            SwitchboardConcern(id: "runtime", title: "Runtime", subtitle: "Everything that runs", icon: Icons.tab["runtime"]!,
+            SwitchboardConcern(id: "runtime", title: "Runtime", subtitle: "What runs", icon: Icons.tab["runtime"]!,
                                footer: "Stop and Disable ask first; a command copies instead of opening a terminal.", footerIcon: "doc.on.doc",
                                content: AnyView(SystemTabView(store: policy, source: .catalog("runtime"))),
                                refresh: { policy.requestSystemRefresh() },
                                pinned: AnyView(SearchField(text: Binding(get: { policy.queries["runtime"] ?? "" },
                                                                          set: { policy.queries["runtime"] = $0 }),
                                                            prompt: "Search services, ports, models and jobs"))),
-            SwitchboardConcern(id: "plugins", title: "Claude MCP", subtitle: "Plugins and MCP servers", icon: Icons.tab["plugins"]!,
+            SwitchboardConcern(id: "plugins", title: "Claude MCP", subtitle: "Plugins · MCP", icon: Icons.tab["plugins"]!,
                                footer: "On and off apply to new sessions. MCP keys and tokens are never shown.", footerIcon: "lock",
                                content: AnyView(SystemTabView(store: policy, source: .catalog("plugins"))),
                                refresh: { policy.reloadCatalog("plugins", PluginsCatalog.groups) },
                                pinned: AnyView(ScopedSearch(store: policy, id: "plugins", prompt: "Search plugins and MCP servers"))),
-            SwitchboardConcern(id: "timers", title: "Timers", subtitle: "Countdowns that go off with a sound", icon: Icons.tab["timers"]!,
+            SwitchboardConcern(id: "timers", title: "Timers", subtitle: "Countdowns", icon: Icons.tab["timers"]!,
                                footer: "A timer keeps running if the app restarts. + adds a minute.", footerIcon: "bell",
                                content: AnyView(TimersTabView(timers: TimerStore.shared))),
-            SwitchboardConcern(id: "notes", title: "Notes", subtitle: "Notes at hand, one file each", icon: Icons.tab["notes"]!,
+            SwitchboardConcern(id: "notes", title: "Notes", subtitle: "One file each", icon: Icons.tab["notes"]!,
                                footer: "Drag the grip to reorder. Point at a note, or right-click it, to copy it.",
                                footerIcon: "doc.text",
                                content: AnyView(NotesTabView(notes: NotesStore.shared)),
                                refresh: { NotesStore.shared.loadInBackground() },
                                pinned: AnyView(NotesTop())),
-            catalogTab(policy, id: "rules", title: "Hooks", subtitle: "Rules, gates and hook scripts", icon: Icons.tab["rules"]!,
+            catalogTab(policy, id: "rules", title: "Hooks", subtitle: "Rules · hooks", icon: Icons.tab["rules"]!,
                        footer: "Problems sort first: a hook with no event, or one whose file is gone.",
                        search: "Search rules, gates and hooks", read: RulesCatalog.groups),
-            catalogTab(policy, id: "queue", title: "Queue", subtitle: "What gcc has lined up to happen", icon: Icons.tab["queue"]!,
+            catalogTab(policy, id: "queue", title: "Queue", subtitle: "Lined up", icon: Icons.tab["queue"]!,
                        footer: "A cron duty whose session has ended cannot fire; those sort first.",
                        search: "Search schedules, duties, deploys and proposals", read: QueueCatalog.groups),
-            catalogTab(policy, id: "ledger", title: "Ledger", subtitle: "Mistakes, the backlog, checkpoints", icon: Icons.tab["ledger"]!,
+            catalogTab(policy, id: "ledger", title: "Ledger", subtitle: "Mistakes · backlog", icon: Icons.tab["ledger"]!,
                        footer: "Mistakes sort by how often they recur; a checkpoint copies its /catchup line.",
                        search: "Search mistakes, proposals and checkpoints", read: LedgerCatalog.groups),
-            catalogTab(policy, id: "library", title: "Library", subtitle: "Skills, docs, personas, scripts", icon: Icons.tab["library"]!,
+            catalogTab(policy, id: "library", title: "Library", subtitle: "Skills · docs", icon: Icons.tab["library"]!,
                        footer: "Open a row for its details; the path copies on click.",
                        search: "Search skills, docs, personas and scripts", read: LibraryCatalog.groups),
         ]
@@ -255,14 +255,14 @@ struct PolicyPanel: View {
             HStack(spacing: 6) {
                 Label("Switchboard", systemImage: "slider.vertical.3").font(PT.title)
                 Spacer(minLength: 8)
-                Text(current.subtitle).font(PT.caption).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true)
+                Text(current.subtitle).font(PT.caption).foregroundStyle(.secondary).lineLimit(1)
                 if !unbounded {
                     Button { DeskPanels.shared.pin(.tab, current.id) } label: {
                         Image(systemName: "pin.square").font(.sbIcon(12, weight: .medium))
                     }
                     .buttonStyle(.borderless).foregroundStyle(.secondary)
-                    .help("Pin \(current.title) to the desktop as a panel that stays up")
+                    .keyRing(keys.zone == .spaces && keys.spacePick == "hdr.pindesk", radius: 4)
+                    .help("Pin \(current.title) to the desktop as a panel that stays up (⌘D)")
                 }
                 // pinned open: a click outside no longer closes the panel (⌘P)
                 if !unbounded {
@@ -270,6 +270,7 @@ struct PolicyPanel: View {
                         Image(systemName: pin.on ? "pin.fill" : "pin").font(.sbIcon(12, weight: .medium))
                     }
                     .buttonStyle(.borderless).foregroundStyle(pin.on ? keyTint : .secondary)
+                    .keyRing(keys.zone == .spaces && keys.spacePick == "hdr.pinopen", radius: 4)
                     .help(pin.on ? "Pinned open; click to let a click outside close it again" : "Keep the panel open until you close it (⌘P)")
                 }
                 // ⓘ keeps the key hints up on every tab; holding ⌘ shows them for a moment
@@ -277,6 +278,7 @@ struct PolicyPanel: View {
                     Image(systemName: actions.hintsPinned ? "info.circle.fill" : "info.circle").font(.sbIcon(12, weight: .medium))
                 }
                 .buttonStyle(.borderless).foregroundStyle(actions.hintsPinned ? keyTint : .secondary)
+                .keyRing(keys.zone == .spaces && keys.spacePick == "hdr.hints", radius: 4)
                 .help(actions.hintsPinned ? "Hide the key hints (hold ⌘ to see them for a moment)" : "Keep the key hints up on every tab")
                 ForEach(shown.filter { Visibility.space(of: $0.id) == nil }) { c in headerButton(c) }
             }
@@ -1532,6 +1534,8 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             b.image = switchboardGlyph()
             b.target = self
             b.action = #selector(toggle(_:))
+            // a right click opens the hover card at once, for when the hover itself feels slow
+            b.sendAction(on: [.leftMouseUp, .rightMouseUp])
             // The tooltip would cover the preview; the preview says more.
             b.toolTip = nil
             let card = QuickCard(state: quick, policy: store, usage: usage, lights: lights, notes: NotesStore.shared, controls: controls,
@@ -1612,6 +1616,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
                 self.store.expireCatalog(self.currentTab); self.concerns.first { $0.id == self.currentTab }?.refresh()
             },
             "panel.settings": { [weak self] in self?.switchTab("settings") },
+            "panel.hints": { ActionRegistry.shared.hintsPinned.toggle() },
             "panel.pinopen": { [weak self] in
                 PanelPin.shared.on.toggle()
                 self?.popover.behavior = PanelPin.shared.on ? .applicationDefined : .transient
@@ -1706,6 +1711,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     }
 
     @objc private func toggle(_ sender: Any?) {
+        if NSApp.currentEvent?.type == .rightMouseUp { if !popover.isShown { peek?.showNow() }; return }
         if popover.isShown { popover.performClose(sender); return }
         show()
     }
@@ -1789,7 +1795,10 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         let typing = (w?.firstResponder as? NSTextView)?.isEditable == true
         let o = tabOrder
         let headerTabs = o.tabs.filter { t in !o.spaces.contains { $0.contains(t) } }
-        let picks = Visibility.spaces.filter { s in o.spaces.contains { $0.first.map(s.tabs.contains) ?? false } }.map(\.id) + headerTabs
+        // the bar's ring walks the spaces, then the header: Approvals, Settings, pin to desk, pin open, hints
+        let headerActions = ["hdr.pindesk", "hdr.pinopen", "hdr.hints"]
+        let picks = Visibility.spaces.filter { s in o.spaces.contains { $0.first.map(s.tabs.contains) ?? false } }.map(\.id) + headerTabs + headerActions
+        let actionOf = ["hdr.pindesk": "panel.pin", "hdr.pinopen": "panel.pinopen", "hdr.hints": "panel.hints"]
         func enter(_ z: PanelKeys.Zone) {
             keys.zone = z
             switch z {
@@ -1817,12 +1826,17 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
                 keys.spacePick = next
                 if let s = Visibility.spaces.first(where: { $0.id == next }) {
                     switchTab(s.tabs.first { $0 == Visibility.lastTab(in: next) } ?? s.tabs.first { t in o.tabs.contains(t) } ?? s.tabs[0])
-                } else { switchTab(next) }
+                } else if actionOf[next] == nil { switchTab(next) }
             } else if let s = o.spaces.first(where: { $0.contains(currentTab) }), let i = s.firstIndex(of: currentTab) {
                 switchTab(s[(i + by + s.count) % s.count])
             }
             return true
         case kVK_DownArrow, kVK_Return:
+            // Return on a header action does it; on a space or tab it steps down a zone
+            if keys.zone == .spaces, let a = keys.spacePick.flatMap({ actionOf[$0] }) {
+                if code == kVK_Return { ActionRegistry.shared.runners[a]?() }
+                return true
+            }
             if keys.zone == .spaces { enter(o.spaces.contains { $0.contains(currentTab) && $0.count > 1 } ? .tabs : (topField == nil ? .none : .top)) }
             else { enter(topField == nil ? .none : .top) }
             return true

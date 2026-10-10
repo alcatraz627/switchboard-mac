@@ -107,9 +107,8 @@ final class HoverPeek: NSObject {
         popover.contentViewController = host
         // A tracking area on a status item never reaches a non-view owner, so the
         // pointer is checked against the icon's frame five times a second instead.
-        poll = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.check() }
-        // Lets macOS batch this wake-up with others; a hover a tenth of a second late is unnoticeable.
-        poll?.tolerance = 0.1
+        poll = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in self?.check() }
+        poll?.tolerance = 0.02
         // Scrolling over the icon or the card's title bar turns the page; over the content it does not.
         scrollWatch = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
             guard let self else { return e }
@@ -206,6 +205,8 @@ final class HoverPeek: NSObject {
 
     /// Closes it at once, as when the panel opens.
     func hide() { closeWork?.cancel(); popover.performClose(nil) }
+    /// Opens it at once (a right click on the icon), as if the pointer had rested there.
+    func showNow() { inside = true; entered() }
 }
 
 /// Draws any hover card offscreen, the way it looks under the menu bar.

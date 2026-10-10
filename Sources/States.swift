@@ -76,11 +76,11 @@ struct ReadingStatus: View {
             case .loading:
                 Text("Reading…").foregroundStyle(.secondary)
             case .fresh(let d):
-                Text("as of \(age(d))")
+                Text(age(d))
                     .foregroundStyle(Date().timeIntervalSince(d) > staleAfter ? AnyShapeStyle(amber) : AnyShapeStyle(.tertiary))
             case .stale(let d, let why):
                 Image(systemName: "exclamationmark.circle").font(.sbIcon(9.5)).foregroundStyle(amber)
-                Text("as of \(age(d)) · couldn't refresh: \(why)").foregroundStyle(amber)
+                Text("\(age(d)) · not refreshed: \(why)").foregroundStyle(amber)
                     .fixedSize(horizontal: false, vertical: true)
             case .failed(let why):
                 Image(systemName: "exclamationmark.triangle.fill").font(.sbIcon(9.5))

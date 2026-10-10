@@ -333,14 +333,16 @@ struct UsageTabView: View {
                 if let r = refresh {
                     if let since = busySince { PendingMark(since: since) }
                     else {
-                        Button(refreshLabel, action: r).buttonStyle(.link).font(SBStyle.caption)
-                            .help("Starts Codex briefly to read fresh numbers (a few seconds)")
+                        Button(action: r) { Image(systemName: "arrow.clockwise").font(.sbIcon(11)) }
+                            .buttonStyle(.borderless).foregroundStyle(.secondary)
+                            .help(refreshLabel + ": starts Codex briefly to read fresh numbers")
+                            .keyRow("usage-refresh-" + title, RowKeyActions(primary: r))
                     }
                 }
-                Link(destination: URL(string: link.1)!) {
-                    Label(link.0, systemImage: "arrow.up.right").font(SBStyle.caption).labelStyle(.titleAndIcon)
-                }
-                .help(link.1)
+                Link(destination: URL(string: link.1)!) { Image(systemName: "arrow.up.right").font(.sbIcon(11)) }
+                    .foregroundStyle(.secondary)
+                    .help(link.0 + ": " + link.1)
+                    .keyRow("usage-link-" + title, RowKeyActions(primary: { NSWorkspace.shared.open(URL(string: link.1)!) }))
             }
             .padding(.trailing, 4)
             ReadingStatus(state: state, staleAfter: 3600).padding(.horizontal, 4)
@@ -416,6 +418,8 @@ struct ZoneSlider: View {
             Text("\(dragging ? Int(draft) : value)%").font(SBStyle.mono).frame(width: sw(36), alignment: .trailing)
         }
         .padding(.horizontal, SBStyle.rowH).padding(.vertical, SBStyle.rowV)
+        // ←/→ move the threshold 5 points, the same step the wheel takes
+        .keyRow("usage-" + id, RowKeyActions(step: { by in value = min(100, max(50, value + by * 5)) }))
     }
 }
 
