@@ -451,13 +451,35 @@ struct NoteRow: View {
             .contentShape(Rectangle())
             .onTapGesture { if !takeover { toggleOpen() } }
             .onHover { hovering = $0 }
+            // every action the note has, each with its icon, grouped (owner: "ALL actions + icons ... groups by list divider")
             .contextMenu {
-                Button(note.pinned ? "Unpin" : "Pin to the quick page") { setPinned(!note.pinned) }
+                Button { if !open { toggleOpen() } } label: { Label("Open", systemImage: "square.and.pencil") }
+                Button { setPinned(!note.pinned) } label: {
+                    Label(note.pinned ? "Unpin" : "Pin to the quick page", systemImage: note.pinned ? "pin.slash" : "pin")
+                }
+                Menu {
+                    ForEach(timerColors, id: \.0) { name, _ in
+                        Button { colorBinding.wrappedValue = name } label: {
+                            Label(name.capitalized, systemImage: note.color == name ? "checkmark.circle.fill" : "circle.fill")
+                        }
+                    }
+                    Divider()
+                    Button { colorBinding.wrappedValue = nil } label: { Label("No colour", systemImage: "circle.slash") }
+                } label: { Label("Colour", systemImage: "paintpalette") }
                 Divider()
-                if !note.title.isEmpty { Button("Copy title") { copy(note.title) } }
-                if !note.body.isEmpty { Button("Copy text") { copy(note.body) } }
-                Button("Copy title and text") { copy(note.content) }
-                Button("Copy file path") { copy(note.path) }
+                Button { openTo(.reminder) } label: { Label(note.remindAt == nil ? "Remind me…" : "Change the reminder…", systemImage: "bell") }
+                Button { openTo(.expiry) } label: { Label(note.expires == nil ? "Expire it…" : "Change the expiry…", systemImage: "hourglass") }
+                Button { openTo(.history) } label: { Label("Versions…", systemImage: "clock.arrow.circlepath") }
+                Divider()
+                if !note.title.isEmpty { Button { copy(note.title) } label: { Label("Copy title", systemImage: "textformat") } }
+                if !note.body.isEmpty { Button { copy(note.body) } label: { Label("Copy text", systemImage: "text.alignleft") } }
+                Button { copy(note.content) } label: { Label("Copy title and text", systemImage: "doc.on.doc") }
+                Button { copy(note.path) } label: { Label("Copy file path", systemImage: "link") }
+                Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: note.path)]) } label: {
+                    Label("Show in Finder", systemImage: "folder")
+                }
+                Divider()
+                Button(role: .destructive) { confirmDelete() } label: { Label("Delete…", systemImage: "trash") }
             }
             if open, draft != nil { editor.transition(Motion.arrive) }
         }
@@ -891,14 +913,23 @@ struct NoteRow: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    private func confirmDelete() {
+        let a = NSAlert(); a.messageText = "Delete \u{201C}\(note.heading)\u{201D}?"
+        a.informativeText = "The file and any reminder it set are removed."
+        a.addButton(withTitle: "Delete"); a.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        if a.runModal() == .alertFirstButtonReturn { notes.delete(note) }
+    }
+
+    /// Opens the note with one of its pickers up, for the right-click menu.
+    private func openTo(_ b: NoteBlock) {
+        snapshotOpen = false
+        withAnimation(Motion.slow) { nav.focus = .open(note.id, b, typing: false) }
+        DispatchQueue.main.async { nav.picker = b }
+    }
+
     private var trash: some View {
-        Button {
-            let a = NSAlert(); a.messageText = "Delete \u{201C}\(note.heading)\u{201D}?"
-            a.informativeText = "The file and any reminder it set are removed."
-            a.addButton(withTitle: "Delete"); a.addButton(withTitle: "Cancel")
-            NSApp.activate(ignoringOtherApps: true)
-            if a.runModal() == .alertFirstButtonReturn { notes.delete(note) }
-        } label: { Image(systemName: "trash").font(.sbIcon(11)) }
+        Button { confirmDelete() } label: { Image(systemName: "trash").font(.sbIcon(11)) }
             .buttonStyle(.borderless).foregroundStyle(.secondary).help("Delete the note (⌫)")
             .keyRing(ringed(.delete), radius: 5)
     }
