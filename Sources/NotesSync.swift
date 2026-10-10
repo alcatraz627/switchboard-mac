@@ -77,7 +77,9 @@ final class NotesSync: ObservableObject {
     /// Pull the Pi's changes and push ours. A clash is committed with both sides kept.
     func sync() {
         let url = remote.trimmingCharacters(in: .whitespaces)
-        guard !url.isEmpty, !syncing else { return }
+        guard !syncing else { return }
+        // with no Pi to talk to, the timer still turns what other tools wrote (bfb, a hand edit) into versions
+        if url.isEmpty { queue.async { [weak self] in self?.commitNow("save") }; return }
         syncing = true
         queue.async { [weak self] in
             guard let self else { return }
@@ -188,6 +190,13 @@ func probeNotesSync() -> [String] {
     s.load()
     check("the clash shows on the note", s.notes.first { $0.id == "clash" }?.conflicted == true)
     try? FileManager.default.removeItem(atPath: NotesStore.dir + "/clash.md")
+    // with no remote set, the timer's sync still turns a file another tool wrote into a version
+    UserDefaults.standard.removeObject(forKey: NotesSync.remoteKey)
+    try? "---\ntitle: by hand\n---\nwritten by another tool\n".write(toFile: NotesStore.dir + "/byhand.md", atomically: true, encoding: .utf8)
+    sync.sync()
+    RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+    check("a file another tool wrote becomes a version on the next tick, remote or not",
+          sync.history(of: "byhand").count == 1, "\(sync.history(of: "byhand").count)")
     UserDefaults.standard.set("nobody@203.0.113.1:Notes.git", forKey: NotesSync.remoteKey)
     let r = sync.git(["ls-remote", "nobody@203.0.113.1:Notes.git"])
     check("a remote that does not answer fails fast with words, never a prompt", r.code != 0 && !r.err.isEmpty)

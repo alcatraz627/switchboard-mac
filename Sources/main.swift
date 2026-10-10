@@ -118,6 +118,14 @@ if let out = argAfter("--snapshot-when") {
     print(ok ? "wrote \(out)" : "snapshot failed")
     exit(ok ? 0 : 1)
 }
+if let out = argAfter("--snapshot-editor-mock") {
+    // --snapshot-editor-mock <out.png> --mock a|b|c [--light]
+    let which = argAfter("--mock") ?? "a"
+    let v = which == "b" ? EditorMock.b() : which == "c" ? EditorMock.c() : EditorMock.a()
+    let ok = snapshotPanel(v.background(Color(nsColor: .windowBackgroundColor)), to: out, dark: !args.contains("--light"))
+    print(ok ? "wrote \(out)" : "snapshot failed")
+    exit(ok ? 0 : 1)
+}
 if let out = argAfter("--snapshot-history") {
     let v = HistoryPanel(note: HistoryFixture.note, versions: HistoryFixture.versions, read: HistoryFixture.read, restore: { _ in })
     let ok = snapshotPanel(v, to: out, dark: !args.contains("--light"))
