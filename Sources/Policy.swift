@@ -356,11 +356,20 @@ final class PolicyStore: ObservableObject {
         didSet { UserDefaults.standard.set(approvalsUnderEveryPage, forKey: Self.approvalsCardKey) }
     }
     static let hoverLingerKey = "switchboard.hoverLinger"
-    static let hoverLingerRange: ClosedRange<Double> = 1...15
+    /// The mouse-away delays on offer: fine steps where a tenth matters, coarser
+    /// above a second, and 0 for "the moment the pointer leaves" (owner, 2026-10-10).
+    static let lingerSteps: [Double] = [0, 0.1, 0.25, 0.5, 0.8, 1.3, 2.4, 3.5, 4.9, 8, 15]
+    static let defaultLinger = 2.4
+    /// The nearest step to a value.
     static func clampedLinger(_ v: Double) -> Double {
-        v == 0 ? 3 : min(hoverLingerRange.upperBound, max(hoverLingerRange.lowerBound, v.rounded()))   // 0 = never set
+        lingerSteps.min { abs($0 - v) < abs($1 - v) } ?? defaultLinger
     }
-    @Published var hoverLinger: Double = PolicyStore.clampedLinger(UserDefaults.standard.double(forKey: PolicyStore.hoverLingerKey)) {
+    /// The saved delay, or the default when none was ever chosen (0 is a real choice now).
+    static var savedLinger: Double {
+        UserDefaults.standard.object(forKey: hoverLingerKey) == nil ? defaultLinger
+            : clampedLinger(UserDefaults.standard.double(forKey: hoverLingerKey))
+    }
+    @Published var hoverLinger: Double = PolicyStore.savedLinger {
         didSet { UserDefaults.standard.set(hoverLinger, forKey: Self.hoverLingerKey) }
     }
     /// The saved hidden pages, plus any start-hidden page the saved order has never listed (new to this owner).

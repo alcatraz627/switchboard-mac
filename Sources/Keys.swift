@@ -342,7 +342,8 @@ enum RowKeys {
         case .row(let id):
             let at = ids.firstIndex(of: id) ?? 0
             switch k {
-            case .up: return (at > 0 ? .row(ids[at - 1]) : (hasField ? .field : f), true)
+            // ↑ from the first row without a box above is the panel's: it climbs to the tabs
+            case .up: return at > 0 ? (.row(ids[at - 1]), true) : hasField ? (.field, true) : (f, false)
             case .down: return (.row(ids[min(ids.count - 1, at + 1)]), true)
             case .escape: return (.none, true)
             default: return (f, false)
@@ -412,7 +413,10 @@ final class KeyRows: ObservableObject {
         let a = focused.flatMap { rows[$0]?.actions }
         switch k {
         case .down: focused = keys[at.map { min(keys.count - 1, $0 + 1) } ?? 0]
-        case .up: focused = keys[at.map { max(0, $0 - 1) } ?? keys.count - 1]
+        case .up:
+            // ↑ from the top row is the panel's: it climbs into the box or the tabs above
+            guard let i = at, i > 0 else { return false }
+            focused = keys[i - 1]
         case .escape:
             guard focused != nil else { return false }
             focused = nil
@@ -670,10 +674,11 @@ final class HotKeys {
     /// A chord, by the tab it opens.
     var onChord: (String) -> Void = { _ in }
 
-    /// The chords and the tab each opens; the leader is "leader".
-    static let chords: [(key: Int, tab: String, label: String)] = [
-        (kVK_ANSI_N, "notes", "⌃⌥⌘N"), (kVK_ANSI_U, "usage", "⌃⌥⌘U"), (kVK_ANSI_B, "home", "⌃⌥⌘B"),
-        (kVK_Space, "leader", "⌃⌥⌘Space"),
+    /// The one chord from anywhere: ⌥Space opens the panel and then works like ⌘⌘.
+    /// Two keys under the thumbs; the ⌃⌥⌘ letters were ruled out (owner, 2026-10-10:
+    /// "4 keys my fingers can't reach normally"). Nothing else on this Mac binds it.
+    static let chords: [(key: Int, mods: UInt32, tab: String, label: String)] = [
+        (kVK_Space, UInt32(optionKey), "leader", "⌥Space"),
     ]
 
     private var refs: [EventHotKeyRef?] = []
@@ -707,16 +712,12 @@ final class HotKeys {
             }
             return noErr
         }, 1, &spec, nil, nil)
-        // Each chord is taken with and without ⇧, so a Caps Lock Hyper key (⌃⌥⌘⇧) opens it too.
-        let mods = UInt32(controlKey | optionKey | cmdKey)
         for (i, c) in Self.chords.enumerated() {
-            for withShift in [false, true] {
-                var ref: EventHotKeyRef?
-                let id = EventHotKeyID(signature: OSType(0x53574244), id: UInt32(i))   // "SWBD"
-                let r = RegisterEventHotKey(UInt32(c.key), withShift ? mods | UInt32(shiftKey) : mods, id, GetApplicationEventTarget(), 0, &ref)
-                if r != noErr { dlog("hotkey \(c.label)\(withShift ? "+⇧" : "") not registered (\(r)); another app may hold it") }
-                refs.append(ref)
-            }
+            var ref: EventHotKeyRef?
+            let id = EventHotKeyID(signature: OSType(0x53574244), id: UInt32(i))   // "SWBD"
+            let r = RegisterEventHotKey(UInt32(c.key), c.mods, id, GetApplicationEventTarget(), 0, &ref)
+            if r != noErr { dlog("hotkey \(c.label) not registered (\(r)); another app may hold it") }
+            refs.append(ref)
         }
     }
 
@@ -770,10 +771,26 @@ struct DoubleTap {
     }
 }
 
-/// The panel's own keyboard state: whether it is listening for a jump letter.
+/// The panel's own keyboard state: whether it is listening for a jump letter,
+/// and which zone above the rows has the keyboard (the spaces bar, the tab
+/// bar, or the box above the list). Tab walks the zones; ↑ out of the rows
+/// climbs into them; Escape lets go.
 final class PanelKeys: ObservableObject {
     static let shared = PanelKeys()
     @Published var jumping = false
+    enum Zone: Equatable { case none, spaces, tabs, top }
+    @Published var zone: Zone = .none
+    /// In the spaces zone: the space id, or a header tab's id (Approvals, Settings).
+    @Published var spacePick: String?
+}
+
+/// Pinned open: the panel ignores a click outside until it is closed on purpose.
+final class PanelPin: ObservableObject {
+    static let shared = PanelPin()
+    static let key = "switchboard.pinnedOpen"
+    @Published var on = UserDefaults.standard.bool(forKey: PanelPin.key) {
+        didSet { UserDefaults.standard.set(on, forKey: Self.key) }
+    }
 }
 
 /// The panel-wide keys, before a tab sees anything: ⌃Tab and ⌃⇧Tab walk the
@@ -792,25 +809,29 @@ enum PanelNav {
         let mods = e.modifierFlags.intersection([.command, .shift, .option, .control])
         let code = Int(e.keyCode)
         // the palette and the panel actions, before anything else, so they work mid-jump and mid-typing
-        if mods == [.command, .shift] {
-            if code == kVK_ANSI_P { return .palette(.all) }
-            if code == kVK_ANSI_A { return .palette(.goTo) }
-        }
+        if mods == [.command, .shift], code == kVK_ANSI_P { return .palette(.all) }
         if mods == .command {
             switch code {
+            // ⌘J, not ⇧⌘A: 1Piece holds ⇧⌘A system-wide for its window menu
+            case kVK_ANSI_J: return .palette(.goTo)
             case kVK_ANSI_Slash: return .palette(.keys)
             case kVK_ANSI_D: return .action("panel.pin")
             case kVK_ANSI_R: return .action("panel.reload")
             case kVK_ANSI_Comma: return .action("panel.settings")
             case kVK_ANSI_L, kVK_ANSI_F: return .action("panel.search")
+            case kVK_ANSI_P: return .action("panel.pinopen")
             default: break
             }
         }
-        // ⌘⌥← and ⌘⌥→: the tabs of the space the current tab is in, wrapping
-        if mods == [.command, .option], code == kVK_LeftArrow || code == kVK_RightArrow,
-           let s = spaces.first(where: { $0.contains(current) }), let i = s.firstIndex(of: current) {
-            let by = code == kVK_RightArrow ? 1 : -1
-            return .tab(s[(i + by + s.count) % s.count])
+        // ⌘⌥← and ⌘⌥→: the tabs of the space the current tab is in, wrapping;
+        // Approvals and Settings, which sit in the header, form a group of their own
+        if mods == [.command, .option], code == kVK_LeftArrow || code == kVK_RightArrow {
+            let header = tabs.filter { t in !spaces.contains { $0.contains(t) } }
+            let groups = spaces + (header.isEmpty ? [] : [header])
+            if let s = groups.first(where: { $0.contains(current) }), let i = s.firstIndex(of: current) {
+                let by = code == kVK_RightArrow ? 1 : -1
+                return .tab(s[(i + by + s.count) % s.count])
+            }
         }
         if jumping {
             PanelKeys.shared.jumping = false
@@ -958,8 +979,8 @@ func probeKeys() -> [String] {
     check("without ⌘⌘, letters are left to the tab", mv(ev(kVK_ANSI_B, [], "b")) == nil)
     check("⌘⌥→ and ⌘⌥← walk the tabs of this space and wrap", mv(ev(kVK_RightArrow, [.command, .option]), "timers") == .tab("notes")
           && mv(ev(kVK_RightArrow, [.command, .option]), "notes") == .tab("timers") && mv(ev(kVK_LeftArrow, [.command, .option]), "timers") == .tab("notes"))
-    check("⇧⌘P opens the palette, ⇧⌘A the places, ⌘/ the keys here",
-          mv(ev(kVK_ANSI_P, [.command, .shift], "p")) == .palette(.all) && mv(ev(kVK_ANSI_A, [.command, .shift], "a")) == .palette(.goTo)
+    check("⇧⌘P opens the palette, ⌘J the places, ⌘/ the keys here",
+          mv(ev(kVK_ANSI_P, [.command, .shift], "p")) == .palette(.all) && mv(ev(kVK_ANSI_J, .command, "j")) == .palette(.goTo)
           && mv(ev(kVK_ANSI_Slash, .command, "/")) == .palette(.keys))
     check("⌘D pins, ⌘R reloads, ⌘, opens Settings, ⌘L and ⌘F find the search box", mv(ev(kVK_ANSI_D, .command, "d")) == .action("panel.pin")
           && mv(ev(kVK_ANSI_R, .command, "r")) == .action("panel.reload") && mv(ev(kVK_ANSI_Comma, .command, ",")) == .action("panel.settings")
@@ -1007,7 +1028,14 @@ func probeKeys() -> [String] {
     check("typing in a label keeps the arrows", RowKeys.move(.field, .down, ids: rows, hasField: true, typing: true).1 == false)
     check("↑ from the first timer goes back to the label",
           RowKeys.move(.row("x"), .up, ids: rows, hasField: true, typing: false) == (.field, true))
-    check("↑ from the first bulb stays on it", RowKeys.move(.row("x"), .up, ids: rows, hasField: false, typing: false) == (.row("x"), true))
+    check("↑ from the first bulb is left to the panel, which climbs to the tabs", RowKeys.move(.row("x"), .up, ids: rows, hasField: false, typing: false) == (.row("x"), false))
+    let top = KeyRows()
+    top.set("only", frame: CGRect(x: 0, y: 0, width: 10, height: 10), actions: RowKeyActions(primary: {}))
+    _ = top.handle(.down)
+    check("↑ from the top row is left to the panel too", top.focused == "only" && !top.handle(.up) && top.focused == "only")
+    check("⌘P pins the panel open", mv(ev(kVK_ANSI_P, .command, "p")) == .action("panel.pinopen"))
+    check("⌘⌥→ walks Approvals and Settings as a group of their own",
+          PanelNav.move(ev(kVK_RightArrow, [.command, .option]), current: "approvals", tabs: tabs + ["approvals", "settings"], spaces: spaces, jumping: false) == .tab("settings"))
     check("↓ walks the rows and stops at the end",
           RowKeys.move(RowKeys.move(.row("x"), .down, ids: rows, hasField: false, typing: false).0, .down, ids: rows, hasField: false, typing: false).0 == .row("y"))
     check("a row's own keys are left to its tab", RowKeys.move(.row("x"), .space, ids: rows, hasField: false, typing: false).1 == false)

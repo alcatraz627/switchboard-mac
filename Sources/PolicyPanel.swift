@@ -207,6 +207,19 @@ struct PolicyPanel: View {
             header
             Divider()
             if let pinned = current.pinned { pinned }
+            contentArea
+                // the palette floats over the content, so the panel never changes height for it
+                .overlay(alignment: .top) {
+                    if actions.palette != nil { PaletteView().padding(.horizontal, PT.gap).padding(.top, 4) }
+                }
+            Divider()
+            footer
+        }
+        .frame(width: PT.width)
+        .coordinateSpace(name: ScrollTargets.space)
+    }
+
+    @ViewBuilder private var contentArea: some View {
             if unbounded {
                 current.content
             } else {
@@ -235,11 +248,6 @@ struct PolicyPanel: View {
                 .scrollContentFrame()
                 .onPreferenceChange(ContentHeightKey.self) { contentHeight = $0 }
             }
-            Divider()
-            footer
-        }
-        .frame(width: PT.width)
-        .coordinateSpace(name: ScrollTargets.space)
     }
 
     private var header: some View {
@@ -256,19 +264,33 @@ struct PolicyPanel: View {
                     .buttonStyle(.borderless).foregroundStyle(.secondary)
                     .help("Pin \(current.title) to the desktop as a panel that stays up")
                 }
+                // pinned open: a click outside no longer closes the panel (⌘P)
+                if !unbounded {
+                    Button { actions.runners["panel.pinopen"]?() } label: {
+                        Image(systemName: pin.on ? "pin.fill" : "pin").font(.sbIcon(12, weight: .medium))
+                    }
+                    .buttonStyle(.borderless).foregroundStyle(pin.on ? keyTint : .secondary)
+                    .help(pin.on ? "Pinned open; click to let a click outside close it again" : "Keep the panel open until you close it (⌘P)")
+                }
+                // ⓘ keeps the key hints up on every tab; holding ⌘ shows them for a moment
+                Button { actions.hintsPinned.toggle() } label: {
+                    Image(systemName: actions.hintsPinned ? "info.circle.fill" : "info.circle").font(.sbIcon(12, weight: .medium))
+                }
+                .buttonStyle(.borderless).foregroundStyle(actions.hintsPinned ? keyTint : .secondary)
+                .help(actions.hintsPinned ? "Hide the key hints (hold ⌘ to see them for a moment)" : "Keep the key hints up on every tab")
                 ForEach(shown.filter { Visibility.space(of: $0.id) == nil }) { c in headerButton(c) }
             }
             spaceBar
             if currentSpaceTabs.count > 1 { subTabs }
             if keys.jumping && !unbounded { jumpStrip }
-            if actions.palette != nil { PaletteView() }
-            else if actions.hints { HintStrip() }
+            if actions.showHints { HintStrip() }
         }
         .padding(.horizontal, PT.gap)
         .padding(.vertical, 10)
     }
 
     @ObservedObject private var keys = PanelKeys.shared
+    @ObservedObject private var pin = PanelPin.shared
     @ObservedObject private var actions = ActionRegistry.shared
     @ObservedObject private var toast = Toast.shared
 
@@ -308,6 +330,7 @@ struct PolicyPanel: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .keyRing(keys.zone == .spaces && keys.spacePick == c.id, radius: 5)
         .help(c.title + ": " + c.subtitle)
     }
 
@@ -346,6 +369,7 @@ struct PolicyPanel: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .keyRing(keys.zone == .spaces && keys.spacePick == s.id, radius: 5)
                 .help(s.tabs.map(\.title).joined(separator: ", "))
             }
         }
@@ -383,6 +407,7 @@ struct PolicyPanel: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .keyRing(keys.zone == .tabs && on, radius: 4)
                 .help(c.subtitle)
             }
             Spacer(minLength: 0)
@@ -1555,7 +1580,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         let host = NSHostingController(rootView: ScaledRoot { PolicyPanel(concerns: concerns, store: store) })
         host.sizingOptions = [.preferredContentSize]
         popover.contentViewController = host
-        popover.behavior = .transient
+        popover.behavior = PanelPin.shared.on ? .applicationDefined : .transient
         popover.animates = true
         popover.delegate = self
         // Scrolling over a row of tabs or a slider steps it; anywhere else scrolls as usual.
@@ -1587,6 +1612,11 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
                 self.store.expireCatalog(self.currentTab); self.concerns.first { $0.id == self.currentTab }?.refresh()
             },
             "panel.settings": { [weak self] in self?.switchTab("settings") },
+            "panel.pinopen": { [weak self] in
+                PanelPin.shared.on.toggle()
+                self?.popover.behavior = PanelPin.shared.on ? .applicationDefined : .transient
+                Toast.shared.show(PanelPin.shared.on ? "Pinned open: a click outside leaves it; Escape or the icon closes it" : "Unpinned")
+            },
             "panel.search": { [weak self] in
                 // the tab's search box is the first editable field in the panel; a tab without one says so
                 guard let v = self?.popover.contentViewController?.view, let w = v.window else { return }
@@ -1604,18 +1634,18 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         ]
         reg.places = { [weak self] in
             guard let self else { return [] }
-            var out: [KeyAction] = self.tabOrder.tabs.compactMap { id in
+            var out: [KeyAction] = self.tabOrder.tabs.compactMap { id -> KeyAction? in
                 guard let c = self.concerns.first(where: { $0.id == id }) else { return nil }
                 let letter = JumpLetters.letter(for: id).map { "⌘⌘ " + String($0).uppercased() } ?? "tab"
-                return KeyAction(id: "place.tab." + id, title: "Go to " + c.title, key: letter, surface: "place", depth: "anywhere",
+                return KeyAction(id: "place.tab." + id, title: "Go to " + c.title, short: c.title, key: letter, surface: "place", depth: "anywhere",
                                  run: { [weak self] in self?.switchTab(id) })
             }
             out += NotesStore.shared.notes.prefix(60).map { n in
-                KeyAction(id: "place.note." + n.id, title: "Note: " + n.title, key: "note", surface: "place", depth: "anywhere",
+                KeyAction(id: "place.note." + n.id, title: "Note: " + n.title, short: n.title, key: "note", surface: "place", depth: "anywhere",
                           run: { [weak self] in self?.reveal(tab: "notes", key: "note-" + n.id) })
             }
             out += TimerStore.shared.timers.map { t in
-                KeyAction(id: "place.timer." + t.id, title: "Timer: " + t.label, key: "timer", surface: "place", depth: "anywhere",
+                KeyAction(id: "place.timer." + t.id, title: "Timer: " + t.label, short: t.label, key: "timer", surface: "place", depth: "anywhere",
                           run: { [weak self] in self?.reveal(tab: "timers", key: "timer-" + t.id) })
             }
             return out
@@ -1737,9 +1767,76 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         return KeyRows.forSpace(ScrollTargets.space).focused == nil ? "tab" : "row"
     }
 
+    /// The first editable field in the panel (a tab's search box, the new-note box), if any.
+    private var topField: NSView? {
+        guard let v = popover.contentViewController?.view else { return nil }
+        func field(in view: NSView) -> NSView? {
+            if let t = view as? NSTextField, t.isEditable { return t }
+            if let t = view as? NSTextView, t.isEditable { return t }
+            for s in view.subviews { if let f = field(in: s) { return f } }
+            return nil
+        }
+        return field(in: v)
+    }
+
+    /// The zones above the rows, by key: Tab walks spaces, tabs, the box, the rows;
+    /// ↑ climbs out of the rows; ←/→ move along a bar and switch at once. True when used.
+    private func zoneKey(_ e: NSEvent) -> Bool {
+        let keys = PanelKeys.shared
+        let mods = e.modifierFlags.intersection([.command, .shift, .option, .control])
+        let code = Int(e.keyCode)
+        let w = popover.contentViewController?.view.window
+        let typing = (w?.firstResponder as? NSTextView)?.isEditable == true
+        let o = tabOrder
+        let headerTabs = o.tabs.filter { t in !o.spaces.contains { $0.contains(t) } }
+        let picks = Visibility.spaces.filter { s in o.spaces.contains { $0.first.map(s.tabs.contains) ?? false } }.map(\.id) + headerTabs
+        func enter(_ z: PanelKeys.Zone) {
+            keys.zone = z
+            switch z {
+            case .spaces: keys.spacePick = Visibility.space(of: currentTab) ?? currentTab
+            case .top: w?.makeFirstResponder(topField)
+            case .none, .tabs: if typing { w?.makeFirstResponder(nil) }
+            }
+            if z == .none { _ = KeyRouter.handle(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: UInt16(kVK_DownArrow))!, space: ScrollTargets.space, tab: currentTab) }
+        }
+        let order: [PanelKeys.Zone] = topField == nil ? [.spaces, .tabs, .none] : [.spaces, .tabs, .top, .none]
+        // Tab and ⇧Tab walk the zones from anywhere, a field included
+        if code == kVK_Tab, mods.isEmpty || mods == .shift {
+            let here: PanelKeys.Zone = typing ? .top : keys.zone
+            let i = order.firstIndex(of: here) ?? order.count - 1
+            enter(order[(i + (mods == .shift ? -1 : 1) + order.count) % order.count])
+            return true
+        }
+        guard keys.zone == .spaces || keys.zone == .tabs, mods.isEmpty else { return false }
+        switch code {
+        case kVK_Escape: keys.zone = .none; return true
+        case kVK_LeftArrow, kVK_RightArrow:
+            let by = code == kVK_RightArrow ? 1 : -1
+            if keys.zone == .spaces, let at = keys.spacePick, let i = picks.firstIndex(of: at) {
+                let next = picks[(i + by + picks.count) % picks.count]
+                keys.spacePick = next
+                if let s = Visibility.spaces.first(where: { $0.id == next }) {
+                    switchTab(s.tabs.first { $0 == Visibility.lastTab(in: next) } ?? s.tabs.first { t in o.tabs.contains(t) } ?? s.tabs[0])
+                } else { switchTab(next) }
+            } else if let s = o.spaces.first(where: { $0.contains(currentTab) }), let i = s.firstIndex(of: currentTab) {
+                switchTab(s[(i + by + s.count) % s.count])
+            }
+            return true
+        case kVK_DownArrow, kVK_Return:
+            if keys.zone == .spaces { enter(o.spaces.contains { $0.contains(currentTab) && $0.count > 1 } ? .tabs : (topField == nil ? .none : .top)) }
+            else { enter(topField == nil ? .none : .top) }
+            return true
+        case kVK_UpArrow:
+            if keys.zone == .tabs { enter(.spaces) }
+            return true
+        default: return false
+        }
+    }
+
     private func handleKey(_ e: NSEvent) -> Bool {
         let reg = ActionRegistry.shared
         if reg.handle(e) { return true }
+        if zoneKey(e) { return true }
         let o = tabOrder
         switch PanelNav.move(e, current: currentTab, tabs: o.tabs, spaces: o.spaces, jumping: PanelKeys.shared.jumping) {
         case .tab(let t)?: switchTab(t); return true
@@ -1750,6 +1847,13 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         case nil: break
         }
         if KeyRouter.handle(e, space: ScrollTargets.space, tab: currentTab) { return true }
+        // ↑ that no row took climbs into the box above the list, or the tab bar
+        if Int(e.keyCode) == kVK_UpArrow, e.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
+           !((e.window?.firstResponder as? NSTextView)?.isEditable ?? false) {
+            PanelKeys.shared.zone = topField == nil ? .tabs : .top
+            if PanelKeys.shared.zone == .top { e.window?.makeFirstResponder(topField) }
+            return true
+        }
         // Escape with nothing left to step out of closes the panel and goes back where the keyboard was
         if Int(e.keyCode) == kVK_Escape, !((e.window?.firstResponder as? NSTextView)?.isEditable ?? false) {
             popover.performClose(nil)

@@ -40,7 +40,7 @@ struct SettingsTabView: View {
                       rows: [sizeRow])
             }
             if keys {
-                group("Keyboard", note: "Hold ⌘ for a moment to see the keys that work where you are; ⇧⌘P finds any action or place, ⇧⌘A goes to a tab, note or timer. ⌘⌘ opens the panel on the last tab; ⌘⌘ again shows a letter for each tab; a third time closes it. ⌃⌥⌘N, ⌃⌥⌘U and ⌃⌥⌘B open Notes, Usage and Home from anywhere (with or without ⇧), and ⌃⌥⌘Space works like ⌘⌘. In the panel: ⌘1 to ⌘5 pick a space (also from the hover card), ⌘⌥← and ⌘⌥→ walk the tabs of a space, ⌃Tab walks every tab, ⌘L or ⌘F jumps to the search box, ⌘D pins the tab, ⌘R reloads it, Escape steps back out and finally returns you to the app you came from. On any tab: ↑ and ↓ move between rows, Return does what a click does, Space flips a switch, → and ← open and close a row or step a slider or choice. Approvals: Return opens a request, then ⌘↩ allows and ⌫ denies. Notes: → opens and → again edits, Tab walks a note's parts, / searches, ⌘↩ saves, P pins, C copies, 1 to 8 colours.",
+                group("Keyboard", note: "Hold ⌘ for a moment to see the keys that work where you are, or click ⓘ in the header to keep them up; ⇧⌘P finds any action or place, ⌘J goes to a tab, note or timer. ⌥Space (or ⌘⌘) opens the panel on the last tab; again shows a letter for each tab; a third time closes it. In the panel: ⌘1 to ⌘5 pick a space (also from the hover card), ⌘⌥← and ⌘⌥→ walk the tabs of a space, ⌃Tab walks every tab, Tab moves between the spaces, the tabs, the box above the list and the rows, ⌘L or ⌘F jumps to the search box, ⌘P keeps the panel open, ⌘D pins the tab to the desktop, ⌘R reloads it, Escape steps back out and finally returns you to the app you came from. On any tab: ↑ and ↓ move between rows, Return does what a click does, Space flips a switch, → and ← open and close a row or step a slider or choice. Approvals: Return opens a request, then ⌘↩ allows and ⌫ denies. Notes: → opens and → again edits, Tab walks a note's parts, / searches, ⌘↩ saves, P pins, C copies, 1 to 8 colours.",
                       rows: [commandWatchRow])
             }
             if !orderedTabs.isEmpty {
@@ -159,7 +159,7 @@ struct SettingsTabView: View {
     private var commandWatchRow: SystemRow {
         var r = SystemRow(label: "⌘⌘ while another app is in front", state: watchAllowed ? .on(menuGreen) : .off,
                           note: watchAllowed ? "allowed" : "needs permission: click, then turn Switchboard on in Accessibility",
-                          tip: "macOS only lets an app hear ⌘ on its own, from anywhere, with this permission. The ⌃⌥⌘ keys work without it.",
+                          tip: "macOS only lets an app hear ⌘ on its own, from anywhere, with this permission. ⌥Space works without it.",
                           action: {
                               HotKeys.askForCommandWatch()
                               DispatchQueue.main.asyncAfter(deadline: .now() + 2) { watchAllowed = HotKeys.commandWatchAllowed }
@@ -240,21 +240,27 @@ struct SettingsTabView: View {
 
     /// The standard macOS slider: one-second ticks, its ends labelled, the value read out beside it,
     /// and scrolling over it steps a second at a time like the panel's other sliders.
+    /// The slider moves along the steps, not along seconds, so the fine end is reachable.
     private var lingerSlider: some View {
-        HStack(spacing: 10) {
-            Slider(value: $store.hoverLinger, in: PolicyStore.hoverLingerRange, step: 1) {
+        let steps = PolicyStore.lingerSteps
+        let index = Double(steps.firstIndex(of: store.hoverLinger) ?? steps.firstIndex(of: PolicyStore.defaultLinger) ?? 0)
+        return HStack(spacing: 10) {
+            Slider(value: Binding(get: { index }, set: { store.hoverLinger = steps[Int($0.rounded())] }),
+                   in: 0...Double(steps.count - 1), step: 1) {
                 Text("Mouse-away delay")
             } minimumValueLabel: {
-                Text("1 s").font(PT.caption).foregroundStyle(.secondary)
+                Text("now").font(PT.caption).foregroundStyle(.secondary)
             } maximumValueLabel: {
                 Text("15 s").font(PT.caption).foregroundStyle(.secondary)
             }
             .labelsHidden().sbControlSize(.small)
-            Text("\(Int(store.hoverLinger)) s").font(PT.label.monospacedDigit()).frame(width: sw(34), alignment: .trailing)
+            Text(store.hoverLinger == 0 ? "0 s" : String(format: store.hoverLinger < 1 ? "%.2f s" : "%.1f s", store.hoverLinger))
+                .font(PT.label.monospacedDigit()).frame(width: sw(44), alignment: .trailing)
         }
         .padding(.horizontal, PT.rowH).padding(.vertical, PT.rowV + 2)
         .scrollSteps("settings.linger", inContent: true, stepper: .slider()) { by in
-            store.hoverLinger = PolicyStore.clampedLinger(store.hoverLinger - Double(by))
+            let i = min(steps.count - 1, max(0, Int(index) - by))
+            store.hoverLinger = steps[i]
         }
     }
 

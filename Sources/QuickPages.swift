@@ -206,9 +206,9 @@ func probeQuickCycle() -> String {
               UsageWindow(id: "gpt-reserve.secondary", label: "Week · gpt-reserve", pct: 2, resetsAt: nil)]
     let bars = QuickCard.limitBars(claude: cl, codex: cx).map { "\($0.icon) \($0.span) \($0.w.pct)" }
     check("Settings knows every hover page", PolicyStore.quickPageIDs == QuickPage.allCases.map(\.rawValue))
-    check("the mouse-away delay is 3 s until set, and stays within 1 to 15 whole seconds",
-          PolicyStore.clampedLinger(0) == 3 && PolicyStore.clampedLinger(0.4) == 1 && PolicyStore.clampedLinger(40) == 15
-          && PolicyStore.clampedLinger(7.6) == 8)
+    check("the mouse-away delay snaps to its steps, 0 included, and tops out at 15 s",
+          PolicyStore.clampedLinger(0) == 0 && PolicyStore.clampedLinger(0.4) == 0.5 && PolicyStore.clampedLinger(40) == 15
+          && PolicyStore.clampedLinger(7.6) == 8 && PolicyStore.clampedLinger(1) == 0.8)
     check("the new pages start hidden for someone who never saw them",
           PolicyStore.startingHidden(saved: [], seen: ["home", "limits", "approvals", "bulbs", "notes"]) == ["timers", "controls", "models"])
     check("a page the owner already switched on stays on",
