@@ -87,6 +87,8 @@ final class NotesSync: ObservableObject {
             self.commitNow("save")
             var failure: String?
             defer {
+                // a failing sync was silent: the Settings line was the only trace, and nobody reads it unasked
+                if let f = failure { dwarn("notes sync: \(f)") } else { dlog("notes sync: ok") }
                 DispatchQueue.main.async {
                     self.syncing = false
                     self.problem = failure
