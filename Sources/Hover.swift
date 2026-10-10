@@ -79,6 +79,8 @@ final class HoverPeek: NSObject {
     /// Fills the Now page (its lines and status chips) from what is in memory.
     private let refresh: () -> Void
     private let panelOpen: () -> Bool
+    /// ⌘1 to ⌘5 on the card: open the panel on that space. Set by the panel.
+    var openSpace: ((Int) -> Void)?
     private var closeWork: DispatchWorkItem?
     private var poll: Timer?
     private var scrollWatch: Any?
@@ -123,9 +125,15 @@ final class HoverPeek: NSObject {
             return e
         }
         // Number keys pick a page while the card has the keyboard and no field is being typed in.
+        // ⌘ and a number opens the panel on that space, the same key it is inside the panel.
         keyWatch = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
-            guard let self, self.popover.isShown, let w = self.cardWindow, e.window === w,
-                  e.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+            guard let self, self.popover.isShown, let w = self.cardWindow, e.window === w else { return e }
+            if e.modifierFlags.intersection([.command, .control, .option, .shift]) == .command,
+               let n = e.charactersIgnoringModifiers?.first?.wholeNumberValue, n >= 1, n <= Visibility.spaces.count {
+                self.openSpace?(n)
+                return nil
+            }
+            guard e.modifierFlags.intersection([.command, .control, .option]).isEmpty,
                   let p = QuickCycle.page(forKey: e.charactersIgnoringModifiers ?? "", in: self.state.pages,
                                           typing: w.firstResponder is NSTextView) else { return e }
             self.cycle.show(p)

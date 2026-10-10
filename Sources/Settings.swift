@@ -40,7 +40,7 @@ struct SettingsTabView: View {
                       rows: [sizeRow])
             }
             if keys {
-                group("Keyboard", note: "⌘⌘ opens the panel on the last tab; ⌘⌘ again shows a letter for each tab; a third time closes it. ⌃⌥⌘N, ⌃⌥⌘U and ⌃⌥⌘B open Notes, Usage and Home from anywhere, and ⌃⌥⌘Space works like ⌘⌘. In the panel: ⌃Tab walks the tabs, ⌘1 to ⌘5 pick a space, Escape steps back out. On any tab: ↑ and ↓ move between rows, Return does what a click does, Space flips a switch, → and ← open and close a row or step a slider or choice. Notes: → opens and → again edits, Tab walks a note's parts, / searches, ⌘↩ saves, P pins, C copies, 1 to 8 colours.",
+                group("Keyboard", note: "Hold ⌘ for a moment to see the keys that work where you are; ⇧⌘P finds any action or place, ⇧⌘A goes to a tab, note or timer. ⌘⌘ opens the panel on the last tab; ⌘⌘ again shows a letter for each tab; a third time closes it. ⌃⌥⌘N, ⌃⌥⌘U and ⌃⌥⌘B open Notes, Usage and Home from anywhere (with or without ⇧), and ⌃⌥⌘Space works like ⌘⌘. In the panel: ⌘1 to ⌘5 pick a space (also from the hover card), ⌘⌥← and ⌘⌥→ walk the tabs of a space, ⌃Tab walks every tab, ⌘L or ⌘F jumps to the search box, ⌘D pins the tab, ⌘R reloads it, Escape steps back out and finally returns you to the app you came from. On any tab: ↑ and ↓ move between rows, Return does what a click does, Space flips a switch, → and ← open and close a row or step a slider or choice. Approvals: Return opens a request, then ⌘↩ allows and ⌫ denies. Notes: → opens and → again edits, Tab walks a note's parts, / searches, ⌘↩ saves, P pins, C copies, 1 to 8 colours.",
                       rows: [commandWatchRow])
             }
             if !orderedTabs.isEmpty {

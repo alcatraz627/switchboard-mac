@@ -289,7 +289,12 @@ struct ControlsTabView: View {
             section("Sound") {
                 row(icon: controls.muted == true ? "speaker.slash.fill" : "speaker.wave.2.fill",
                     title: controls.outputs.first { $0.id == controls.output }?.name ?? "No output",
-                    caption: controls.volume == nil ? "volume set on the device" : nil) {
+                    caption: controls.volume == nil ? "volume set on the device" : nil,
+                    keys: ("sound", RowKeyActions(toggle: controls.muted == nil ? nil : { controls.toggleMute() },
+                                                  step: controls.volume == nil ? nil : { by in
+                                                      let v = sliderStep(volumeDraft ?? controls.volume ?? 0, by: by)
+                                                      volumeDraft = nil; controls.setVolume(v)
+                                                  }))) {
                     if controls.muted != nil {
                         Button { controls.toggleMute() } label: {
                             Image(systemName: controls.muted == true ? "speaker.slash" : "speaker.wave.1")
@@ -312,7 +317,11 @@ struct ControlsTabView: View {
             }
             if let b = controls.brightness {
                 section("Display") {
-                    row(icon: "sun.max.fill", title: "Built-in display", caption: nil) { EmptyView() }
+                    row(icon: "sun.max.fill", title: "Built-in display", caption: nil,
+                        keys: ("display", RowKeyActions(step: { by in
+                            let v = sliderStep(brightDraft ?? b, by: by)
+                            brightDraft = nil; controls.setBrightness(v)
+                        }))) { EmptyView() }
                     let shown = brightDraft ?? b
                     slider("controls.brightness", value: shown, level: "\(Int((shown * 100).rounded()))%",
                            set: { brightDraft = $0; controls.setBrightness($0) }, commit: { _ in brightDraft = nil })
@@ -326,7 +335,11 @@ struct ControlsTabView: View {
                 section("Wi-Fi") {
                     row(icon: on ? "wifi" : "wifi.slash", title: "Wi-Fi",
                         caption: !on ? "off" : controls.ssid ?? (controls.locationAllowed ? "not connected" : "connected · name hidden by macOS"),
-                        captionIsName: on && controls.ssid != nil) {
+                        captionIsName: on && controls.ssid != nil,
+                        keys: ("wifi", RowKeyActions(toggle: controls.busy.contains("wifi") ? nil : {
+                            if on && !confirm("Turn Wi-Fi off?", "Everything on this Mac that uses the network loses it, including remote sessions.") { return }
+                            controls.setWiFi(!on)
+                        }))) {
                         if on && controls.ssid == nil && !controls.locationAllowed {
                             Button("Show name") { controls.askLocation() }.buttonStyle(.link).font(SBStyle.caption)
                                 .help("macOS shows the network name only to apps with Location access")
@@ -344,7 +357,11 @@ struct ControlsTabView: View {
             if let on = controls.btOn {
                 section("Bluetooth") {
                     row(icon: "dot.radiowaves.left.and.right", title: "Bluetooth",
-                        caption: !on ? "off" : controls.btListed ? "\(controls.btDevices.filter(\.connected).count) connected" : "on") {
+                        caption: !on ? "off" : controls.btListed ? "\(controls.btDevices.filter(\.connected).count) connected" : "on",
+                        keys: ("bluetooth", RowKeyActions(toggle: controls.busy.contains("bluetooth") ? nil : {
+                            if on && !confirm("Turn Bluetooth off?", "A Bluetooth keyboard, mouse or headphones disconnect at once.") { return }
+                            controls.setBluetooth(!on)
+                        }))) {
                         if controls.busy.contains("bluetooth") { PendingMark(since: controls.busySince["bluetooth"] ?? Date()) }
                         Toggle("", isOn: Binding(get: { on }, set: { new in
                             if !new && !confirm("Turn Bluetooth off?", "A Bluetooth keyboard, mouse or headphones disconnect at once.") { return }
@@ -362,7 +379,8 @@ struct ControlsTabView: View {
                         ForEach(controls.btDevices) { d in
                             Divider().padding(.leading, SBStyle.rowH + 26)
                             row(icon: d.connected ? "checkmark.circle.fill" : "circle", title: d.name,
-                                caption: d.connected ? "connected" : "paired", indent: 14) {
+                                caption: d.connected ? "connected" : "paired", indent: 14,
+                                keys: ("bt-" + d.id, RowKeyActions(toggle: controls.busy.contains(d.id) ? nil : { controls.toggleDevice(d) }))) {
                                 if controls.busy.contains(d.id) { PendingMark(since: controls.busySince[d.id] ?? Date()) }
                                 Button { controls.toggleDevice(d) } label: {
                                     Image(systemName: d.connected ? "bolt.horizontal.circle.fill" : "bolt.horizontal.circle")
@@ -394,8 +412,20 @@ struct ControlsTabView: View {
 
     /// A row's title is always a name (a device, a network), so it stays on
     /// one line and gives up its middle when it does not fit.
-    private func row<C: View>(icon: String, title: String, caption: String?, captionIsName: Bool = false, indent: CGFloat = 0,
-                              @ViewBuilder trailing: () -> C) -> some View {
+    /// `keys` makes the row reachable by ↑/↓ and gives Space, ← and → their jobs.
+    @ViewBuilder private func row<C: View>(icon: String, title: String, caption: String?, captionIsName: Bool = false, indent: CGFloat = 0,
+                                           keys: (id: String, actions: RowKeyActions)? = nil,
+                                           @ViewBuilder trailing: () -> C) -> some View {
+        if let k = keys {
+            rowBody(icon: icon, title: title, caption: caption, captionIsName: captionIsName, indent: indent, trailing: trailing)
+                .keyRow("ctl-" + k.id, k.actions)
+        } else {
+            rowBody(icon: icon, title: title, caption: caption, captionIsName: captionIsName, indent: indent, trailing: trailing)
+        }
+    }
+
+    private func rowBody<C: View>(icon: String, title: String, caption: String?, captionIsName: Bool, indent: CGFloat,
+                                  @ViewBuilder trailing: () -> C) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon).font(.sbIcon(12)).foregroundStyle(.secondary).frame(width: si(18))
             VStack(alignment: .leading, spacing: 1) {

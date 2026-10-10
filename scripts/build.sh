@@ -61,7 +61,9 @@ STAGE="$ROOT/build/.stage"
 [[ -d "$STAGE" ]] && discard "$STAGE"
 mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources/lib"
 
-/usr/bin/swiftc -O "${SOURCES[@]}" -o "$STAGE/Contents/MacOS/$APP_NAME"
+# The target is pinned: the macOS 27 beta toolchain otherwise stamps the binary
+# minos 28.0 and LaunchServices refuses to open it (-10825).
+/usr/bin/swiftc -O -target arm64-apple-macos26.0 "${SOURCES[@]}" -o "$STAGE/Contents/MacOS/$APP_NAME"
 cp -f "$ROOT"/Resources/lib/*.py "$STAGE/Contents/Resources/lib/"
 COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo dev)"
 cat > "$STAGE/Contents/Info.plist" <<EOF

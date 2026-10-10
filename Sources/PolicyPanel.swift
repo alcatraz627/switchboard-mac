@@ -261,12 +261,15 @@ struct PolicyPanel: View {
             spaceBar
             if currentSpaceTabs.count > 1 { subTabs }
             if keys.jumping && !unbounded { jumpStrip }
+            if actions.palette != nil { PaletteView() }
+            else if actions.hints { HintStrip() }
         }
         .padding(.horizontal, PT.gap)
         .padding(.vertical, 10)
     }
 
     @ObservedObject private var keys = PanelKeys.shared
+    @ObservedObject private var actions = ActionRegistry.shared
     @ObservedObject private var toast = Toast.shared
 
     /// After ⌘⌘: each tab's letter. A letter jumps there; Escape or ⌘⌘ again stops listening.
@@ -783,6 +786,9 @@ struct SystemRowView: View {
         if let choose = row.onChoose, let ch = row.choices, !ch.isEmpty {
             k.step = { by in choose(min(ch.count - 1, max(0, row.selected + by))) }
         }
+        // a request's Approve and Deny, by key, only once its details are open
+        if let yes = row.buttons.first(where: { $0.label == "Approve" }) { k.confirm = { if expanded || !opens { press(yes) } } }
+        if let no = row.buttons.first(where: { $0.label == "Deny" || $0.label == "Cancel" }) { k.deny = { if expanded || !opens { press(no) } } }
         return k
     }
     /// A row that only shows text (an opened item's details): its words can be
@@ -1436,6 +1442,8 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     private var panelScroll: Any?
     private var panelMiddle: Any?
     private var panelKeys: Any?
+    /// The app in front when a key opened the panel; Escape hands the keyboard back to it.
+    private var cameFrom: NSRunningApplication?
     private var pageWatch: AnyCancellable?
     private var countWatch: AnyCancellable?
     /// A Now page pinned to the desktop shares the hover card's badges; they refresh while it is up.
@@ -1512,6 +1520,13 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             peek = HoverPeek(button: b, state: quick, card: AnyView(ScaledRoot { card }),
                              refresh: { [weak self] in self?.refreshQuick() },
                              panelOpen: { [weak self] in self?.popover.isShown ?? false })
+            peek?.openSpace = { [weak self] n in
+                guard let self else { return }
+                let spaces = self.tabOrder.spaces
+                guard spaces.indices.contains(n - 1), let tab = spaces[n - 1].first else { return }
+                self.peek?.hide()
+                self.frontDoor(tab: tab)
+            }
             let d = IconDot(on: b)
             dot = d
             // One writer for the dot: this and updateDot both go through renderDot,
@@ -1561,6 +1576,50 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             return self.handleKey(e) ? nil : e
         }
         KeyRouter.lights = lights
+        // The palette and the hint strip read this; the probe and the docs read the same table.
+        let reg = ActionRegistry.shared
+        reg.currentTab = { [weak self] in self?.currentTab ?? "agents" }
+        reg.currentDepth = { [weak self] in self?.keyboardDepth ?? "tab" }
+        reg.runners = [
+            "panel.pin": { [weak self] in if let t = self?.currentTab { DeskPanels.shared.pin(.tab, t) } },
+            "panel.reload": { [weak self] in
+                guard let self else { return }
+                self.store.expireCatalog(self.currentTab); self.concerns.first { $0.id == self.currentTab }?.refresh()
+            },
+            "panel.settings": { [weak self] in self?.switchTab("settings") },
+            "panel.search": { [weak self] in
+                // the tab's search box is the first editable field in the panel; a tab without one says so
+                guard let v = self?.popover.contentViewController?.view, let w = v.window else { return }
+                func field(in view: NSView) -> NSView? {
+                    if let t = view as? NSTextField, t.isEditable { return t }
+                    if let t = view as? NSTextView, t.isEditable { return t }
+                    for s in view.subviews { if let f = field(in: s) { return f } }
+                    return nil
+                }
+                if let f = field(in: v) { w.makeFirstResponder(f) } else { Toast.shared.show("No search box on this tab") }
+            },
+            "panel.close": { [weak self] in self?.popover.performClose(nil) },
+            "panel.goto": { reg.open(.goTo) },
+            "panel.keys": { reg.open(.keys) },
+        ]
+        reg.places = { [weak self] in
+            guard let self else { return [] }
+            var out: [KeyAction] = self.tabOrder.tabs.compactMap { id in
+                guard let c = self.concerns.first(where: { $0.id == id }) else { return nil }
+                let letter = JumpLetters.letter(for: id).map { "⌘⌘ " + String($0).uppercased() } ?? "tab"
+                return KeyAction(id: "place.tab." + id, title: "Go to " + c.title, key: letter, surface: "place", depth: "anywhere",
+                                 run: { [weak self] in self?.switchTab(id) })
+            }
+            out += NotesStore.shared.notes.prefix(60).map { n in
+                KeyAction(id: "place.note." + n.id, title: "Note: " + n.title, key: "note", surface: "place", depth: "anywhere",
+                          run: { [weak self] in self?.reveal(tab: "notes", key: "note-" + n.id) })
+            }
+            out += TimerStore.shared.timers.map { t in
+                KeyAction(id: "place.timer." + t.id, title: "Timer: " + t.label, key: "timer", surface: "place", depth: "anywhere",
+                          run: { [weak self] in self?.reveal(tab: "timers", key: "timer-" + t.id) })
+            }
+            return out
+        }
         HotKeys.shared.onDoubleCommand = { [weak self] in self?.frontDoor(tab: nil) }
         HotKeys.shared.onChord = { [weak self] tab in self?.frontDoor(tab: tab == "leader" ? nil : tab) }
         HotKeys.shared.start()
@@ -1625,6 +1684,8 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     /// Open: a chord switches tab; ⌘⌘ shows the jump letters, and again closes.
     func frontDoor(tab: String?) {
         if !popover.isShown {
+            // so Escape can hand the keyboard back to the app the owner came from
+            cameFrom = NSWorkspace.shared.frontmostApplication
             NSApp.activate(ignoringOtherApps: true)
             show(tab: tab ?? UserDefaults.standard.string(forKey: PolicyPanel.tabKey))
             return
@@ -1659,18 +1720,41 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         concerns.first { $0.id == tab }?.refresh()
     }
 
+    /// Where the keyboard is on the open tab, for the hint strip: typing in a
+    /// field, inside an open note, on a row, or at the tab itself.
+    private var keyboardDepth: String {
+        if (popover.contentViewController?.view.window?.firstResponder as? NSTextView)?.isEditable == true { return "field" }
+        if currentTab == "notes" {
+            switch NotesNav.forSpace(ScrollTargets.space).focus {
+            case .open: return "open"
+            case .row: return "row"
+            default: return "tab"
+            }
+        }
+        if currentTab == "home" || currentTab == "timers" {
+            return RowNav.forSpace(ScrollTargets.space, currentTab).focusedID == nil ? "tab" : "row"
+        }
+        return KeyRows.forSpace(ScrollTargets.space).focused == nil ? "tab" : "row"
+    }
+
     private func handleKey(_ e: NSEvent) -> Bool {
+        let reg = ActionRegistry.shared
+        if reg.handle(e) { return true }
         let o = tabOrder
         switch PanelNav.move(e, current: currentTab, tabs: o.tabs, spaces: o.spaces, jumping: PanelKeys.shared.jumping) {
         case .tab(let t)?: switchTab(t); return true
         case .close?: popover.performClose(nil); return true
         case .none?: return true
+        case .palette(let m)?: if reg.palette == m { reg.close() } else { reg.open(m) }; return true
+        case .action(let id)?: reg.runners[id]?(); return true
         case nil: break
         }
         if KeyRouter.handle(e, space: ScrollTargets.space, tab: currentTab) { return true }
-        // Escape with nothing left to step out of closes the panel
+        // Escape with nothing left to step out of closes the panel and goes back where the keyboard was
         if Int(e.keyCode) == kVK_Escape, !((e.window?.firstResponder as? NSTextView)?.isEditable ?? false) {
             popover.performClose(nil)
+            if let app = cameFrom, app.processIdentifier != ProcessInfo.processInfo.processIdentifier { app.activate() }
+            cameFrom = nil
             return true
         }
         return false

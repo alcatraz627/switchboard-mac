@@ -5,7 +5,7 @@
 //
 //   --dump                  print every Machine-tab row
 //   --dump-policy [--scope <dir>]
-//   --snapshot <out.png> [--tab <tab id, e.g. agents, rules, notes, controls>] [--light] [--scope <dir>] [--expand]
+//   --snapshot <out.png> [--tab <tab id, e.g. agents, rules, notes, controls>] [--light] [--scope <dir>] [--expand] [--palette | --hints]
 //   --probe-timers          exercise the timed-flip engine on Keep Awake
 //   --probe-controls        write volume, mute and brightness back to themselves
 //   --probe-approve         approve a planted push in a scratch folder, never ~/.claude
@@ -123,7 +123,7 @@ if args.contains("--time-tabs") {
     exit(0)
 }
 if args.contains("--probe-quick") {
-    let r = probeQuickCycle() + "\n" + (probePointer() + probeScale() + probeDesk() + probeTimerShorthand() + probeKeys()).joined(separator: "\n")
+    let r = probeQuickCycle() + "\n" + (probePointer() + probeScale() + probeDesk() + probeTimerShorthand() + probeKeys() + probeActions()).joined(separator: "\n")
     print(r)
     exit(r.contains("FAIL") ? 1 : 0)
 }
@@ -187,6 +187,9 @@ if let out = argAfter("--snapshot") {
         UserDefaults.standard.removeObject(forKey: TimerStore.key)
     }
     if args.contains("--notifications-off") { TimerStore.shared.notificationsOff = true }
+    // The palette open, or the hint strip as if ⌘ were held, for a picture of either.
+    if args.contains("--palette") { ActionRegistry.shared.currentTab = { tab }; ActionRegistry.shared.open(.all) }
+    if args.contains("--hints") { ActionRegistry.shared.currentTab = { tab }; ActionRegistry.shared.hints = true }
     // Tabs that draw Machine groups, their own or ones moved to them, need the probe.
     let usesSystem = tab == "system" || tab == "remote" || SystemTabView.groupHome.values.contains(tab)
     let fresh = usesSystem ? delegate.panelSystemGroupsFresh() : []

@@ -379,6 +379,10 @@ struct RowKeyActions {
     /// → opens, ← closes, for a row with children. Answers whether it is open.
     var isOpen: (() -> Bool)?
     var setOpen: ((Bool) -> Void)?
+    /// ⌘↩ and ⌫ on a request: approve it, deny it. Only offered once the row is open,
+    /// so a stray ⌘↩ on the list cannot approve anything (owner, 2026-10-10).
+    var confirm: (() -> Void)?
+    var deny: (() -> Void)?
 }
 
 /// The rows on one window's tabs that take keys, by where they sit on screen,
@@ -424,6 +428,12 @@ final class KeyRows: ObservableObject {
         case .space:
             guard let a else { return false }
             (a.toggle ?? a.primary)?()
+        case .save:
+            guard let c = a?.confirm else { return false }
+            c()
+        case .delete:
+            guard let d = a?.deny else { return false }
+            d()
         default: return false
         }
         if let f = focused { FocusScroll.shared.show("kr-" + f) }
@@ -669,6 +679,7 @@ final class HotKeys {
     private var refs: [EventHotKeyRef?] = []
     private var monitors: [Any] = []
     private var tap = DoubleTap()
+    private let hold = CommandHold()
 
     func start() {
         registerChords()
@@ -696,19 +707,23 @@ final class HotKeys {
             }
             return noErr
         }, 1, &spec, nil, nil)
+        // Each chord is taken with and without ⇧, so a Caps Lock Hyper key (⌃⌥⌘⇧) opens it too.
         let mods = UInt32(controlKey | optionKey | cmdKey)
         for (i, c) in Self.chords.enumerated() {
-            var ref: EventHotKeyRef?
-            let id = EventHotKeyID(signature: OSType(0x53574244), id: UInt32(i))   // "SWBD"
-            let r = RegisterEventHotKey(UInt32(c.key), mods, id, GetApplicationEventTarget(), 0, &ref)
-            if r != noErr { dlog("hotkey \(c.label) not registered (\(r)); another app may hold it") }
-            refs.append(ref)
+            for withShift in [false, true] {
+                var ref: EventHotKeyRef?
+                let id = EventHotKeyID(signature: OSType(0x53574244), id: UInt32(i))   // "SWBD"
+                let r = RegisterEventHotKey(UInt32(c.key), withShift ? mods | UInt32(shiftKey) : mods, id, GetApplicationEventTarget(), 0, &ref)
+                if r != noErr { dlog("hotkey \(c.label)\(withShift ? "+⇧" : "") not registered (\(r)); another app may hold it") }
+                refs.append(ref)
+            }
         }
     }
 
     private func watchCommand() {
         let feed: (NSEvent) -> Void = { [weak self] e in
             guard let self else { return }
+            self.hold.feed(e)
             if self.tap.feed(e.type == .flagsChanged ? .flags(e.modifierFlags.intersection(.deviceIndependentFlagsMask)) : .other,
                              at: e.timestamp) {
                 DispatchQueue.main.async { self.onDoubleCommand() }
@@ -764,11 +779,39 @@ final class PanelKeys: ObservableObject {
 /// The panel-wide keys, before a tab sees anything: ⌃Tab and ⌃⇧Tab walk the
 /// tabs, ⌘1 to ⌘5 pick a space, and after ⌘⌘ a letter jumps to its tab.
 enum PanelNav {
-    enum Move: Equatable { case tab(String), close, none }
+    enum Move: Equatable {
+        case tab(String), close, none
+        /// ⇧⌘P, ⇧⌘A, ⌘/: the palette in one of its modes.
+        case palette(PaletteMode)
+        /// ⌘D, ⌘R, ⌘,: a panel action by its id in the table (Actions.swift).
+        case action(String)
+    }
 
     /// `tabs` is the visible tabs in bar order; `spaces` each space's tabs.
     static func move(_ e: NSEvent, current: String, tabs: [String], spaces: [[String]], jumping: Bool) -> Move? {
         let mods = e.modifierFlags.intersection([.command, .shift, .option, .control])
+        let code = Int(e.keyCode)
+        // the palette and the panel actions, before anything else, so they work mid-jump and mid-typing
+        if mods == [.command, .shift] {
+            if code == kVK_ANSI_P { return .palette(.all) }
+            if code == kVK_ANSI_A { return .palette(.goTo) }
+        }
+        if mods == .command {
+            switch code {
+            case kVK_ANSI_Slash: return .palette(.keys)
+            case kVK_ANSI_D: return .action("panel.pin")
+            case kVK_ANSI_R: return .action("panel.reload")
+            case kVK_ANSI_Comma: return .action("panel.settings")
+            case kVK_ANSI_L, kVK_ANSI_F: return .action("panel.search")
+            default: break
+            }
+        }
+        // ⌘⌥← and ⌘⌥→: the tabs of the space the current tab is in, wrapping
+        if mods == [.command, .option], code == kVK_LeftArrow || code == kVK_RightArrow,
+           let s = spaces.first(where: { $0.contains(current) }), let i = s.firstIndex(of: current) {
+            let by = code == kVK_RightArrow ? 1 : -1
+            return .tab(s[(i + by + s.count) % s.count])
+        }
         if jumping {
             PanelKeys.shared.jumping = false
             if Int(e.keyCode) == kVK_Escape { return Move.none }
@@ -913,6 +956,14 @@ func probeKeys() -> [String] {
     check("after ⌘⌘, a letter jumps to its tab", mv(ev(kVK_ANSI_B, [], "b"), jumping: true) == .tab("home"))
     check("after ⌘⌘, Escape just stops listening", mv(ev(kVK_Escape, [], "\u{1b}"), jumping: true) == PanelNav.Move.none)
     check("without ⌘⌘, letters are left to the tab", mv(ev(kVK_ANSI_B, [], "b")) == nil)
+    check("⌘⌥→ and ⌘⌥← walk the tabs of this space and wrap", mv(ev(kVK_RightArrow, [.command, .option]), "timers") == .tab("notes")
+          && mv(ev(kVK_RightArrow, [.command, .option]), "notes") == .tab("timers") && mv(ev(kVK_LeftArrow, [.command, .option]), "timers") == .tab("notes"))
+    check("⇧⌘P opens the palette, ⇧⌘A the places, ⌘/ the keys here",
+          mv(ev(kVK_ANSI_P, [.command, .shift], "p")) == .palette(.all) && mv(ev(kVK_ANSI_A, [.command, .shift], "a")) == .palette(.goTo)
+          && mv(ev(kVK_ANSI_Slash, .command, "/")) == .palette(.keys))
+    check("⌘D pins, ⌘R reloads, ⌘, opens Settings, ⌘L and ⌘F find the search box", mv(ev(kVK_ANSI_D, .command, "d")) == .action("panel.pin")
+          && mv(ev(kVK_ANSI_R, .command, "r")) == .action("panel.reload") && mv(ev(kVK_ANSI_Comma, .command, ",")) == .action("panel.settings")
+          && mv(ev(kVK_ANSI_L, .command, "l")) == .action("panel.search") && mv(ev(kVK_ANSI_F, .command, "f")) == .action("panel.search"))
     PanelKeys.shared.jumping = false
 
     // any other tab: rows in reading order, each acted on by what it offers
@@ -936,6 +987,18 @@ func probeKeys() -> [String] {
     kr.set("s", frame: CGRect(x: 0, y: 100, width: 10, height: 10), actions: RowKeyActions(step: { stepped += $0 }))
     kr.focused = "s"; _ = kr.handle(.right); _ = kr.handle(.right); _ = kr.handle(.left)
     check("← and → step a slider or a choice", stepped == 1)
+    var verdict: [String] = []
+    var openReq = false
+    kr.set("req", frame: CGRect(x: 0, y: 130, width: 10, height: 10),
+           actions: RowKeyActions(isOpen: { openReq }, setOpen: { openReq = $0 },
+                                  confirm: { if openReq { verdict.append("approve") } }, deny: { if openReq { verdict.append("deny") } }))
+    kr.focused = "req"
+    _ = kr.handle(.save)
+    check("⌘↩ on a closed request approves nothing", verdict.isEmpty)
+    _ = kr.handle(.enter); _ = kr.handle(.save); _ = kr.handle(.delete)
+    check("Return opens the request, then ⌘↩ approves and ⌫ denies", openReq && verdict == ["approve", "deny"])
+    kr.focused = "a"
+    check("⌘↩ on a row with no request is left to the panel", !kr.handle(.save))
 
     // bulbs and timers
     let rows = ["x", "y"]
