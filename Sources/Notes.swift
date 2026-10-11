@@ -315,7 +315,20 @@ func probeNotes() -> String {
     // The colour dots can be added to, renamed and removed; a note's file keeps the name it was saved with.
     let pal = NotePalette.shared
     pal.reset()
+    NotePalette.customOn = false
     check("the palette starts as the shared eight", pal.dots.map(\.key) == timerColors.map(\.0))
+    check("custom colours are off until the owner turns them on", !NotePalette.customOn)
+    // Off: a custom dot may sit in the palette, but no picker offers it and no note file is given its name.
+    let hidden = pal.add(label: "Hidden hue", hex: "#778899")
+    let offNote = s.add(title: "Off note", body: "", color: "hidden-hue")
+    check("while custom colours are off, a custom name is not written into a note",
+          offNote?.color == nil && !((try? String(contentsOfFile: offNote?.path ?? "", encoding: .utf8)) ?? "").contains("color:"))
+    check("and the pickers offer only the shared eight", hidden != nil && pal.colors.map(\.0) == timerColors.map(\.0), pal.colors.map(\.0).joined(separator: ","))
+    check("a shared name is still written while they are off", s.add(title: "Shared hue", body: "", color: "red")?.color == "red")
+    pal.reset()
+    NotePalette.customOn = true
+    check("turned on, the pickers offer the added dot", pal.add(label: "Seen hue", hex: "#778899") != nil && pal.colors.count == 9)
+    pal.reset()
     let sea = pal.add(label: "Deep sea", hex: "#112233")
     check("an added dot's name is made from its label", sea?.key == "deep-sea" && pal.dots.count == 9, sea?.key ?? "nil")
     check("a second dot with the same label gets its own name", pal.add(label: "Deep sea", hex: "#445566")?.key == "deep-sea-2")
@@ -333,6 +346,7 @@ func probeNotes() -> String {
     pal.reset()
     check("reset brings back the shared eight", pal.dots == NotePalette.eight && pal.label("red") == "Red")
     check("the last dot cannot be removed", { let q = NotePalette(); for d in q.dots.dropFirst() { q.remove(d.key) }; q.remove(q.dots[0].key); let one = q.dots.count; q.reset(); return one == 1 }())
+    NotePalette.customOn = false
     lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
     return lines.joined(separator: "\n")
 }
@@ -518,7 +532,7 @@ final class NotesStore: ObservableObject {
         // Enter on a note already saved does not make a second copy.
         if let same = notes.first(where: { $0.title == title && $0.body == body && ($0.url ?? "") == url }) { return same }
         var n = Note(id: newID(), title: title, body: body, tags: [], created: Date())
-        n.color = color.flatMap(noteColorName)
+        n.color = color.flatMap(NotePalette.shared.writable)
         n.url = url.isEmpty ? nil : url
         guard write(n) else { return nil }
         notes.insert(n, at: 0)
