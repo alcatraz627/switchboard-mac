@@ -274,9 +274,15 @@ enum Settings {
             return false
         }
         obj[key] = value
-        guard let out = try? JSONSerialization.data(withJSONObject: obj,
-                                                    options: [.prettyPrinted, .sortedKeys])
+        // The new text comes from a helper that changes only this key, so the owner's order and layout survive.
+        guard JSONSerialization.isValidJSONObject(obj),
+              let valueJSON = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]),
+              let valueText = String(data: valueJSON, encoding: .utf8)
         else { lastError = "That value could not be written to settings.json."; return false }
+        let made = Services.run("/usr/bin/env", ["python3", AppPaths.lib("settings_set.py"), path, key, valueText], timeout: 10)
+        guard made.ok, !made.out.isEmpty, let out = made.out.data(using: .utf8),
+              (try? JSONSerialization.jsonObject(with: out)) != nil
+        else { lastError = "settings.json could not be rewritten: \(made.failure ?? "the helper gave no file")"; return false }
         let tmp = path + ".tmp-\(getpid())"
         guard (try? out.write(to: URL(fileURLWithPath: tmp), options: .atomic)) != nil else {
             lastError = "settings.json could not be written; the disk may be full or read-only."
