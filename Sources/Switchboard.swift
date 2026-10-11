@@ -280,8 +280,11 @@ enum Settings {
               let valueText = String(data: valueJSON, encoding: .utf8)
         else { lastError = "That value could not be written to settings.json."; return false }
         let made = Services.run("/usr/bin/env", ["python3", AppPaths.lib("settings_set.py"), path, key, valueText], timeout: 10)
-        guard made.ok, !made.out.isEmpty, let out = made.out.data(using: .utf8),
-              (try? JSONSerialization.jsonObject(with: out)) != nil
+        // Without a usable python3 the helper cannot run; the plain writer still flips the setting (it sorts the keys).
+        var helperText = made.ok && !made.out.isEmpty ? made.out.data(using: .utf8) : nil
+        if let t = helperText, (try? JSONSerialization.jsonObject(with: t)) == nil { helperText = nil }
+        let fallback = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys])
+        guard let out = helperText ?? fallback
         else { lastError = "settings.json could not be rewritten: \(made.failure ?? "the helper gave no file")"; return false }
         let tmp = path + ".tmp-\(getpid())"
         guard (try? out.write(to: URL(fileURLWithPath: tmp), options: .atomic)) != nil else {

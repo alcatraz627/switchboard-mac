@@ -12,6 +12,8 @@ import Foundation
 /// the caller points SWITCHBOARD_STATE at; never touches Reminders.
 func probeNotes() -> String {
     NotesStore.remindersOff = true
+    NotesStore.probing = true
+    NotesStore.defaults.removeObject(forKey: NotesStore.folderKey)
     let s = NotesStore()
     var lines: [String] = []
     func check(_ name: String, _ ok: Bool, _ got: String = "") {
@@ -53,11 +55,17 @@ func probeNotes() -> String {
     let written = NotesStore.render(kept)
     check("an unknown header key survives a save", written.contains("\nupdated: 2026-10-11\n") && written.contains("\nmood: calm\n")
           && written.contains("\ncolor: green\n"), written)
+    let listy = NotesStore.parse(id: "y", "---\ntitle: \"L\"\ntags:\n  - a\n  - b\n\nmood: calm\n---\nbody\n")!
+    check("non-blank header lines without a colon are kept in order", listy.extra == ["  - a", "  - b", "mood: calm"], listy.extra.joined(separator: "|"))
+    let bare = NotesStore.parse(id: "z", "---\ntitle: \"Z\"\nreminder_id: \"\"\n---\nbody\n")!
+    let bareOut = NotesStore.render(bare)
+    check("a note with no created line is saved without one", !bareOut.contains("created:") && !bareOut.contains("0001"), bareOut)
+    check("an empty reminder id is not written", !bareOut.contains("reminder_id"), bareOut)
 
     // A folder chosen in Settings that has gone missing is reported, never quietly re-created empty.
-    let savedFolder = UserDefaults.standard.string(forKey: NotesStore.folderKey)
+    let savedFolder = NotesStore.defaults.string(forKey: NotesStore.folderKey)
     let gone = NSTemporaryDirectory() + "sb-notes-missing-\(getpid())"
-    UserDefaults.standard.set(gone, forKey: NotesStore.folderKey)
+    NotesStore.defaults.set(gone, forKey: NotesStore.folderKey)
     let lost = NotesStore()
     lost.load()
     check("a missing chosen folder is said to be missing and not created",
@@ -65,8 +73,10 @@ func probeNotes() -> String {
           lost.error ?? "nil")
     check("saving into it fails with that sentence and still creates nothing",
           lost.add("lost note") == nil && lost.error?.contains("is missing") == true && !FileManager.default.fileExists(atPath: gone))
-    if let b = savedFolder { UserDefaults.standard.set(b, forKey: NotesStore.folderKey) } else { UserDefaults.standard.removeObject(forKey: NotesStore.folderKey) }
+    if let b = savedFolder { NotesStore.defaults.set(b, forKey: NotesStore.folderKey) } else { NotesStore.defaults.removeObject(forKey: NotesStore.folderKey) }
     check("a store that has not read yet is not loaded", !NotesStore().loaded)
+    check("the probe's folder choice never touches the app's own defaults",
+          UserDefaults.standard.string(forKey: NotesStore.folderKey) != gone && NotesStore.probing)
 
     // Reminders through a stand-in: the permission dialog stays up until answer() runs.
     NotesStore.remindersOff = false
@@ -105,7 +115,7 @@ func probeNotes() -> String {
     NotesStore.remindersOff = true
 
     // A folder of the owner's own, holding a markdown file written by hand.
-    let ud = UserDefaults.standard
+    let ud = NotesStore.defaults
     let chosenBefore = ud.string(forKey: NotesStore.folderKey)
     let own = AppPaths.stateDir + "/own-notes"
     // The owner's own folder exists already; the store never creates a chosen one.
@@ -220,6 +230,11 @@ final class NotesStore: ObservableObject {
 
     /// Where notes are kept: the folder chosen in Settings, or the state folder's notes.
     static let folderKey = "switchboard.notesFolder"
+    /// Set by --probe-notes so the folder choice is read and written in a throwaway suite, never the app's own domain.
+    static var probing = false
+    static var defaults: UserDefaults {
+        probing ? (UserDefaults(suiteName: "switchboard.probe-notes") ?? .standard) : .standard
+    }
     /// `~/Notes`, the one folder the Mac, the Pi and the phone share (contract 2026-10-10).
     /// A probe's scratch state keeps its own folder so no check ever touches the owner's notes.
     static var defaultDir: String {
@@ -238,7 +253,7 @@ final class NotesStore: ObservableObject {
         dlog("notes moved to ~/Notes (\(names.filter { $0.hasSuffix(".md") }.count) files); the old folder is kept")
     }
     static var dir: String {
-        let chosen = UserDefaults.standard.string(forKey: folderKey)
+        let chosen = defaults.string(forKey: folderKey)
         let d = (chosen?.isEmpty == false ? chosen! : defaultDir)
         // Rows read a note's path on every redraw: a stat, not a create, when it exists.
         // Only the default folder is ever created: a folder the owner chose that has gone
@@ -399,14 +414,16 @@ final class NotesStore: ObservableObject {
             (try? JSONSerialization.data(withJSONObject: [s], options: [.withoutEscapingSlashes]))
                 .flatMap { String(data: $0, encoding: .utf8) }.map { String($0.dropFirst().dropLast()) } ?? "\"\""
         }
-        var lines = ["---", "title: " + q(n.title), "created: " + iso.string(from: n.created)]
+        var lines = ["---", "title: " + q(n.title)]
+        // a hand-written note with no created line stays without one (the Pi leaves it absent too)
+        if n.created != Date.distantPast { lines.append("created: " + iso.string(from: n.created)) }
         if !n.tags.isEmpty { lines.append("tags: " + q(n.tags.joined(separator: ", "))) }
         if let e = n.expires { lines.append("expires: " + iso.string(from: e)) }
         if let r = n.remindAt {
             lines.append("remind_at: " + iso.string(from: r))
             if n.remindRepeat != .never { lines.append("remind_repeat: " + n.remindRepeat.rawValue) }
         }
-        if let id = n.reminderID { lines.append("reminder_id: " + q(id)) }
+        if let id = n.reminderID, !id.isEmpty { lines.append("reminder_id: " + q(id)) }
         if n.pinned { lines.append("pinned: true") }
         if let c = n.color { lines.append("color: " + c) }
         if let a = n.agent { lines.append("agent: " + q(a)) }
@@ -429,7 +446,11 @@ final class NotesStore: ObservableObject {
         if text.hasPrefix("---\n"), let end = text.range(of: "\n---\n", range: text.index(text.startIndex, offsetBy: 3)..<text.endIndex) {
             let start = text.index(text.startIndex, offsetBy: 4)
             for line in (start < end.lowerBound ? text[start..<end.lowerBound] : "").components(separatedBy: "\n") {
-                guard let c = line.firstIndex(of: ":") else { continue }
+                guard let c = line.firstIndex(of: ":") else {
+                    // a non-blank line with no colon (a YAML list item from another editor) is kept in place
+                    if !line.trimmingCharacters(in: .whitespaces).isEmpty { extra.append(line) }
+                    continue
+                }
                 if !known.contains(String(line[..<c]).trimmingCharacters(in: .whitespaces)) { extra.append(line); continue }
                 var v = String(line[line.index(after: c)...]).trimmingCharacters(in: .whitespaces)
                 if v.hasPrefix("\""), let d = try? JSONSerialization.jsonObject(with: Data("[\(v)]".utf8)) as? [String], let s = d.first { v = s }

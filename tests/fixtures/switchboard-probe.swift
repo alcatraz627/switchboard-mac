@@ -133,6 +133,12 @@ check("and the refusal says why in a sentence", Settings.lastError?.contains("no
 SwitchboardPaths.gccRoot = fixture
 check("a good write clears that reason", Settings.write(key: "effortLevel", value: "medium") && Settings.lastError == nil)
 
+// With the python helper unable to run, a flip still lands through the plain writer.
+let libBefore = ProcessInfo.processInfo.environment["SWITCHBOARD_LIB"]
+setenv("SWITCHBOARD_LIB", fixture + "/no-such-lib", 1)
+check("a flip still works when the python helper cannot run", Settings.write(key: "effortLevel", value: "high") && Settings.effortLevel() == "high" && Settings.lastError == nil)
+if let b = libBefore { setenv("SWITCHBOARD_LIB", b, 1) } else { unsetenv("SWITCHBOARD_LIB") }
+
 // Refuse to invent a config where none exists. The directory must EXIST with the
 // file missing: pointing at a missing directory proves nothing, because the write
 // then fails on the absent parent rather than on the guard. (Caught by mutation:

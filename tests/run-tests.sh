@@ -46,6 +46,7 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   check "the Ledger tab renders" "$BIN" --snapshot "$WORK/ledger.png" --tab ledger
   check "the Runtime tab renders" "$BIN" --snapshot "$WORK/runtime.png" --tab runtime
   check "the Claude MCP tab renders" "$BIN" --snapshot "$WORK/plugins.png" --tab plugins
+  check "phone --act: --confirmed is a flag only, keys are unique and enabled" "$BIN" --probe-act
   check "a transcript window says when the hub is down" "$BIN" --probe-transcript
   check "a section hidden in Settings is neither drawn nor read" "$BIN" --probe-visibility
   check "the Settings tab renders" "$BIN" --snapshot "$WORK/settings.png" --tab settings

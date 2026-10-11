@@ -87,6 +87,11 @@ if args.contains("--probe-notes") {
     print(sync.joined(separator: "\n"))
     exit(report.hasSuffix("all passed") && !sync.contains { $0.hasPrefix("FAIL") } ? 0 : 1)
 }
+if args.contains("--probe-act") {
+    let lines = probeAct()
+    print((lines + [lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed"]).joined(separator: "\n"))
+    exit(lines.contains { $0.hasPrefix("FAIL") } ? 1 : 0)
+}
 if args.contains("--probe-transcript") {
     let report = probeTranscript()
     print(report)
@@ -241,7 +246,12 @@ func rowJSON(_ r: SystemRow) -> [String: Any] {
     if let l = r.link { d["link"] = l }
     if r.action != nil { d["acts"] = true }
     if let c = r.choices { d["choices"] = c; d["selected"] = r.selected }
-    if !r.buttons.isEmpty { d["buttons"] = r.buttons.map { b -> [String: Any] in ["label": b.label, "icon": b.icon ?? ""] } }
+    if !r.buttons.isEmpty { d["buttons"] = r.buttons.map { b -> [String: Any] in
+        // "runs": --act can press it (a plain run button); the phone hides the rest
+        var runs = false
+        if case .run = b.kind { runs = true }
+        return ["label": b.label, "icon": b.icon ?? "", "runs": runs]
+    } }
     if !r.children.isEmpty { d["children"] = r.children.map(rowJSON) }
     for (k, v) in r.phone { d[k] = v }
     return d
@@ -270,13 +280,64 @@ if let tab = argAfter("--json") {
 
 // One button on one list-tab row, pressed from the phone: the same closure the panel's button runs.
 // A button that asks first answers with its question until the phone sends --confirmed.
-func findRow(_ rows: [SystemRow], key: String) -> SystemRow? {
+/// Every enabled row with this key, anywhere in the tab's groups and children.
+func findRows(_ rows: [SystemRow], key: String) -> [SystemRow] {
+    var out: [SystemRow] = []
     for r in rows {
-        if r.key == key { return r }
-        if let c = findRow(r.children, key: key) { return c }
+        if r.key == key && r.enabled { out.append(r) }
+        out += findRows(r.children, key: key)
     }
-    return nil
+    return out
 }
+/// The one row --act may press, or the sentence saying why none: a key that is gone, disabled everywhere, or shared by two rows.
+func actRow(_ rows: [SystemRow], key: String) -> (row: SystemRow?, error: String?) {
+    let hits = findRows(rows, key: key)
+    if hits.count == 1 { return (hits[0], nil) }
+    if hits.isEmpty { return (nil, "That row is no longer on the Mac; refresh the list") }
+    return (nil, "More than one row on this tab has that key, so nothing was run")
+}
+/// --confirmed counts only as a flag of its own, never as the text after --key, --value or --button.
+func actConfirmed(_ argv: [String]) -> Bool {
+    var i = 0
+    while i < argv.count {
+        if ["--key", "--value", "--button", "--act"].contains(argv[i]) { i += 2; continue }
+        if argv[i] == "--confirmed" { return true }
+        i += 1
+    }
+    return false
+}
+/// A phone-sent --key or --value that starts with "-" could pose as a flag; --act refuses it.
+func actArgsOK(_ argv: [String]) -> Bool {
+    for f in ["--key", "--value"] {
+        if let i = argv.firstIndex(of: f), i + 1 < argv.count, argv[i + 1].hasPrefix("-") { return false }
+    }
+    return true
+}
+
+func probeAct() -> [String] {
+    var lines: [String] = []
+    func check(_ name: String, _ ok: Bool, _ got: String = "") {
+        lines.append("\(ok ? "ok  " : "FAIL") \(name)\(ok || got.isEmpty ? "" : " (got: \(got))")")
+    }
+    func row(_ key: String, enabled: Bool = true, kind: RowButton.Kind = .run({ nil })) -> SystemRow {
+        SystemRow(label: key, state: .ok, note: "", enabled: enabled, key: key, buttons: [RowButton(label: "Go", kind: kind)])
+    }
+    check("--confirmed as a flag counts", actConfirmed(["--act", "t", "--key", "a", "--button", "Go", "--confirmed"]))
+    check("--confirmed as the text after --key or --value does not count",
+          !actConfirmed(["--act", "t", "--key", "--confirmed"]) && !actConfirmed(["--act", "t", "--key", "a", "--value", "--confirmed"]))
+    check("a key or value starting with a dash is refused",
+          !actArgsOK(["--key", "--confirmed"]) && !actArgsOK(["--key", "a", "--value", "-x"]) && actArgsOK(["--key", "a", "--value", "5"]))
+    check("a key shared by two rows is refused", actRow([row("k"), row("k")], key: "k").row == nil && actRow([row("k"), row("k")], key: "k").error?.contains("More than one") == true)
+    check("a key shared across a row and a child is refused", actRow([SystemRow(label: "p", state: .ok, note: "", key: "p", children: [row("k")]), row("k")], key: "k").row == nil)
+    check("a disabled row is skipped, so its enabled twin is the one", actRow([row("k", enabled: false), row("k")], key: "k").row?.enabled == true)
+    check("a row that is only disabled is not found", actRow([row("k", enabled: false)], key: "k").row == nil)
+    check("a unique key is found", actRow([row("a"), row("b")], key: "b").row?.key == "b")
+    func runs(_ k: RowButton.Kind) -> Any? { (rowJSON(row("r", kind: k))["buttons"] as? [[String: Any]])?.first?["runs"] }
+    check("the phone's row JSON marks only run buttons as runnable",
+          runs(.run({ nil })) as? Bool == true && runs(.copy("x")) as? Bool == false && runs(.ask(placeholder: "", { _ in nil })) as? Bool == false)
+    return lines
+}
+
 if let tab = argAfter("--act") {
     func reply(_ d: [String: Any], _ code: Int32) -> Never {
         let data = (try? JSONSerialization.data(withJSONObject: d, options: [.sortedKeys])) ?? Data()
@@ -284,14 +345,15 @@ if let tab = argAfter("--act") {
         exit(code)
     }
     guard let reader = phoneReaders[tab] else { reply(["error": "no list tab named \(tab)"], 2) }
-    guard let key = argAfter("--key"), let row = findRow(reader().flatMap { $0.rows }, key: key) else {
-        reply(["error": "That row is no longer on the Mac; refresh the list"], 3)
-    }
+    guard actArgsOK(args) else { reply(["error": "--key and --value may not start with a dash"], 4) }
+    guard let key = argAfter("--key") else { reply(["error": "That row is no longer on the Mac; refresh the list"], 3) }
+    let found = actRow(reader().flatMap { $0.rows }, key: key)
+    guard let row = found.row else { reply(["error": found.error ?? "That row is no longer on the Mac; refresh the list"], 3) }
     if let label = argAfter("--button") {
         guard let button = row.buttons.first(where: { $0.label == label }) else {
             reply(["error": "\(row.label) has no \(label) button on the Mac now; refresh the list"], 3)
         }
-        if let ask = button.confirm, !args.contains("--confirmed") { reply(["confirm": ask], 0) }
+        if let ask = button.confirm, !actConfirmed(args) { reply(["confirm": ask], 0) }
         switch button.kind {
         case .run(let run):
             if let why = run() { reply(["ok": false, "error": "Couldn't \(button.doing ?? label.lowercased()): \(why)"], 1) }
