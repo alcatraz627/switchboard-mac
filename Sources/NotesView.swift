@@ -637,10 +637,10 @@ struct NoteRow: View {
         Button { save(); withAnimation(Motion.slow) { nav.focus = .row(note.id) } } label: {
             HStack(spacing: 4) {
                 Image(systemName: "chevron.left").font(.sbIcon(10, weight: .semibold))
-                Text("All notes").font(PT.caption)
-                KeyPill(text: "Esc")
+                Text("All notes").font(PT.caption).lineLimit(1).fixedSize()
+                KeyPill(text: "Esc").fixedSize()
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.secondary).fixedSize()
         }
         .buttonStyle(.plain).help("Back to the list (Esc or ←); the note stays as you left it")
     }
@@ -648,23 +648,30 @@ struct NoteRow: View {
     /// Write is the text as typed; Read lays it out. Return starts writing, Esc goes back to reading.
     private var readWriteSwitch: some View {
         let typing = openState?.typing ?? false
-        return HStack(spacing: 0) {
-            modeButton("pencil", "Write", on: typing) { nav.focus = .open(note.id, .body, typing: true) }
-            modeButton("book", "Read", on: !typing) { save(); nav.focus = .open(note.id, .body, typing: false) }
+        // words when there is room, icons alone (words in the tooltip) when there is not; a word never breaks
+        return ViewThatFits(in: .horizontal) {
+            switchButtons(typing: typing, words: true)
+            switchButtons(typing: typing, words: false)
         }
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
         .help("Write: the text as typed. Read: laid out. Return writes, Esc reads")
     }
-    private func modeButton(_ icon: String, _ text: String, on: Bool, _ act: @escaping () -> Void) -> some View {
+    private func switchButtons(typing: Bool, words: Bool) -> some View {
+        HStack(spacing: 0) {
+            modeButton("pencil", "Write", on: typing, words: words) { nav.focus = .open(note.id, .body, typing: true) }
+            modeButton("book", "Read", on: !typing, words: words) { save(); nav.focus = .open(note.id, .body, typing: false) }
+        }
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+    }
+    private func modeButton(_ icon: String, _ text: String, on: Bool, words: Bool, _ act: @escaping () -> Void) -> some View {
         Button(action: act) {
             HStack(spacing: 4) {
                 Image(systemName: icon).font(.sbIcon(10))
-                Text(text).font(.sb(11, weight: on ? .semibold : .regular))
+                if words { Text(text).font(.sb(11, weight: on ? .semibold : .regular)).lineLimit(1).fixedSize() }
             }
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(on ? 0.12 : 0)))
         }
-        .buttonStyle(.plain).foregroundStyle(on ? Color.primary : .secondary)
+        .buttonStyle(.plain).foregroundStyle(on ? Color.primary : .secondary).help(text)
     }
 
     /// The open note's title on one line, cut in the middle; a click opens a box holding all of it.
@@ -907,7 +914,7 @@ struct NoteRow: View {
                         .frame(minHeight: takeover ? 220 : 0, alignment: .top)
                 }
                 // tags as chips; the box after them takes the next one (comma or Return), ⌫ on an empty box drops the last
-                HStack(spacing: 4) {
+                FlowLayout(spacing: 4) {
                     Text("#").font(PT.caption).foregroundStyle(.tertiary)
                     ForEach(d.wrappedValue.tags, id: \.self) { t in tagChip(t, d) }
                     TextField(d.wrappedValue.tags.isEmpty ? "tags" : "+ tag", text: $tagsText)
@@ -1090,7 +1097,7 @@ struct NoteRow: View {
 
     private func tagChip(_ t: String, _ d: Binding<Note>) -> some View {
         HStack(spacing: 3) {
-            Text("#" + t).font(.sb(10.5))
+            Text("#" + t).font(.sb(10.5)).lineLimit(1).fixedSize()
             Button { d.wrappedValue.tags.removeAll { $0 == t } } label: { Image(systemName: "xmark").font(.sbIcon(7, weight: .semibold)) }
                 .buttonStyle(.plain).foregroundStyle(.tertiary).help("Remove #\(t)")
         }
