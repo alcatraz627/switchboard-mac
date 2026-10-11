@@ -40,18 +40,8 @@ struct SettingsTabView: View {
     private func on(_ id: String) -> Bool { !query.isEmpty || section == id }
 
     private var sectionBar: some View {
-        HStack(spacing: 6) {
-            ForEach(Self.sections, id: \.id) { s in
-                Button { section = s.id } label: {
-                    Label(s.title, systemImage: s.icon).font(.sb(11.5, weight: section == s.id ? .semibold : .regular))
-                        .padding(.horizontal, 9).padding(.vertical, 5)
-                        .background(RoundedRectangle(cornerRadius: 7).fill(section == s.id ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.06)))
-                        .contentShape(RoundedRectangle(cornerRadius: 7))
-                }
-                .buttonStyle(.plain).help(s.title)
-            }
-            Spacer(minLength: 0)
-        }
+        SubTabStrip(items: Self.sections.map { SubTabItem(id: $0.id, title: $0.title, icon: $0.icon) },
+                    selected: section) { section = $0 }
     }
 
     var body: some View {
