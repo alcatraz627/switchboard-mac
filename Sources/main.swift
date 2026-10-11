@@ -243,7 +243,13 @@ if let tab = argAfter("--json") {
     guard let reader = catalogReaders[tab] else {
         print("{\"error\": \"no list tab named \(tab); try \(catalogReaders.keys.sorted().joined(separator: ", "))\"}"); exit(2)
     }
-    let groups = reader().map { g -> [String: Any] in ["title": g.title, "rows": g.rows.map(rowJSON)] }
+    // a page at a time: --limit rows per group (40), or one --group from --offset
+    let limit = Int(argAfter("--limit") ?? "") ?? 40, offset = Int(argAfter("--offset") ?? "") ?? 0
+    let only = argAfter("--group")
+    let groups = reader().filter { only == nil || $0.title == only }.map { g -> [String: Any] in
+        let page = Array(g.rows.dropFirst(only == nil ? 0 : offset).prefix(limit))
+        return ["title": g.title, "total": g.rows.count, "offset": only == nil ? 0 : offset, "rows": page.map(rowJSON)]
+    }
     let data = (try? JSONSerialization.data(withJSONObject: ["tab": tab, "groups": groups], options: [.sortedKeys])) ?? Data()
     print(String(data: data, encoding: .utf8) ?? "{}")
     exit(0)
