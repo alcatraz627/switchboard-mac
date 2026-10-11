@@ -46,6 +46,13 @@ func probeNotes() -> String {
     check("a dragged order is kept across a reload", s.notes.map(\.id) == [a!.id, c.id, b!.id], s.notes.map(\.title).joined(separator: ","))
     s.delete(c)
     check("delete removes the file", !FileManager.default.fileExists(atPath: c.path) && !s.notes.contains { $0.id == c.id })
+    // A header key Switchboard has no field for (another tool's, or typed by hand) survives a save here.
+    let foreign = "---\ntitle: \"Kept\"\ncreated: 2026-10-11T00:00:00Z\nupdated: 2026-10-11\nmood: calm\ncolor: green\n---\nbody\n"
+    var kept = NotesStore.parse(id: "x", foreign)!
+    kept.body = "edited"
+    let written = NotesStore.render(kept)
+    check("an unknown header key survives a save", written.contains("\nupdated: 2026-10-11\n") && written.contains("\nmood: calm\n")
+          && written.contains("\ncolor: green\n"), written)
 
     // A folder chosen in Settings that has gone missing is reported, never quietly re-created empty.
     let savedFolder = UserDefaults.standard.string(forKey: NotesStore.folderKey)
@@ -177,6 +184,9 @@ struct Note: Identifiable, Equatable {
     var source: String? = nil
     /// A pin is a note with a link: title, body and url are each optional, one is needed.
     var url: String? = nil
+    /// Header lines Switchboard has no field for, written back as they were, so a key
+    /// another tool or a person added is never lost on a save here.
+    var extra: [String] = []
 
     var expired: Bool { expires.map { $0 <= Date() } ?? false }
     /// Both sides of a clash are in the body, marked by git; the owner sorts it out when they like.
@@ -402,6 +412,7 @@ final class NotesStore: ObservableObject {
         if let a = n.agent { lines.append("agent: " + q(a)) }
         if let s = n.source { lines.append("source: " + q(s)) }
         if let u = n.url { lines.append("url: " + q(u)) }
+        lines += n.extra
         lines.append("---")
         return lines.joined(separator: "\n") + "\n" + n.body + (n.body.isEmpty ? "" : "\n")
     }
@@ -410,12 +421,16 @@ final class NotesStore: ObservableObject {
         // a file saved on Windows or by some editors ends lines with \r\n; the Pi and bfb read it as \n
         let text = raw.replacingOccurrences(of: "\r\n", with: "\n")
         var fields: [String: String] = [:]
+        var extra: [String] = []
+        let known: Set<String> = ["title", "created", "tags", "expires", "remind_at", "remind_repeat", "reminder_id",
+                                  "pinned", "color", "agent", "source", "url"]
         var body = text
         // from offset 3, so an empty block ("---" then "---") closes too
         if text.hasPrefix("---\n"), let end = text.range(of: "\n---\n", range: text.index(text.startIndex, offsetBy: 3)..<text.endIndex) {
             let start = text.index(text.startIndex, offsetBy: 4)
             for line in (start < end.lowerBound ? text[start..<end.lowerBound] : "").components(separatedBy: "\n") {
                 guard let c = line.firstIndex(of: ":") else { continue }
+                if !known.contains(String(line[..<c]).trimmingCharacters(in: .whitespaces)) { extra.append(line); continue }
                 var v = String(line[line.index(after: c)...]).trimmingCharacters(in: .whitespaces)
                 if v.hasPrefix("\""), let d = try? JSONSerialization.jsonObject(with: Data("[\(v)]".utf8)) as? [String], let s = d.first { v = s }
                 // YAML single quotes, as other editors write them: '' is a literal quote
@@ -445,7 +460,7 @@ final class NotesStore: ObservableObject {
                     color: fields["color"].flatMap(tagColorName),
                     agent: fields["agent"].flatMap { $0.isEmpty ? nil : $0 },
                     source: fields["source"].flatMap { $0.isEmpty ? nil : $0 },
-                    url: fields["url"].flatMap { $0.isEmpty ? nil : $0 })
+                    url: fields["url"].flatMap { $0.isEmpty ? nil : $0 }, extra: extra)
     }
 
     // ── Reminders ───────────────────────────────────────────────────────────

@@ -75,6 +75,12 @@ if args.contains("--probe-timers-tab") {
     exit(report.hasSuffix("all passed") ? 0 : 1)
 }
 if args.contains("--probe-notes") {
+    // The probe adds, reorders and deletes notes; run against the owner's own folder it once left
+    // test notes in ~/Notes and reset their order. It runs only inside a scratch state folder.
+    guard let state = ProcessInfo.processInfo.environment["SWITCHBOARD_STATE"], !state.isEmpty else {
+        print("--probe-notes writes notes; set SWITCHBOARD_STATE to a scratch folder (tests/run-tests.sh does)")
+        exit(2)
+    }
     let report = probeNotes()
     let sync = probeNotesSync() + probeMarkdown() + probeFormat()
     print(report)
