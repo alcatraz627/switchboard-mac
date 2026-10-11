@@ -183,6 +183,29 @@ func probeQuickCycle() -> String {
     _ = m.scroll(delta: -1, precise: false, phase: .none, momentum: false, at: 0)
     check("scrolling follows the owner's order", m.page == .notes, m.page.rawValue)
 
+    // Hiding a page from the card.
+    let hp = QuickCard.hidePlan(pages: [.home, .limits, .notes], current: .limits)
+    check("hiding a page turns to the one after it", hp?.next == .notes && hp?.hide == "limits")
+    check("hiding the last page turns to the one before it", QuickCard.hidePlan(pages: [.home, .limits], current: .limits)?.next == .home)
+    check("the only page cannot be hidden", QuickCard.hidePlan(pages: [.home], current: .home) == nil)
+
+    // The header's focus ring.
+    check("a focused control stays unringed until the keyboard is used",
+          !QuickState.ringShows(focused: "pill-home", id: "pill-home", keyboardDriven: false))
+    check("after Tab the focused control is ringed", QuickState.ringShows(focused: "pill-home", id: "pill-home", keyboardDriven: true))
+    check("only the one focused control is ringed",
+          ["pill-home", "pill-limits", "hide", "desk", "open"].filter { QuickState.ringShows(focused: "hide", id: $0, keyboardDriven: true) } == ["hide"])
+    check("nothing is ringed when nothing is focused",
+          !QuickState.ringShows(focused: nil, id: "pill-home", keyboardDriven: true))
+
+    // The dot beside a tab.
+    let standing = Problem.hooks(unwired: 8, missing: 1) + [Problem(text: "1 gate is off", tab: "rules", level: .warn)]
+    check("hook and gate warnings put no dot on their tab", Problem.tabMarks(standing).isEmpty)
+    check("a failing job does, in red, even beside warnings",
+          Problem.tabMarks(standing + [Problem(text: "nightly failed", tab: "runtime", level: .error)]) == ["runtime": .error])
+    check("an error on the same tab as a warning shows as the error",
+          Problem.tabMarks(standing + [Problem(text: "hook crashed", tab: "rules", level: .error)]) == ["rules": .error])
+
     // Number keys.
     let order: [QuickPage] = [.home, .limits, .approvals, .bulbs, .notes]
     check("2 opens the second page", QuickCycle.page(forKey: "2", in: order, typing: false) == .limits)
@@ -240,6 +263,14 @@ func probeQuickCycle() -> String {
     return lines.joined(separator: "\n")
 }
 
+extension Problem {
+    /// The dots beside tab and space names: errors only. A warning such as "8 hook scripts have no event"
+    /// is a standing condition that never clears by itself, so a dot for it is furniture; the Now page badge still names it.
+    static func tabMarks(_ ps: [Problem]) -> [String: ProblemLevel] {
+        levels(ps.filter { $0.level == .error })
+    }
+}
+
 /// What the card shows and which page it is on; the view follows it.
 final class QuickState: ObservableObject {
     @Published var page: QuickPage = .home {
@@ -262,6 +293,14 @@ final class QuickState: ObservableObject {
     var space = ScrollTargets.cardSpace
     /// A desk panel: it stays on screen, so it refreshes at a calmer pace than the hover card.
     var onDesk = false
+    /// Set by a Tab or arrow key on the card, cleared when the card opens. The header's focus ring
+    /// draws only while this is set, so nothing sits ringed just because the card appeared.
+    @Published var keyboardDriven = false
+
+    /// The header control that wears the ring: the focused one, and only after the keyboard was used.
+    static func ringShows(focused: String?, id: String, keyboardDriven: Bool) -> Bool {
+        keyboardDriven && focused == id
+    }
 }
 
 /// One standard badge for something that needs the owner, coloured by how
@@ -341,6 +380,15 @@ let quickLaunchTabs: [(id: String, title: String)] = [
     ("timers", "Timers"), ("controls", "Controls"), ("system", "Machine"),
 ]
 
+extension View {
+    /// A header control's own focus ring in place of the system one, which sat on the first icon
+    /// as soon as the card opened. Drawn only for the focused control after a Tab or arrow key.
+    func headerRing(_ id: String, _ focus: FocusState<String?>.Binding, _ state: QuickState, radius: CGFloat = 5) -> some View {
+        focusEffectDisabled().focused(focus, equals: id)
+            .keyRing(QuickState.ringShows(focused: focus.wrappedValue, id: id, keyboardDriven: state.keyboardDriven), radius: radius)
+    }
+}
+
 /// The hover card: a header with the page's name and dots for every page,
 /// then the page itself.
 struct QuickCard: View {
@@ -362,6 +410,8 @@ struct QuickCard: View {
     var pin: ((QuickPage) -> Void)? = nil
     /// Why the footer's Hub button could not open the hub, if it could not.
     @State private var hubFailed: String?
+    /// Which header control the keyboard is on; at most one, so at most one ring.
+    @FocusState private var focus: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -416,26 +466,46 @@ struct QuickCard: View {
             // A desk panel shows one page and names it in its own title row, so it needs no pills.
             if !state.onDesk { ViewThatFits(in: .horizontal) { pills(named: true); pills(named: false) } }
             Spacer(minLength: 4)
+            if !state.onDesk, let plan = QuickCard.hidePlan(pages: state.pages, current: state.page) {
+                Button {
+                    state.page = plan.next
+                    policy.hiddenQuickPages.insert(plan.hide)
+                } label: {
+                    Image(systemName: "eye.slash").font(.sbIcon(12, weight: .medium))
+                }
+                .buttonStyle(.borderless).foregroundStyle(.secondary).headerRing("hide", $focus, state)
+                .help("Hide \(state.page.title) from the hover card. Bring it back in Settings, Hover card.")
+            }
             if let pin, !state.onDesk {
                 Button { pin(state.page) } label: {
-                    Image(systemName: "pin.square").font(.sbIcon(12, weight: .medium))
+                    // a floating window, not a pin: a pin is what notes carry
+                    Image(systemName: "pip.enter").font(.sbIcon(12, weight: .medium))
                 }
-                .buttonStyle(.borderless).foregroundStyle(.secondary)
+                .buttonStyle(.borderless).foregroundStyle(.secondary).headerRing("desk", $focus, state)
                 .help("Pin \(state.page.title) to the desktop as a panel that stays up")
             }
             if let tab = state.page.tab {
                 Button { openTab(tab) } label: {
-                    Image(systemName: "arrow.up.forward.app").font(.sbIcon(12, weight: .medium))
+                    Image(systemName: "arrow.up.left.and.arrow.down.right").font(.sbIcon(12, weight: .medium))
                 }
-                .buttonStyle(.borderless).foregroundStyle(.secondary).help("Open \(state.page.title) in the panel")
+                .buttonStyle(.borderless).foregroundStyle(.secondary).headerRing("open", $focus, state)
+                .help("Open \(state.page.title) in the panel")
             } else {
                 // Now has no tab of its own; its button opens the hover card's own settings
                 Button { openSearch("settings", "hover") } label: {
                     Image(systemName: "gearshape").font(.sbIcon(12, weight: .medium))
                 }
-                .buttonStyle(.borderless).foregroundStyle(.secondary).help("Hover card settings: pages, delay, what Now shows")
+                .buttonStyle(.borderless).foregroundStyle(.secondary).headerRing("gear", $focus, state)
+                .help("Hover card settings: pages, delay, what Now shows")
             }
         }
+    }
+
+    /// Hiding the page on show: the page to turn to first (the one after it, else the one before) and the id to hide.
+    /// Nothing when it is the only page, so the card always has one.
+    static func hidePlan(pages: [QuickPage], current: QuickPage) -> (next: QuickPage, hide: String)? {
+        guard pages.count > 1, let i = pages.firstIndex(of: current) else { return nil }
+        return (pages[i + 1 < pages.count ? i + 1 : i - 1], current.rawValue)
     }
 
     private func pills(named: Bool) -> some View {
@@ -456,7 +526,7 @@ struct QuickCard: View {
                     .foregroundStyle(on ? .primary : .secondary)
                     .contentShape(Capsule())
                 }
-                .buttonStyle(.plain).help("\(p.title) (\(i + 1))")
+                .buttonStyle(.plain).headerRing("pill-" + p.rawValue, $focus, state, radius: 11).help("\(p.title) (\(i + 1))")
             }
         }
         .fixedSize()
@@ -641,8 +711,9 @@ struct QuickCard: View {
                         .help(n.pinned ? "Pinned" : "Edited in the last two hours")
                     // the note's colour, as the Notes tab shows it
                     if let c = n.color { Circle().fill(timerColor(c)).frame(width: si(7), height: si(7)) }
-                    Text(n.heading).font(.sb(11.5)).fixedSize(horizontal: false, vertical: true)
-                    Spacer()
+                    // one line however long the title; the tooltip carries all of it
+                    Text(n.heading).font(.sb(11.5)).nameFit(n.heading)
+                    Spacer(minLength: 6)
                     Button { openReveal("notes", NotesNav.revealKey(n.id)) } label: { Image(systemName: "square.and.pencil").font(.sbIcon(10.5)) }
                         .buttonStyle(.borderless).foregroundStyle(.secondary).help("Open the note to read or edit")
                     Button {
