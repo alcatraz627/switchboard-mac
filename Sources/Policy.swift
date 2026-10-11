@@ -348,9 +348,9 @@ final class PolicyStore: ObservableObject {
                                                                        all: PolicyStore.quickPageIDs) {
         didSet { UserDefaults.standard.set(quickPageOrder, forKey: Self.quickOrderKey) }
     }
-    @Published var hiddenQuickPages: Set<String> = PolicyStore.startingHidden(
+    @Published var hiddenQuickPages: Set<String> = PolicyStore.timersShownOnce(PolicyStore.startingHidden(
         saved: UserDefaults.standard.stringArray(forKey: PolicyStore.quickHiddenKey) ?? [],
-        seen: UserDefaults.standard.stringArray(forKey: PolicyStore.quickOrderKey) ?? []) {
+        seen: UserDefaults.standard.stringArray(forKey: PolicyStore.quickOrderKey) ?? [])) {
         didSet { UserDefaults.standard.set(Array(hiddenQuickPages).sorted(), forKey: Self.quickHiddenKey) }
     }
     /// How long the hover card stays after the pointer leaves, in whole seconds from 1 to 15.
@@ -375,6 +375,14 @@ final class PolicyStore: ObservableObject {
     }
     @Published var hoverLinger: Double = PolicyStore.savedLinger {
         didSet { UserDefaults.standard.set(hoverLinger, forKey: Self.hoverLingerKey) }
+    }
+    static let timersShownKey = "switchboard.timersPageShownOnce"
+    /// Timers once started hidden and that default was saved as if chosen; the owner asked for timers on
+    /// the card, so it is shown one time. Hiding it again after that is kept.
+    static func timersShownOnce(_ hidden: Set<String>, defaults: UserDefaults = .standard) -> Set<String> {
+        guard !defaults.bool(forKey: timersShownKey) else { return hidden }
+        defaults.set(true, forKey: timersShownKey)
+        return hidden.subtracting(["timers"])
     }
     /// The saved hidden pages, plus any start-hidden page the saved order has never listed (new to this owner).
     static func startingHidden(saved: [String], seen: [String]) -> Set<String> {

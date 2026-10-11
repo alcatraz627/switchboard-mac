@@ -214,6 +214,11 @@ func probeQuickCycle() -> String {
     check("the header offers Timers to someone who never changed the page list",
           !PolicyStore.startingHidden(saved: [], seen: []).contains("timers") && QuickPage.allCases.contains(.timers))
     check("Models stays an opt-in page", PolicyStore.startingHidden(saved: [], seen: []).contains("models"))
+    let once = UserDefaults(suiteName: "sb-probe-timers-\(getpid())")!
+    check("a saved hidden Timers is shown once, and hiding it again afterwards is kept",
+          PolicyStore.timersShownOnce(["timers", "models"], defaults: once) == ["models"]
+          && PolicyStore.timersShownOnce(["timers", "models"], defaults: once) == ["timers", "models"])
+    once.removePersistentDomain(forName: "sb-probe-timers-\(getpid())")
     let tick = StatusBadge(id: "t", icon: "timer", text: "Tea", kind: .info, help: "", until: Date(timeIntervalSince1970: 1000))
     check("a timer badge counts down with the clock, not with when it was made",
           tick.text(at: Date(timeIntervalSince1970: 940)) == "Tea · 1:00" && tick.text(at: Date(timeIntervalSince1970: 970)) == "Tea · 0:30"
