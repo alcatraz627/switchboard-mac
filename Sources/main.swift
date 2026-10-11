@@ -237,18 +237,25 @@ func rowJSON(_ r: SystemRow) -> [String: Any] {
     if let c = r.choices { d["choices"] = c; d["selected"] = r.selected }
     if !r.buttons.isEmpty { d["buttons"] = r.buttons.map { b -> [String: Any] in ["label": b.label, "icon": b.icon ?? ""] } }
     if !r.children.isEmpty { d["children"] = r.children.map(rowJSON) }
+    for (k, v) in r.phone { d[k] = v }
     return d
 }
 if let tab = argAfter("--json") {
-    guard let reader = catalogReaders[tab] else {
-        print("{\"error\": \"no list tab named \(tab); try \(catalogReaders.keys.sorted().joined(separator: ", "))\"}"); exit(2)
+    guard let reader = phoneReaders[tab] else {
+        print("{\"error\": \"no list tab named \(tab); try \(phoneReaders.keys.sorted().joined(separator: ", "))\"}"); exit(2)
     }
     // a page at a time: --limit rows per group (40), or one --group from --offset
     let limit = Int(argAfter("--limit") ?? "") ?? 40, offset = Int(argAfter("--offset") ?? "") ?? 0
     let only = argAfter("--group")
     let groups = reader().filter { only == nil || $0.title == only }.map { g -> [String: Any] in
         let page = Array(g.rows.dropFirst(only == nil ? 0 : offset).prefix(limit))
-        return ["title": g.title, "total": g.rows.count, "offset": only == nil ? 0 : offset, "rows": page.map(rowJSON)]
+        var d: [String: Any] = ["title": g.title, "total": g.rows.count, "offset": only == nil ? 0 : offset, "rows": page.map(rowJSON)]
+        // why a section is empty or partial, in the panel's own words
+        switch g.status {
+        case .failed(let m)?, .unavailable(let m)?, .stale(_, let m)?: d["status"] = m
+        default: break
+        }
+        return d
     }
     let data = (try? JSONSerialization.data(withJSONObject: ["tab": tab, "groups": groups], options: [.sortedKeys])) ?? Data()
     print(String(data: data, encoding: .utf8) ?? "{}")
@@ -270,7 +277,7 @@ if let tab = argAfter("--act") {
         print(String(data: data, encoding: .utf8) ?? "{}")
         exit(code)
     }
-    guard let reader = catalogReaders[tab] else { reply(["error": "no list tab named \(tab)"], 2) }
+    guard let reader = phoneReaders[tab] else { reply(["error": "no list tab named \(tab)"], 2) }
     guard let key = argAfter("--key"), let row = findRow(reader().flatMap { $0.rows }, key: key) else {
         reply(["error": "That row is no longer on the Mac; refresh the list"], 3)
     }
@@ -279,8 +286,16 @@ if let tab = argAfter("--act") {
             reply(["error": "\(row.label) has no \(label) button on the Mac now; refresh the list"], 3)
         }
         if let ask = button.confirm, !args.contains("--confirmed") { reply(["confirm": ask], 0) }
-        guard case .run(let run) = button.kind else { reply(["error": "\(label) works only on the Mac"], 4) }
-        if let why = run() { reply(["ok": false, "error": "Couldn't \(button.doing ?? label.lowercased()): \(why)"], 1) }
+        switch button.kind {
+        case .run(let run):
+            if let why = run() { reply(["ok": false, "error": "Couldn't \(button.doing ?? label.lowercased()): \(why)"], 1) }
+        case .ask(_, let run):
+            // a button that wants a line of text (a brightness, a colour) takes it as --value
+            guard let value = argAfter("--value") else { reply(["error": "\(label) needs a --value"], 4) }
+            if let why = run(value) { reply(["ok": false, "error": "Couldn't \(button.doing ?? label.lowercased()): \(why)"], 1) }
+        default:
+            reply(["error": "\(label) works only on the Mac"], 4)
+        }
     } else if let action = row.action {
         action()
     } else {

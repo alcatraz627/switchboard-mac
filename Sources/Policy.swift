@@ -246,6 +246,8 @@ struct SystemRow: Identifiable {
     var icon: String? = nil
     /// Opens on first show, as a search match does so the match is visible.
     var startsOpen = false
+    /// Extra fields only the phone's --json reads (a meter's percent, a bulb's brightness).
+    var phone: [String: Any] = [:]
 
     var id: String { key ?? label }
     /// A plain on/off with a single action renders as a switch.
