@@ -202,6 +202,92 @@ func probeNotes() -> String {
     for t in s.trashed { s.purge(t) }
     check("the hidden folder is not read as notes", !s.notes.contains { $0.id.hasPrefix(".") })
 
+    // Duplicate: the same words, tags, colour and link, but never the pin or a reminder.
+    var src = s.add(title: "Source", body: "words", color: "blue", url: "https://example.com/s")!
+    src.tags = ["t1"]; src.pinned = true
+    src.remindAt = Date().addingTimeInterval(3600)
+    s.update(src)
+    let dup = s.duplicate(s.notes.first { $0.id == src.id }!)
+    s.load()
+    let dupBack = s.notes.first { $0.id == dup?.id }
+    check("a duplicate keeps the words, tags, colour and link", dupBack?.title == "Source copy" && dupBack?.body == "words"
+          && dupBack?.tags == ["t1"] && dupBack?.color == "blue" && dupBack?.url == "https://example.com/s")
+    check("a duplicate is not pinned and has no reminder", dupBack?.pinned == false && dupBack?.remindAt == nil && dupBack?.reminderID == nil)
+    check("the original is left as it was", s.notes.first { $0.id == src.id }?.pinned == true && s.notes.first { $0.id == src.id }?.title == "Source")
+    check("a duplicate sits under its original", { let ids = s.notes.map(\.id); return (ids.firstIndex(of: src.id) ?? -9) + 1 == ids.firstIndex(of: dup?.id ?? "") }())
+
+    // Show on the Pi: the address, the request, and a stand-in Pi that answers, refuses or is not there.
+    check("the Pi's host is the notes remote's", PiLink.host(remote: "alcatraz627@100.65.188.9:Notes") == "100.65.188.9"
+          && PiLink.host(remote: "me@pi.example:Notes.git") == "pi.example" && PiLink.host(remote: "") == PiLink.defaultHost)
+    let req = PiLink.request(title: "T", body: "line one\nline two", base: "http://h:1", token: "tok")
+    check("the request is a POST of the note's words with the token", req?.url?.absoluteString == "http://h:1/v1/display/show" && req?.httpMethod == "POST"
+          && req?.value(forHTTPHeaderField: "X-Csync-Token") == "tok" && String(data: req?.httpBody ?? Data(), encoding: .utf8)?.contains("line one") == true)
+    check("a title-only note shows its title", String(data: PiLink.request(title: "Only", body: "", base: "http://h:1", token: "t")?.httpBody ?? Data(), encoding: .utf8)?.contains("\"text\":\"Only\"") == true)
+    check("a note with no words makes no request", PiLink.request(title: " ", body: "", base: "http://h:1", token: "t") == nil)
+    check("long text is cut after a whole word under 4000", PiLink.screenText(String(repeating: "word ", count: 1200)).count <= 4000
+          && PiLink.screenText(String(repeating: "word ", count: 1200)).hasSuffix("word"))
+    /// A one-answer web server on the loopback address, standing in for the Pi.
+    func piStub(status: String, body: String) -> (Int32, UInt16, () -> String)? {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return nil }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size); addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1"); addr.sin_port = 0
+        let bound = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
+        guard bound == 0, listen(fd, 1) == 0 else { close(fd); return nil }
+        var got = sockaddr_in(); var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &got) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) } }
+        let port = UInt16(bigEndian: got.sin_port)
+        let seen = NSMutableString()
+        DispatchQueue.global().async {
+            let c = accept(fd, nil, nil)
+            guard c >= 0 else { return }
+            var buf = [UInt8](repeating: 0, count: 65536)
+            var all = Data()
+            // read until the headers and the whole body have arrived
+            while true {
+                let n = recv(c, &buf, buf.count, 0)
+                if n <= 0 { break }
+                all.append(buf, count: n)
+                let text = String(data: all, encoding: .utf8) ?? ""
+                if let r = text.range(of: "\r\n\r\n"),
+                   let cl = text.lowercased().components(separatedBy: "content-length: ").dropFirst().first.flatMap({ Int($0.prefix { $0.isNumber }) }),
+                   all.count >= text.distance(from: text.startIndex, to: r.upperBound) + cl { break }
+            }
+            DispatchQueue.main.sync { seen.append(String(data: all, encoding: .utf8) ?? "") }
+            let r = "HTTP/1.1 \(status)\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+            _ = r.withCString { send(c, $0, strlen($0), 0) }
+            close(c)
+        }
+        return (fd, port, { seen as String })
+    }
+    func askPi(_ note: Note, base: String) -> (Bool, String) {
+        PiLink.baseOverride = base
+        PiLink.tokenOverride = "probe-token"
+        var out: (Bool, String)?
+        PiLink.show(note, remote: "") { ok, msg in out = (ok, msg) }
+        let until = Date().addingTimeInterval(8)
+        while out == nil && Date() < until { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        PiLink.baseOverride = nil; PiLink.tokenOverride = nil
+        return out ?? (false, "no answer")
+    }
+    if let (l, port, seen) = piStub(status: "200 OK", body: "{\"sentToDisplay\":true}") {
+        let r = askPi(src, base: "http://127.0.0.1:\(port)")
+        close(l)
+        check("a Pi that answers is reported as showing", r.0 && r.1.contains("Showing"), r.1)
+        check("the Pi got the path, the token and the words", seen().contains("POST /v1/display/show") && seen().lowercased().contains("x-csync-token: probe-token") && seen().contains("words"), seen())
+    } else { check("a stand-in Pi starts", false) }
+    if let (l, port, _) = piStub(status: "200 OK", body: "{\"sentToDisplay\":false}") {
+        let r = askPi(src, base: "http://127.0.0.1:\(port)"); close(l)
+        check("a Pi with its screen off says so", r.0 && r.1.contains("screen is off"), r.1)
+    }
+    if let (l, port, _) = piStub(status: "401 Unauthorized", body: "{}") {
+        let r = askPi(src, base: "http://127.0.0.1:\(port)"); close(l)
+        check("a refused token is said plainly", !r.0 && r.1.contains("token"), r.1)
+    }
+    let unreachable = askPi(src, base: "http://127.0.0.1:1")
+    check("a Pi that is not there is a sentence, not a crash", !unreachable.0 && unreachable.1.contains("did not answer"), unreachable.1)
+
     // A link is a note by itself; sorts and the tag filter only change the view.
     let pin = s.add(title: "", body: "", url: "https://example.com/a")
     check("a note with only a link is saved and keeps it", pin != nil && pin?.heading == "https://example.com/a")
@@ -305,6 +391,14 @@ final class NotesStore: ObservableObject {
 
     @Published private(set) var notes: [Note] = []
     @Published var error: String?
+    /// A short word on something that just happened (duplicated, shown on the Pi); it clears itself.
+    struct Notice: Equatable { let text: String; let ok: Bool }
+    @Published private(set) var notice: Notice?
+    func say(_ text: String, ok: Bool = true) {
+        let n = Notice(text: text, ok: ok)
+        notice = n
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in if self?.notice == n { self?.notice = nil } }
+    }
     /// True once the folder has been read, so an empty list can say "No notes yet" and not "still reading".
     @Published private(set) var loaded = false
 
@@ -423,16 +517,33 @@ final class NotesStore: ObservableObject {
         guard InputRules.canSave(title: title, body: body, url: url) else { return nil }
         // Enter on a note already saved does not make a second copy.
         if let same = notes.first(where: { $0.title == title && $0.body == body && ($0.url ?? "") == url }) { return same }
-        let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
-        var id = f.string(from: Date())
-        while notes.contains(where: { $0.id == id }) { id += "x" }
-        var n = Note(id: id, title: title, body: body, tags: [], created: Date())
+        var n = Note(id: newID(), title: title, body: body, tags: [], created: Date())
         n.color = color.flatMap(noteColorName)
         n.url = url.isEmpty ? nil : url
         guard write(n) else { return nil }
         notes.insert(n, at: 0)
         saveOrder()
         return n
+    }
+
+    private func newID() -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
+        var id = f.string(from: Date())
+        while notes.contains(where: { $0.id == id }) { id += "x" }
+        return id
+    }
+
+    /// A second note with the same words, tags, colour and link, placed under the first.
+    /// It is never pinned and carries no reminder or expiry, so nothing fires twice.
+    @discardableResult
+    func duplicate(_ n: Note) -> Note? {
+        var c = Note(id: newID(), title: n.title.isEmpty ? "" : n.title + " copy", body: n.body, tags: n.tags, created: Date())
+        c.color = n.color
+        c.url = n.url
+        guard write(c) else { return nil }
+        notes.insert(c, at: min((notes.firstIndex { $0.id == n.id } ?? -1) + 1, notes.count))
+        saveOrder()
+        return c
     }
 
     /// Save a changed note; its reminder follows only a change to when, how

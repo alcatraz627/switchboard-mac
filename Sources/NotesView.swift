@@ -151,6 +151,17 @@ struct NotesTabView: View {
     var body: some View { NotesList(notes: notes, nav: NotesNav.forSpace(space)) }
 }
 
+/// What just happened to a note (duplicated, shown on the Pi), until it clears itself.
+private struct NoticeLine: View {
+    @ObservedObject var notes: NotesStore
+    var body: some View {
+        if let n = notes.notice {
+            Label(n.text, systemImage: n.ok ? "checkmark.circle" : "exclamationmark.triangle").font(PT.caption)
+                .foregroundStyle(n.ok ? Color.secondary : Color.orange).padding(.horizontal, 4).transition(Motion.arrive)
+        }
+    }
+}
+
 /// The notes under the colour filter, each row knowing whether it has the keyboard.
 private struct NotesList: View {
     @ObservedObject var notes: NotesStore
@@ -166,8 +177,11 @@ private struct NotesList: View {
 
     var body: some View {
         if let n = openNote {
-            Card { NoteRow(note: n, notes: notes, nav: nav, grip: AnyView(EmptyView()), takeover: true).id("note-" + n.id) }
-                .padding(PT.gap)
+            VStack(alignment: .leading, spacing: 6) {
+                NoticeLine(notes: notes)
+                Card { NoteRow(note: n, notes: notes, nav: nav, grip: AnyView(EmptyView()), takeover: true).id("note-" + n.id) }
+            }
+            .padding(PT.gap)
         } else {
             list
         }
@@ -179,6 +193,7 @@ private struct NotesList: View {
             if let e = notes.error {
                 ReadingStatus(state: .failed(e)).padding(.horizontal, 4)
             }
+            NoticeLine(notes: notes)
             if !notes.loaded {
                 ReadingStatus(state: .loading).padding(.horizontal, 4)
             } else if notes.live.isEmpty && notes.expired.isEmpty && notes.error == nil {
@@ -547,6 +562,7 @@ struct NoteRow: View {
                 // macOS draws menu items as words only unless the labels ask for their icons
                 Group {
                 Button { if !open { toggleOpen() } } label: { Label("Open", systemImage: "square.and.pencil") }
+                Button { duplicate() } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
                 Button { setPinned(!note.pinned) } label: {
                     Label(note.pinned ? "Unpin" : "Pin to the quick page", systemImage: note.pinned ? "pin.slash" : "pin")
                 }
@@ -563,6 +579,9 @@ struct NoteRow: View {
                 Button { openTo(.reminder) } label: { Label(note.remindAt == nil ? "Remind me…" : "Change the reminder…", systemImage: "bell") }
                 Button { openTo(.expiry) } label: { Label(note.expires == nil ? "Expire it…" : "Change the expiry…", systemImage: "hourglass") }
                 Button { openTo(.history) } label: { Label("Versions…", systemImage: "clock.arrow.circlepath") }
+                Divider()
+                Button { send() } label: { Label("Send…", systemImage: "square.and.arrow.up") }
+                Button { showOnPi() } label: { Label("Show on the Pi screen", systemImage: "tv") }
                 Divider()
                 if !note.title.isEmpty { Button { copy(note.title) } label: { Label("Copy title", systemImage: "textformat") } }
                 if !note.body.isEmpty { Button { copy(note.body) } label: { Label("Copy text", systemImage: "text.alignleft") } }
@@ -664,6 +683,21 @@ struct NoteRow: View {
         n.pinned = on
         if draft != nil { draft = n }
         notes.update(n)
+    }
+    private func duplicate() {
+        if notes.duplicate(draft ?? note) != nil { notes.say("Duplicated \u{201C}\(note.heading)\u{201D}.") }
+    }
+    /// The macOS share menu with the note's words: AirDrop, Messages, Mail and the rest.
+    private func send() {
+        guard let view = NSApp.keyWindow?.contentView, let e = NSApp.currentEvent else { return }
+        let picker = NSSharingServicePicker(items: [note.content])
+        let p = view.convert(e.locationInWindow, from: nil)
+        picker.show(relativeTo: NSRect(x: p.x, y: p.y, width: 1, height: 1), of: view, preferredEdge: .minY)
+    }
+    private func showOnPi() {
+        let n = draft ?? note
+        notes.say("Sending to the Pi…")
+        PiLink.show(n, remote: NotesSync.shared.remote) { ok, message in notes.say(message, ok: ok) }
     }
     private func copy(_ s: String) {
         NSPasteboard.general.clearContents()
