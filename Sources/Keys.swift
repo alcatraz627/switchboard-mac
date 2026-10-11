@@ -282,6 +282,11 @@ final class NotesNav: ObservableObject {
 
     @Published var focus: NoteFocus = .none
     @Published var filter: Set<String> = []
+    /// Tags chosen on the filter row; a note must carry every one.
+    @Published var tagFilter: Set<String> = []
+    @Published var sort: NoteSort = NoteSort.saved {
+        didSet { NotesStore.defaults.set(sort.rawValue, forKey: NoteSort.key) }
+    }
     @Published var query = ""
     @Published var draftTitle = ""
     @Published var draftBody = ""
@@ -298,12 +303,13 @@ final class NotesNav: ObservableObject {
     /// The notes the list shows: in a chosen colour, if any, and matching every word searched for.
     func visible(_ notes: [Note]) -> [Note] {
         let words = query.lowercased().split(separator: " ").map(String.init)
-        return notes.filter { n in
+        return sort.apply(notes.filter { n in
             (filter.isEmpty || (n.color.flatMap(noteColorName).map(filter.contains) ?? false))
+                && tagFilter.isSubset(of: n.tags)
                 && words.allSatisfy { w in
                     n.title.lowercased().contains(w) || n.body.lowercased().contains(w) || n.tags.contains { $0.lowercased().contains(w) }
                 }
-        }
+        })
     }
 
     /// Saves the new note. The saved note opens for typing in the same field,

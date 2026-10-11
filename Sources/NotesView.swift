@@ -186,11 +186,11 @@ private struct NotesList: View {
                     .padding(.horizontal, 4)
             }
             if !notes.live.isEmpty {
-                NoteFilterBar(nav: nav, hidden: notes.live.count - shown.count)
+                NoteFilterBar(nav: nav, hidden: notes.live.count - shown.count, tags: notes.live.tagCounts)
             }
             if !shown.isEmpty {
                 Card {
-                    ReorderStack(items: shown, move: { notes.move($0, to: $1) }, commit: { notes.saveOrder() }) { i, n, grip in
+                    ReorderStack(items: shown, move: { if nav.sort == .manual { notes.move($0, to: $1) } }, commit: { if nav.sort == .manual { notes.saveOrder() } }) { i, n, grip in
                         VStack(spacing: 0) {
                             if i > 0 { Divider().padding(.leading, PT.rowH) }
                             NoteRow(note: n, notes: notes, nav: nav, grip: grip)
@@ -235,6 +235,8 @@ struct NoteFilterBar: View {
     @ObservedObject var nav: NotesNav
     @ObservedObject private var palette = NotePalette.shared
     let hidden: Int
+    /// Every tag the live notes carry, for the tag row.
+    var tags: [(tag: String, count: Int)] = []
     @FocusState private var searching: Bool
 
     var body: some View {
@@ -260,7 +262,44 @@ struct NoteFilterBar: View {
             // the list can come back (a note closed) with the keyboard already sent to the search
             .onAppear { if nav.focus == .search, !searching { DispatchQueue.main.async { searching = true } } }
             dots
+            if !tags.isEmpty { tagRow }
         }
+    }
+
+    /// Tags as chips: choosing several keeps the notes that carry all of them.
+    private var tagRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 5) {
+                Image(systemName: "tag").font(.sbIcon(9.5)).foregroundStyle(.tertiary)
+                ForEach(tags, id: \.tag) { t in
+                    let on = nav.tagFilter.contains(t.tag)
+                    Button { if on { nav.tagFilter.remove(t.tag) } else { nav.tagFilter.insert(t.tag) } } label: {
+                        Text("#\(t.tag) \(t.count)").font(.sb(10.5, weight: on ? .semibold : .regular)).lineLimit(1)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Capsule().fill(on ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.07)))
+                            .foregroundStyle(on ? Color.primary : .secondary)
+                    }
+                    .buttonStyle(.plain).help(on ? "Stop filtering by #\(t.tag)" : "Only notes tagged #\(t.tag); choose more to narrow further")
+                }
+                if !nav.tagFilter.isEmpty {
+                    Button { nav.tagFilter = [] } label: { Label("Clear", systemImage: "xmark.circle").font(.sb(10.5)).lineLimit(1) }
+                        .buttonStyle(.plain).foregroundStyle(.tertiary).help("Show every tag again")
+                }
+            }
+            .padding(.horizontal, 4)
+        }
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            ForEach(NoteSort.allCases) { o in
+                Button { nav.sort = o } label: { Label(o.label, systemImage: nav.sort == o ? "checkmark" : o.icon) }
+            }
+        } label: {
+            Label(nav.sort == .manual ? "Sort" : nav.sort.label, systemImage: "arrow.up.arrow.down").font(PT.caption).lineLimit(1).fixedSize()
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().foregroundStyle(nav.sort == .manual ? .secondary : Color.primary)
+        .help(nav.sort == .manual ? "Sort the list; your own order is kept" : "Sorted \(nav.sort.label.lowercased()); choose My order to drag again")
     }
 
     private var dots: some View {
@@ -285,7 +324,8 @@ struct NoteFilterBar: View {
                     .help(palette.label(c.0))
             }
             Spacer(minLength: 4)
-            if hidden > 0 { Text("\(hidden) hidden").font(PT.caption).foregroundStyle(.tertiary) }
+            if hidden > 0 { Text("\(hidden) hidden").font(PT.caption).foregroundStyle(.tertiary).lineLimit(1).fixedSize() }
+            sortMenu
         }
         .padding(.horizontal, 4)
     }
@@ -717,6 +757,14 @@ struct NoteRow: View {
                 }
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .keyRing(ringed(.tags), radius: 5)
+                // a pin: the address this note is about, opened from the row
+                HStack(spacing: 4) {
+                    Image(systemName: "link").font(.sbIcon(10)).foregroundStyle(.tertiary)
+                    TextField("link", text: Binding(get: { d.wrappedValue.url ?? "" },
+                                                    set: { d.wrappedValue.url = $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }))
+                        .textFieldStyle(.plain).font(PT.caption)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 3)
                 .padding(.bottom, 4)
             }
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
@@ -896,8 +944,9 @@ struct NoteRow: View {
         if !tagsText.isEmpty, draft != nil { commitTag(Binding(get: { draft ?? note }, set: { draft = $0 })) }
         guard var n = draft, n != note else { refused = false; return }
         // a note with neither title nor text is refused, not saved; Delete is how a note goes
-        guard InputRules.canSave(title: n.title, body: n.body) else { refused = true; return }
+        guard InputRules.canSave(title: n.title, body: n.body, url: n.url ?? "") else { refused = true; return }
         n.title = n.title.trimmingCharacters(in: .whitespaces)
+        n.url = n.url.map { $0.trimmingCharacters(in: .whitespaces) }.flatMap { $0.isEmpty ? nil : $0 }
         refused = false
         notes.update(n)
         savedAt = Date()

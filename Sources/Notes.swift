@@ -168,6 +168,30 @@ func probeNotes() -> String {
     check("a resolved note is no longer a clash", !NotesSync.conflicted(NotesSync.resolve(clash, keep: .both)))
     check("an unclosed block loses nothing", NotesSync.resolve("a\n<<<<<<< x\nb\n=======\nc", keep: .mine) == "a\nb\nc")
 
+    // A link is a note by itself; sorts and the tag filter only change the view.
+    let pin = s.add(title: "", body: "", url: "https://example.com/a")
+    check("a note with only a link is saved and keeps it", pin != nil && pin?.heading == "https://example.com/a")
+    s.load()
+    check("the link survives the file", s.notes.first { $0.id == pin?.id }?.url == "https://example.com/a")
+    func mk(_ id: String, _ title: String, _ day: Int, pinned: Bool = false, tags: [String] = []) -> Note {
+        var n = Note(id: id, title: title, body: "", tags: tags, created: Date(timeIntervalSince1970: Double(day) * 86400))
+        n.pinned = pinned
+        return n
+    }
+    let set = [mk("a", "banana", 3, tags: ["x", "y"]), mk("b", "Apple", 1, pinned: true, tags: ["x"]), mk("c", "cherry", 2)]
+    check("manual keeps the list as given", NoteSort.manual.apply(set).map(\.id) == ["a", "b", "c"])
+    check("newest first, pinned still on top", NoteSort.newest.apply(set).map(\.id) == ["b", "a", "c"])
+    check("oldest first, pinned still on top", NoteSort.oldest.apply(set).map(\.id) == ["b", "c", "a"])
+    check("A to Z ignores case, pinned on top", NoteSort.title.apply(set).map(\.id) == ["b", "a", "c"])
+    check("tags are counted, most used first", set.tagCounts.map(\.tag) == ["x", "y"] && set.tagCounts.map(\.count) == [2, 1])
+    let nav = NotesNav()
+    nav.sort = .manual
+    nav.tagFilter = ["x"]
+    check("one tag keeps the notes carrying it", nav.visible(set).map(\.id) == ["a", "b"])
+    nav.tagFilter = ["x", "y"]
+    check("two tags keep only notes with both", nav.visible(set).map(\.id) == ["a"])
+    nav.tagFilter = []
+
     // The colour dots can be added to, renamed and removed; a note's file keeps the name it was saved with.
     let pal = NotePalette.shared
     pal.reset()
@@ -237,7 +261,7 @@ struct Note: Identifiable, Equatable {
     var content: String { body.isEmpty ? title : title.isEmpty ? body : title + "\n\n" + body }
     /// What a list shows as the note's name: the title, or the body's first line when there is no title.
     var heading: String {
-        title.isEmpty ? (body.components(separatedBy: "\n").first { !$0.isEmpty } ?? "") : title
+        title.isEmpty ? (body.components(separatedBy: "\n").first { !$0.isEmpty } ?? url ?? "") : title
     }
 }
 
@@ -357,17 +381,19 @@ final class NotesStore: ObservableObject {
     /// Saves a new note from a title and a body, either of which may be empty
     /// but not both; the same note twice is saved once.
     @discardableResult
-    func add(title rawTitle: String, body rawBody: String, color: String? = nil) -> Note? {
+    func add(title rawTitle: String, body rawBody: String, color: String? = nil, url rawURL: String = "") -> Note? {
         let title = rawTitle.trimmingCharacters(in: .whitespaces)
         let body = rawBody.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard InputRules.canSave(title: title, body: body) else { return nil }
+        let url = rawURL.trimmingCharacters(in: .whitespaces)
+        guard InputRules.canSave(title: title, body: body, url: url) else { return nil }
         // Enter on a note already saved does not make a second copy.
-        if let same = notes.first(where: { $0.title == title && $0.body == body }) { return same }
+        if let same = notes.first(where: { $0.title == title && $0.body == body && ($0.url ?? "") == url }) { return same }
         let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
         var id = f.string(from: Date())
         while notes.contains(where: { $0.id == id }) { id += "x" }
         var n = Note(id: id, title: title, body: body, tags: [], created: Date())
         n.color = color.flatMap(noteColorName)
+        n.url = url.isEmpty ? nil : url
         guard write(n) else { return nil }
         notes.insert(n, at: 0)
         saveOrder()
