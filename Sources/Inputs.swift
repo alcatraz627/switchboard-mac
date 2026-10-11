@@ -106,6 +106,11 @@ final class EditorTextView: NSTextView {
         if formatKey(e) { return }
         super.keyDown(with: e)
     }
+    // A picture file dropped on the text is attached, like a pasted one; other drops insert as before.
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if let onImage, isEditable, let d = Self.pastedImageFile(sender.draggingPasteboard) { onImage(d); return true }
+        return super.performDragOperation(sender)
+    }
     override func paste(_ sender: Any?) {
         let pb = NSPasteboard.general
         // A copied picture file (a screenshot's thumbnail, a Finder copy) also carries its path as

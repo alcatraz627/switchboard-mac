@@ -4,6 +4,7 @@
 
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The bar above the list: a title line that opens into a title and body
 /// sheet, with buttons to save, save what is on the clipboard, or save and
@@ -831,8 +832,15 @@ struct NoteRow: View {
         case .task: apply(NoteFormat.prefixLines(tv.string, r, "- [ ] "), to: tv)
         case .link: apply(NoteFormat.link(tv.string, r, clipboard: NSPasteboard.general.string(forType: .string)), to: tv)
         case .image:
+            // the clipboard's picture when it holds one, else a picture chosen from disk
             let pb = NSPasteboard.general
-            guard let d = pb.data(forType: .png) ?? pb.data(forType: .tiff) else { hint("No picture on the clipboard"); return }
+            if let d = EditorTextView.pastedImageFile(pb) ?? pb.data(forType: .png) ?? pb.data(forType: .tiff) { pasteImage(d); return }
+            let panel = NSOpenPanel()
+            panel.allowedContentTypes = [.image]
+            panel.allowsMultipleSelection = false
+            panel.message = "Choose a picture for this note"
+            NSApp.activate(ignoringOtherApps: true)
+            guard panel.runModal() == .OK, let url = panel.url, let d = try? Data(contentsOf: url) else { return }
             pasteImage(d)
         }
     }
