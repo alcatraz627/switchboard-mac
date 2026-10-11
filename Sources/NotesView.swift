@@ -205,9 +205,11 @@ private struct NotesList: View {
             }
             if !shown.isEmpty {
                 Card {
-                    ReorderStack(items: shown, move: { if nav.sort == .manual { notes.move($0, to: $1) } }, commit: { if nav.sort == .manual { notes.saveOrder() } }) { i, n, grip in
+                    ReorderStack(items: shown, move: { if nav.sort == .manual { notes.move($0, to: $1) } },
+                                 commit: { if nav.sort == .manual { notes.commitMove(visible: nav.visible(notes.live).map(\.id)) } }) { i, n, grip in
                         VStack(spacing: 0) {
-                            if i > 0 { Divider().padding(.leading, PT.rowH) }
+                            if let head = PinGroupHead.title(at: i, in: shown) { PinGroupHead(text: head, pinned: n.pinned) }
+                            else if i > 0 { Divider().padding(.leading, PT.rowH) }
                             NoteRow(note: n, notes: notes, nav: nav, grip: grip)
                                 .revealFlash("note-" + n.id).id("note-" + n.id)
                         }
@@ -242,6 +244,30 @@ private struct NotesList: View {
             }
         }
         .padding(PT.gap)
+    }
+}
+
+/// The strip that marks where pinned notes end and the rest begin; drags never cross it.
+struct PinGroupHead: View {
+    let text: String
+    let pinned: Bool
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: pinned ? "pin.fill" : "note.text").font(.sbIcon(9))
+            Text(text).font(PT.caption).lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, PT.rowH).padding(.vertical, 4)
+        .background(Color.primary.opacity(0.05))
+    }
+
+    /// The head the row at `i` opens a group with, or nil. Only shown while some pinned note is in view.
+    static func title(at i: Int, in rows: [Note]) -> String? {
+        guard rows.contains(where: \.pinned) else { return nil }
+        if i == 0 { return rows[0].pinned ? "Pinned" : "Other notes" }
+        return rows[i].pinned != rows[i - 1].pinned ? "Other notes" : nil
     }
 }
 

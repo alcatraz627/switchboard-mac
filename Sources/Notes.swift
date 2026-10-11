@@ -40,12 +40,28 @@ func probeNotes() -> String {
     check("a pin survives the file", s.notes.first { $0.id == a?.id }?.pinned == true)
     check("an unpinned note stays unpinned", s.notes.first { $0.id == b?.id }?.pinned == false)
     check("a past expiry moves the note to Expired", s.expired.map(\.id) == [b!.id] && s.live.map(\.id) == [a!.id])
+    Thread.sleep(forTimeInterval: 1.1)   // a whole second apart, so "newest first" is what the file says too
     let c = s.add("Third")!
-    // New notes go on top, so the order is c, b, a; drag a onto c's place.
-    s.move(a!.id, to: c.id)
-    s.saveOrder()
+    check("a new note lands on top of its pin group", s.notes.map(\.id) == [a!.id, c.id, b!.id], s.notes.map(\.title).joined(separator: ","))
+    func filesNow() -> [String: String] { Dictionary(uniqueKeysWithValues: s.notes.map { ($0.id, (try? String(contentsOfFile: $0.path, encoding: .utf8)) ?? "") }) }
+    // a is pinned, so it stays above whatever is dragged below it; drag b onto c's place
+    var beforeDrag = filesNow()
+    s.move(b!.id, to: c.id)
+    s.commitMove(visible: s.notes.map(\.id))
     s.load()
-    check("a dragged order is kept across a reload", s.notes.map(\.id) == [a!.id, c.id, b!.id], s.notes.map(\.title).joined(separator: ","))
+    check("a dragged order is kept across a reload", s.notes.map(\.id) == [a!.id, b!.id, c.id], s.notes.map(\.title).joined(separator: ","))
+    check("the first drag arranges the group once: every unpinned note now has a pos", s.notes.filter { !$0.pinned }.allSatisfy { $0.pos != nil })
+    beforeDrag = filesNow()
+    s.move(c.id, to: b!.id)
+    s.commitMove(visible: s.notes.map(\.id))
+    s.load()
+    let afterDrag = filesNow()
+    check("a drag after that rewrites exactly one note", afterDrag.filter { beforeDrag[$0.key] != $0.value }.map(\.key) == [c.id],
+          afterDrag.filter { beforeDrag[$0.key] != $0.value }.map(\.key).joined(separator: ","))
+    check("and puts it back on top of its group", s.notes.map(\.id) == [a!.id, c.id, b!.id], s.notes.map(\.title).joined(separator: ","))
+    s.move(a!.id, to: c.id)
+    check("a row cannot be dragged across the pin line", s.notes.map(\.id) == [a!.id, c.id, b!.id])
+    check("the old order file is never written", !FileManager.default.fileExists(atPath: NotesStore.dir + "/order.json"))
     s.delete(c)
     check("delete removes the file", !FileManager.default.fileExists(atPath: c.path) && !s.notes.contains { $0.id == c.id })
     // A header key Switchboard has no field for (another tool's, or typed by hand) survives a save here.
@@ -127,7 +143,7 @@ func probeNotes() -> String {
     check("a hand-written file reads its heading as the title", h?.title == "Shopping", h?.title ?? "nil")
     check("and keeps its body", h?.body == "- milk\n- eggs", h?.body ?? "nil")
     h?.tags = ["errands"]
-    if let h = h { s.update(h); s.saveOrder() }
+    if let h = h { s.update(h) }
     let onDisk = (try? String(contentsOfFile: own + "/shopping.md", encoding: .utf8)) ?? ""
     check("editing it keeps the body in the file", onDisk.contains("- milk\n- eggs"), onDisk)
     check("the saved order is not written into the owner's folder", !FileManager.default.fileExists(atPath: own + "/order.json"))
@@ -207,6 +223,7 @@ func probeNotes() -> String {
     src.tags = ["t1"]; src.pinned = true
     src.remindAt = Date().addingTimeInterval(3600)
     s.update(src)
+    Thread.sleep(forTimeInterval: 1.1)
     let dup = s.duplicate(s.notes.first { $0.id == src.id }!)
     s.load()
     let dupBack = s.notes.first { $0.id == dup?.id }
@@ -214,7 +231,11 @@ func probeNotes() -> String {
           && dupBack?.tags == ["t1"] && dupBack?.color == "blue" && dupBack?.url == "https://example.com/s")
     check("a duplicate is not pinned and has no reminder", dupBack?.pinned == false && dupBack?.remindAt == nil && dupBack?.reminderID == nil)
     check("the original is left as it was", s.notes.first { $0.id == src.id }?.pinned == true && s.notes.first { $0.id == src.id }?.title == "Source")
-    check("a duplicate sits under its original", { let ids = s.notes.map(\.id); return (ids.firstIndex(of: src.id) ?? -9) + 1 == ids.firstIndex(of: dup?.id ?? "") }())
+    check("a copy of a pinned note starts the unpinned notes", s.notes.first { !$0.pinned }?.id == dup?.id)
+    Thread.sleep(forTimeInterval: 1.1)
+    let plain = s.add("Plain original")!
+    let plainCopy = s.duplicate(plain)
+    check("a duplicate sits under its original", { let ids = s.notes.map(\.id); return (ids.firstIndex(of: plain.id) ?? -9) + 1 == ids.firstIndex(of: plainCopy?.id ?? "") }())
 
     // Show on the Pi: the address, the request, and a stand-in Pi that answers, refuses or is not there.
     check("the Pi's host is the notes remote's", PiLink.host(remote: "alcatraz627@100.65.188.9:Notes") == "100.65.188.9"
@@ -347,6 +368,75 @@ func probeNotes() -> String {
     check("reset brings back the shared eight", pal.dots == NotePalette.eight && pal.label("red") == "Red")
     check("the last dot cannot be removed", { let q = NotePalette(); for d in q.dots.dropFirst() { q.remove(d.key) }; q.remove(q.dots[0].key); let one = q.dots.count; q.reset(); return one == 1 }())
     NotePalette.customOn = false
+
+    // The old order.json becomes pos lines once, and the clash rule keeps this Mac's side.
+    let fm2 = FileManager.default
+    let migBefore = NotesStore.defaults.string(forKey: NotesStore.folderKey)
+    let mig = AppPaths.stateDir + "/migrate-notes"
+    try? fm2.createDirectory(atPath: mig, withIntermediateDirectories: true)
+    NotesStore.defaults.set(mig, forKey: NotesStore.folderKey)
+    for (id, day) in [("m1", "09"), ("m2", "10"), ("m3", "08")] {
+        try? "---\ntitle: \"\(id)\"\ncreated: 2026-10-\(day)T00:00:00Z\n---\nbody\n".write(toFile: mig + "/\(id).md", atomically: true, encoding: .utf8)
+    }
+    try? "[\"m3\",\"m1\",\"gone\"]".write(toFile: NotesStore.orderPath, atomically: true, encoding: .utf8)
+    let ms = NotesStore()
+    ms.load()
+    func posOf(_ id: String) -> String? { ms.notes.first { $0.id == id }?.pos }
+    check("migration gives the notes order.json names a pos, in its order", posOf("m3") != nil && posOf("m1") != nil && posOf("m3")! < posOf("m1")!, "\(posOf("m3") ?? "nil") \(posOf("m1") ?? "nil")")
+    check("a note order.json never named stays unpositioned and so lands on top", posOf("m2") == nil && ms.notes.map(\.id) == ["m2", "m3", "m1"], ms.notes.map(\.id).joined(separator: ","))
+    check("order.json is set aside, not deleted", !fm2.fileExists(atPath: NotesStore.orderPath) && fm2.fileExists(atPath: NotesStore.orderPath + ".migrated"))
+    ms.load()
+    check("a second load migrates nothing and keeps the order", ms.notes.map(\.id) == ["m2", "m3", "m1"])
+    Thread.sleep(forTimeInterval: 2.6)   // the commit waits two seconds after the last write
+    check("the migration is one commit, 'order: migrate'", NotesSync.shared.git(["log", "-1", "--format=%s"]).out.trimmingCharacters(in: .whitespacesAndNewlines) == "order: migrate",
+          NotesSync.shared.git(["log", "-1", "--format=%s"]).out)
+    if let b = migBefore { NotesStore.defaults.set(b, forKey: NotesStore.folderKey) } else { NotesStore.defaults.removeObject(forKey: NotesStore.folderKey) }
+    // beside the default notes the set-aside file would sit inside the repository: an older repository learns to ignore it
+    try? "order.json\n.DS_Store\n".write(toFile: NotesStore.dir + "/.gitignore", atomically: true, encoding: .utf8)
+    NotesSync.shared.ensureRepo()
+    try? "[]".write(toFile: NotesStore.dir + "/order.json.migrated", atomically: true, encoding: .utf8)
+    check("an older repository ignores the set-aside order file", NotesSync.shared.git(["check-ignore", "order.json.migrated"]).code == 0)
+    try? fm2.removeItem(atPath: NotesStore.dir + "/order.json.migrated")
+
+    check("a clash that is only a pos line is recognised", NotesSync.posOnlyClash("---\ntitle: \"x\"\n<<<<<<< HEAD\npos: 4\n=======\npos: r\n>>>>>>> pi/main\n---\nbody\n"))
+    check("a clash in the body is not", !NotesSync.posOnlyClash("---\ntitle: \"x\"\n---\n<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> pi/main\n"))
+    check("a clash on pos and another line is not", !NotesSync.posOnlyClash("<<<<<<< HEAD\npos: 4\ncolor: red\n=======\npos: r\n>>>>>>> pi/main\n"))
+    check("a text with no clash is not a pos clash", !NotesSync.posOnlyClash("---\npos: 4\n---\n"))
+    let repo = NSTemporaryDirectory() + "sb-clash-\(getpid())"
+    try? fm2.removeItem(atPath: repo)
+    try? fm2.createDirectory(atPath: repo + "/.reminders/runs", withIntermediateDirectories: true)
+    @discardableResult func g(_ a: [String]) -> (code: Int32, out: String, err: String) {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/git"); p.arguments = ["-C", repo] + a
+        let o = Pipe(), e = Pipe(); p.standardOutput = o; p.standardError = e
+        do { try p.run() } catch { return (127, "", "\(error)") }
+        let out = String(data: o.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let err = String(data: e.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        p.waitUntilExit()
+        return (p.terminationStatus, out, err)
+    }
+    func put(_ f: String, _ t: String) { try? t.write(toFile: repo + "/" + f, atomically: true, encoding: .utf8) }
+    func note(pos: String, body: String) -> String { "---\ntitle: \"A\"\ncreated: 2026-10-01T00:00:00Z\npos: \(pos)\n---\n\(body)\n" }
+    g(["init", "-q", "-b", "main"]); g(["config", "user.name", "t"]); g(["config", "user.email", "t@t"])
+    put("a.md", note(pos: "i", body: "one")); put("b.md", note(pos: "i", body: "one")); put(".reminders/runs/r.json", "{\"v\":0}\n")
+    g(["add", "-A"]); g(["commit", "-q", "-m", "base"])
+    g(["checkout", "-q", "-b", "side"])
+    put("a.md", note(pos: "r", body: "one")); put("b.md", note(pos: "i", body: "phone body")); put(".reminders/runs/r.json", "{\"v\":2}\n")
+    g(["commit", "-q", "-am", "phone"])
+    g(["checkout", "-q", "main"])
+    put("a.md", note(pos: "4", body: "one")); put("b.md", note(pos: "i", body: "mac body")); put(".reminders/runs/r.json", "{\"v\":1}\n")
+    g(["commit", "-q", "-am", "mac"])
+    check("the scratch merge stops on three clashes", g(["merge", "-q", "--no-edit", "side"]).code != 0)
+    NotesSync.settleClashes(in: repo, git: { g($0) })
+    g(["add", "-A"])
+    let merged = g(["commit", "-q", "-m", "merge"])
+    let aText = (try? String(contentsOfFile: repo + "/a.md", encoding: .utf8)) ?? ""
+    let rText = (try? String(contentsOfFile: repo + "/.reminders/runs/r.json", encoding: .utf8)) ?? ""
+    let bText = (try? String(contentsOfFile: repo + "/b.md", encoding: .utf8)) ?? ""
+    check("a note moved on both sides keeps the Mac's pos and no markers", aText.contains("\npos: 4\n") && !aText.contains("<<<<<<<") && !aText.contains("pos: r"), aText)
+    check("a clash under .reminders keeps the Mac's file whole", rText == "{\"v\":1}\n", rText)
+    check("a body clash keeps both sides, as before", bText.contains("<<<<<<<") && bText.contains("mac body") && bText.contains("phone body"))
+    check("the merge commits after the rules ran", merged.code == 0, merged.err)
+    try? fm2.removeItem(atPath: repo)
     lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
     return lines.joined(separator: "\n")
 }
@@ -374,6 +464,8 @@ struct Note: Identifiable, Equatable {
     var source: String? = nil
     /// A pin is a note with a link: title, body and url are each optional, one is needed.
     var url: String? = nil
+    /// Where the note sits in the shared order, written bare; nil until it is first arranged. See NotePos.
+    var pos: String? = nil
     /// Header lines Switchboard has no field for, written back as they were, so a key
     /// another tool or a person added is never lost on a save here.
     var extra: [String] = []
@@ -459,7 +551,7 @@ final class NotesStore: ObservableObject {
     }
     /// The saved order lives beside the default notes, but never inside a
     /// folder of the owner's own that was chosen in Settings.
-    private static var orderPath: String {
+    fileprivate static var orderPath: String {
         let d = dir
         guard d != defaultDir else { return d + "/order.json" }
         return AppPaths.stateDir + "/notes-order" + d.replacingOccurrences(of: "/", with: "_") + ".json"
@@ -482,6 +574,7 @@ final class NotesStore: ObservableObject {
     private func apply(_ r: (notes: [Note], problem: String?)) {
         notes = r.notes
         loaded = true
+        migrateOrderIfNeeded()
         loadTrash()
         // A read problem clears itself when the next read is clean (a drive plugged back in).
         if let p = r.problem { readProblem = p; error = p }
@@ -503,10 +596,85 @@ final class NotesStore: ObservableObject {
             guard let text = try? String(contentsOfFile: Self.dir + "/" + f, encoding: .utf8) else { skipped += 1; return nil }
             return Self.parse(id: String(f.dropLast(3)), text)
         }
-        let order = (fm.contents(atPath: Self.orderPath).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String] }) ?? []
-        // Newest first where the saved order has no place for a note yet.
         let problem = skipped == 0 ? nil : readProblemTag + (skipped == 1 ? "1 file is not readable text." : "\(skipped) files are not readable text.")
-        return (applyOrder(read.sorted { $0.created > $1.created }, order), problem)
+        return (NoteOrder.sorted(read), problem)
+    }
+
+    // ── The shared order ────────────────────────────────────────────────────
+
+    /// The row being dragged; its new place is written once, when the drop ends.
+    private var dragging: String?
+
+    /// Re-sorts after any change, so a pin, a new note or a moved one lands where the one comparator puts it.
+    private func resort() { notes = NoteOrder.sorted(notes) }
+
+    /// Moves a note while it is dragged. A drag stays inside its pin group: a row cannot be dropped across the line.
+    func move(_ dragged: String, to target: String) {
+        guard let d = notes.first(where: { $0.id == dragged }), let t = notes.first(where: { $0.id == target }), d.pinned == t.pinned else { return }
+        dragging = dragged
+        notes = applyOrder(notes, reordered(notes.map(\.id), moving: dragged, to: target))
+    }
+
+    /// The drop: writes one `pos` into the dragged note's file, placed under the row now above it.
+    /// `visible` is the ids on screen in order, so a search or colour filter uses the neighbours the owner sees.
+    func commitMove(visible: [String]) {
+        guard let d = dragging else { return }
+        dragging = nil
+        guard let m = notes.first(where: { $0.id == d }) else { return }
+        // nothing to write when the drag ended where it began
+        let persisted = NoteOrder.sorted(notes).map(\.id).filter(visible.contains)
+        guard persisted != visible, let at = visible.firstIndex(of: d) else { resort(); return }
+        var anchor: String?
+        if at > 0, let above = notes.first(where: { $0.id == visible[at - 1] }), above.pinned == m.pinned { anchor = above.id }
+        arrange(m.id, after: anchor)
+    }
+
+    /// Gives a note the place right under `anchor` (nil: top of its pin group). A group nobody has arranged
+    /// yet gets keys once, one `pos` line per note, so the order it shows today is kept.
+    func arrange(_ id: String, after anchor: String?) {
+        guard let m = notes.first(where: { $0.id == id }) else { return }
+        func others() -> [Note] { NoteOrder.sorted(notes).filter { $0.pinned == m.pinned && $0.id != id } }
+        var group = others()
+        let loose = group.filter { $0.pos == nil }
+        let anchorNote = group.first { $0.id == anchor }
+        if !loose.isEmpty, anchorNote == nil || anchorNote?.pos == nil {
+            let below = group.first { NotePos.usable($0.pos) }?.pos
+            for (n, key) in zip(loose, NotePos.fresh(loose.count, below: below)) { setPos(n.id, key) }
+            group = others()
+        }
+        let at = anchor.flatMap { a in group.firstIndex { $0.id == a } } ?? -1
+        let lower = group.prefix(at + 1).last { NotePos.usable($0.pos) }?.pos ?? ""
+        let upper = group.dropFirst(at + 1).first { NotePos.usable($0.pos) }?.pos
+        setPos(id, NotePos.between(lower, upper))
+        resort()
+        NotesSync.shared.commit("move")
+    }
+
+    /// Writes a note's `pos` only; a reorder is not an edit, so the file keeps its time.
+    private func setPos(_ id: String, _ pos: String) {
+        guard var n = notes.first(where: { $0.id == id }) else { return }
+        let keep = n.modified
+        n.pos = pos
+        guard write(n) else { return }
+        if let t = keep { try? FileManager.default.setAttributes([.modificationDate: t], ofItemAtPath: n.path) }
+        if let i = notes.firstIndex(where: { $0.id == id }) { notes[i] = n }
+    }
+
+    /// The old `order.json` becomes `pos` lines once: the notes it names get well-spread keys in its order,
+    /// the file is renamed (never deleted) and the change is one commit.
+    private func migrateOrderIfNeeded() {
+        let fm = FileManager.default
+        let path = Self.orderPath
+        guard fm.fileExists(atPath: path), Self.missingFolder == nil else { return }
+        let saved = fm.contents(atPath: path).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String] } ?? []
+        let named = applyOrder(notes.sorted { $0.created > $1.created }, saved).filter { saved.contains($0.id) }
+        for (n, key) in zip(named, NotePos.spread(named.count)) { setPos(n.id, key) }
+        var aside = path + ".migrated"
+        if fm.fileExists(atPath: aside) { aside += "-" + String(Int(Date().timeIntervalSince1970)) }
+        try? fm.moveItem(atPath: path, toPath: aside)
+        resort()
+        if !named.isEmpty { NotesSync.shared.commit("order: migrate") }
+        dlog("notes order: \(named.count) notes moved from order.json to pos")
     }
 
     /// Live notes in the owner's order, then expired ones.
@@ -531,14 +699,18 @@ final class NotesStore: ObservableObject {
         guard InputRules.canSave(title: title, body: body, url: url) else { return nil }
         // Enter on a note already saved does not make a second copy.
         if let same = notes.first(where: { $0.title == title && $0.body == body && ($0.url ?? "") == url }) { return same }
-        var n = Note(id: newID(), title: title, body: body, tags: [], created: Date())
+        var n = Note(id: newID(), title: title, body: body, tags: [], created: Self.now())
         n.color = color.flatMap(NotePalette.shared.writable)
         n.url = url.isEmpty ? nil : url
         guard write(n) else { return nil }
-        notes.insert(n, at: 0)
-        saveOrder()
+        // no pos: a new note is never-arranged, so the comparator puts it on top of its pin group
+        notes.append(n)
+        resort()
         return n
     }
+
+    /// Now in whole seconds: the file keeps no more, and a note must sort the same before and after a reload.
+    static func now() -> Date { Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down)) }
 
     private func newID() -> String {
         let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
@@ -551,13 +723,15 @@ final class NotesStore: ObservableObject {
     /// It is never pinned and carries no reminder or expiry, so nothing fires twice.
     @discardableResult
     func duplicate(_ n: Note) -> Note? {
-        var c = Note(id: newID(), title: n.title.isEmpty ? "" : n.title + " copy", body: n.body, tags: n.tags, created: Date())
+        var c = Note(id: newID(), title: n.title.isEmpty ? "" : n.title + " copy", body: n.body, tags: n.tags, created: Self.now())
         c.color = n.color
         c.url = n.url
         guard write(c) else { return nil }
-        notes.insert(c, at: min((notes.firstIndex { $0.id == n.id } ?? -1) + 1, notes.count))
-        saveOrder()
-        return c
+        notes.append(c)
+        resort()
+        // the copy is never pinned; under an unpinned original it takes the place right below it
+        if !n.pinned { arrange(c.id, after: n.id) }
+        return notes.first { $0.id == c.id } ?? c
     }
 
     /// Save a changed note; its reminder follows only a change to when, how
@@ -565,13 +739,15 @@ final class NotesStore: ObservableObject {
     func update(_ n: Note) {
         var n = n
         let old = notes.first { $0.id == n.id }
+        // an editor holding an older copy must not undo a move that arrived since
+        if let old { n.pos = old.pos }
         var problem: String?
         if old?.remindAt != n.remindAt || old?.remindRepeat != n.remindRepeat || old?.title != n.title { problem = syncReminder(&n) }
         // pinning or tagging is not editing: keep the file's time, which the hover card reads as "last edited"
         let keepTime = old.map { $0.title == n.title && $0.body == n.body && $0.tags == n.tags } == true ? old?.modified : nil
         guard write(n) else { return }
         if let t = keepTime { try? FileManager.default.setAttributes([.modificationDate: t], ofItemAtPath: n.path) }
-        if let i = notes.firstIndex(where: { $0.id == n.id }) { notes[i] = n }
+        if let i = notes.firstIndex(where: { $0.id == n.id }) { notes[i] = n; resort() }
         // After write, which clears the error line on success.
         if let p = problem { error = p }
     }
@@ -585,7 +761,6 @@ final class NotesStore: ObservableObject {
             self.error = "\(n.title) could not be removed: \(error.localizedDescription)"; return
         }
         notes.removeAll { $0.id == n.id }
-        saveOrder()
         loadTrash()
         NotesSync.shared.commit("delete")
         // The note is gone either way; a reminder left behind would fire for nothing.
@@ -644,7 +819,6 @@ final class NotesStore: ObservableObject {
         } else {
             NotesSync.shared.commit("restore")
         }
-        saveOrder()
         return notes.first { $0.id == id }
     }
 
@@ -656,15 +830,6 @@ final class NotesStore: ObservableObject {
             self.error = "\(t.note.heading) could not be removed: \(error.localizedDescription)"
         }
         loadTrash()
-    }
-
-    func move(_ dragged: String, to target: String) {
-        notes = applyOrder(notes, reordered(notes.map(\.id), moving: dragged, to: target))
-    }
-
-    func saveOrder() {
-        guard let d = try? JSONSerialization.data(withJSONObject: notes.map(\.id)) else { return }
-        try? d.write(to: URL(fileURLWithPath: Self.orderPath), options: .atomic)
     }
 
     private func write(_ n: Note) -> Bool {
@@ -705,6 +870,8 @@ final class NotesStore: ObservableObject {
         if let a = n.agent { lines.append("agent: " + q(a)) }
         if let s = n.source { lines.append("source: " + q(s)) }
         if let u = n.url { lines.append("url: " + q(u)) }
+        // bare, so a reader that sees `no` or `1e5` still gets the exact text back
+        if let p = n.pos, !p.isEmpty { lines.append("pos: " + p) }
         lines += n.extra
         lines.append("---")
         return lines.joined(separator: "\n") + "\n" + n.body + (n.body.isEmpty ? "" : "\n")
@@ -716,7 +883,7 @@ final class NotesStore: ObservableObject {
         var fields: [String: String] = [:]
         var extra: [String] = []
         let known: Set<String> = ["title", "created", "tags", "expires", "remind_at", "remind_repeat", "reminder_id",
-                                  "pinned", "color", "agent", "source", "url"]
+                                  "pinned", "color", "agent", "source", "url", "pos"]
         var body = text
         // from offset 3, so an empty block ("---" then "---") closes too
         if text.hasPrefix("---\n"), let end = text.range(of: "\n---\n", range: text.index(text.startIndex, offsetBy: 3)..<text.endIndex) {
@@ -757,7 +924,8 @@ final class NotesStore: ObservableObject {
                     color: fields["color"].flatMap(noteColorName),
                     agent: fields["agent"].flatMap { $0.isEmpty ? nil : $0 },
                     source: fields["source"].flatMap { $0.isEmpty ? nil : $0 },
-                    url: fields["url"].flatMap { $0.isEmpty ? nil : $0 }, extra: extra)
+                    url: fields["url"].flatMap { $0.isEmpty ? nil : $0 },
+                    pos: fields["pos"].flatMap { $0.isEmpty ? nil : $0 }, extra: extra)
     }
 
     // ── Reminders ───────────────────────────────────────────────────────────
