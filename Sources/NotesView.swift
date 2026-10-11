@@ -453,6 +453,12 @@ struct NoteRow: View {
     static var startReading = false
 
     @State private var hovering = false
+    @State private var editingTitle = false
+    @State private var titleDraft = ""
+    @State private var hoveringTitle = false
+    @FocusState private var titleFocused: Bool
+    /// A snapshot run with --edit-title draws the open note with its title box up.
+    static var startTitleEdit = CommandLine.arguments.contains("--edit-title")
 
     /// This note's place in the keyboard's path: open (and which block, reading or typing) or not.
     private var openState: (block: NoteBlock?, typing: Bool)? {
@@ -535,7 +541,7 @@ struct NoteRow: View {
                 // the note's one colour: shown here, and changed here
                 ColorDot(selection: colorBinding, size: si(9), isOpen: open ? pickerBinding(.color) : nil, palette: palette.colors)
                     .keyRing(ringed(.color), radius: 8)
-                if !takeover { heading }
+                if !takeover { heading } else { titleHeader }
                 Spacer(minLength: 4)
                 // two actions, out of the way until the row is pointed at, open or has the keyboard
                 let shown = hovering || open || nav.focus == .row(note.id)
@@ -595,6 +601,7 @@ struct NoteRow: View {
                 }
                 .labelStyle(.titleAndIcon)
             }
+            if takeover, editingTitle { titleBox }
             if open, draft != nil { editor.transition(Motion.arrive) }
         }
     }
@@ -634,17 +641,66 @@ struct NoteRow: View {
         .buttonStyle(.plain).foregroundStyle(on ? Color.primary : .secondary)
     }
 
+    /// The open note's title on one line, cut in the middle; a click opens a box holding all of it.
+    private var titleHeader: some View {
+        let t = (draft ?? note).title
+        return Button { startTitleEdit() } label: {
+            HStack(spacing: 4) {
+                Text(t.isEmpty ? "Untitled" : t).font(PT.label).lineLimit(1).truncationMode(.middle)
+                    .foregroundStyle(t.isEmpty ? Color.secondary : Color.primary)
+                Image(systemName: "pencil").font(.sbIcon(9)).foregroundStyle(.tertiary).opacity(hoveringTitle ? 1 : 0).layoutPriority(1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).onHover { hoveringTitle = $0 }
+        .opacity(editingTitle ? 0 : 1).allowsHitTesting(!editingTitle)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .help(t.isEmpty ? "Give this note a title" : "\(t)\nClick to edit the whole title")
+    }
+
+    /// The whole title, every line of it, under the header. Return saves it, Esc leaves it as it was.
+    private var titleBox: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "textformat").font(.sbIcon(10)).foregroundStyle(.tertiary).padding(.top, 6)
+            TextField("Title", text: $titleDraft, axis: .vertical).textFieldStyle(.plain).font(PT.label).lineLimit(1...8)
+                .focused($titleFocused).inputBox(focused: true)
+                .onSubmit { commitTitle() }
+                .onExitCommand { editingTitle = false }
+                .onAppear { titleFocused = true }
+                .onChange(of: titleFocused) { f in if !f, editingTitle { commitTitle() } }
+        }
+        .padding(.horizontal, 6).padding(.bottom, 6)
+    }
+
+    private func startTitleEdit() {
+        titleDraft = (draft ?? note).title
+        // the keyboard leaves the note's own parts, so Esc and Return reach the box and not the key rules
+        nav.focus = .open(note.id, nil, typing: false)
+        editingTitle = true
+    }
+    private func commitTitle() {
+        guard editingTitle else { return }
+        editingTitle = false
+        let clean = titleDraft.components(separatedBy: .newlines).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        guard clean != (draft ?? note).title else { return }
+        draft?.title = clean
+        save()
+    }
+
     /// The closed row's text: the heading, the marks, a link, and a line of what is set.
     private var heading: some View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
-                        Text(note.heading).font(PT.label).fixedSize(horizontal: false, vertical: true)
-                            .strikethrough(note.expired)
+                        // one line, cut in the middle so the end of a long title still shows; the marks keep their room
+                        Text(note.heading).font(PT.label).lineLimit(1).truncationMode(.middle)
+                            .strikethrough(note.expired).help(note.heading)
                         if note.conflicted {
                             KeyPill(text: "both sides").help("Edited on two devices apart; both versions are in the body, marked")
+                                .layoutPriority(1).fixedSize()
                         }
                         if let a = note.agent {
                             Image(systemName: "cpu").font(.sbIcon(9)).foregroundStyle(.secondary).help("Written by the \(a) agent")
+                                .layoutPriority(1)
                         }
                     }
                     if let url = firstLink {
@@ -714,6 +770,7 @@ struct NoteRow: View {
         if Self.startOpen, notes.live.first?.id == note.id {
             _snapshotOpen = State(initialValue: true)
             _draft = State(initialValue: note)
+            if Self.startTitleEdit { _editingTitle = State(initialValue: true); _titleDraft = State(initialValue: note.title) }
         }
     }
 
