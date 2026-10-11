@@ -36,7 +36,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         killOtherInstances()
         // The hover card's "next reminder" needs the notes before the panel is ever opened.
         NotesStore.shared.loadInBackground()
-        if UserDefaults.standard.bool(forKey: keepAwakeKey) { setKeepAwake(true) }
+        if AppDefaults.store.bool(forKey: keepAwakeKey) { setKeepAwake(true) }
 
         policyController = PolicyStatusController(
             liveDirs: { LiveSessions.dirs() },
@@ -137,7 +137,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
 
     /// Keep Awake also keeps the screen on; off (the old behaviour) lets the display sleep.
     static let keepScreenKey = "switchboard.keepAwakeScreen"
-    static var keepScreen: Bool { UserDefaults.standard.bool(forKey: keepScreenKey) }
+    static var keepScreen: Bool { AppDefaults.store.bool(forKey: keepScreenKey) }
     private var keepScreenAssertionID: IOPMAssertionID = 0
 
     func setKeepAwake(_ on: Bool) {
@@ -169,7 +169,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             keepAwakeOn = false
             dlog("keep-awake OFF")
         }
-        UserDefaults.standard.set(keepAwakeOn, forKey: keepAwakeKey)
+        AppDefaults.store.set(keepAwakeOn, forKey: keepAwakeKey)
     }
 
     // ── Rows ─────────────────────────────────────────────────────────────────
@@ -1593,7 +1593,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
 
     var systemTimers: [String: SystemTimer] {
         get {
-            let raw = UserDefaults.standard.dictionary(forKey: systemTimersKey) as? [String: [String: Any]] ?? [:]
+            let raw = AppDefaults.store.dictionary(forKey: systemTimersKey) as? [String: [String: Any]] ?? [:]
             return raw.compactMapValues { d in
                 guard let t = d["until"] as? Double, let on = d["restoreOn"] as? Bool else { return nil }
                 return SystemTimer(until: Date(timeIntervalSince1970: t), restoreOn: on)
@@ -1601,7 +1601,7 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
         }
         set {
             let raw = newValue.mapValues { ["until": $0.until.timeIntervalSince1970, "restoreOn": $0.restoreOn] as [String: Any] }
-            UserDefaults.standard.set(raw, forKey: systemTimersKey)
+            AppDefaults.store.set(raw, forKey: systemTimersKey)
         }
     }
 
@@ -1890,7 +1890,7 @@ extension SwitchboardApp {
     }
 
     func probeVisibility() -> String {
-        let d = UserDefaults.standard
+        let d = AppDefaults.store
         let before = d.stringArray(forKey: Visibility.sectionsKey)
         defer { d.set(before, forKey: Visibility.sectionsKey) }
         d.set(["system::Repos", "runtime::Dev servers"], forKey: Visibility.sectionsKey)

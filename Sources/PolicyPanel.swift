@@ -184,7 +184,7 @@ struct PolicyPanel: View {
     var forcedTab: String? = nil
     @State private var contentHeight: CGFloat = 0
     static let tabKey = "policyPanel.tab"
-    @AppStorage(PolicyPanel.tabKey) private var storedTab = "agents"
+    @AppStorage(PolicyPanel.tabKey, store: AppDefaults.store) private var storedTab = "agents"
 
     /// Visible tabs in the owner's order, so a drag in Settings moves the bar at once.
     private var shown: [SwitchboardConcern] {
@@ -1720,7 +1720,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             // so Escape can hand the keyboard back to the app the owner came from
             cameFrom = NSWorkspace.shared.frontmostApplication
             NSApp.activate(ignoringOtherApps: true)
-            show(tab: tab ?? UserDefaults.standard.string(forKey: PolicyPanel.tabKey))
+            show(tab: tab ?? AppDefaults.store.string(forKey: PolicyPanel.tabKey))
             return
         }
         if let tab { switchTab(tab); return }
@@ -1728,7 +1728,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         else { PanelKeys.shared.jumping = true }
     }
 
-    private var currentTab: String { UserDefaults.standard.string(forKey: PolicyPanel.tabKey) ?? "agents" }
+    private var currentTab: String { AppDefaults.store.string(forKey: PolicyPanel.tabKey) ?? "agents" }
 
     /// Visible tabs in the bar's order, and each space's tabs with its last-used one first.
     private var tabOrder: (tabs: [String], spaces: [[String]]) {
@@ -1748,7 +1748,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
 
     private func switchTab(_ tab: String) {
         guard tab != currentTab else { return }
-        UserDefaults.standard.set(tab, forKey: PolicyPanel.tabKey)
+        AppDefaults.store.set(tab, forKey: PolicyPanel.tabKey)
         Visibility.rememberTab(tab)
         concerns.first { $0.id == tab }?.refresh()
     }
@@ -1881,7 +1881,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         // a note's row is opened, not just scrolled to, and it must be the clicked note
         if tab == "notes", let f = NotesNav.focus(forRevealKey: key) { NotesNav.forSpace(ScrollTargets.space).focus = f }
         if popover.isShown {
-            UserDefaults.standard.set(tab, forKey: PolicyPanel.tabKey)
+            AppDefaults.store.set(tab, forKey: PolicyPanel.tabKey)
             Visibility.rememberTab(tab)
         } else {
             show(tab: tab)
@@ -1899,10 +1899,10 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         // A tab asked for by name (a quick page's Open button) wins; otherwise
         // open on whatever turned the dot red or yellow, once per new cause.
         if let tab = chosen {
-            UserDefaults.standard.set(tab, forKey: PolicyPanel.tabKey)
+            AppDefaults.store.set(tab, forKey: PolicyPanel.tabKey)
             Visibility.rememberTab(tab)
         } else if let tab = attentionTab() {
-            UserDefaults.standard.set(tab, forKey: PolicyPanel.tabKey)
+            AppDefaults.store.set(tab, forKey: PolicyPanel.tabKey)
             Visibility.rememberTab(tab)
         }
         // Picks up a notification setting changed in System Settings. A ringing timer

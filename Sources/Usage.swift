@@ -32,25 +32,25 @@ final class UsageStore: ObservableObject {
     @Published private(set) var codexResets: [CodexResetCredit] = []
 
     /// Where a Claude bar turns amber and red.
-    @Published var warnPct: Int = UserDefaults.standard.integer(forKey: "rateLimitWarningThreshold") {
+    @Published var warnPct: Int = AppDefaults.store.integer(forKey: "rateLimitWarningThreshold") {
         didSet { saveZone("rateLimitWarningThreshold", warnPct) }
     }
-    @Published var dangerPct: Int = UserDefaults.standard.integer(forKey: "rateLimitDangerThreshold") {
+    @Published var dangerPct: Int = AppDefaults.store.integer(forKey: "rateLimitDangerThreshold") {
         didSet { saveZone("rateLimitDangerThreshold", dangerPct) }
     }
 
     /// Where a Codex bar turns amber. Its red line is the policy's Codex seat
     /// stand-down, so only the warning needs a setting of its own.
-    @Published var codexWarnPct: Int = UserDefaults.standard.integer(forKey: "codexWarningThreshold") {
+    @Published var codexWarnPct: Int = AppDefaults.store.integer(forKey: "codexWarningThreshold") {
         didSet { saveZone("codexWarningThreshold", codexWarnPct) }
     }
 
     init() {
-        UserDefaults.standard.register(defaults: ["rateLimitWarningThreshold": 70, "rateLimitDangerThreshold": 90,
+        AppDefaults.store.register(defaults: ["rateLimitWarningThreshold": 70, "rateLimitDangerThreshold": 90,
                                                   "codexWarningThreshold": 60])
-        warnPct = UserDefaults.standard.integer(forKey: "rateLimitWarningThreshold")
-        dangerPct = UserDefaults.standard.integer(forKey: "rateLimitDangerThreshold")
-        codexWarnPct = UserDefaults.standard.integer(forKey: "codexWarningThreshold")
+        warnPct = AppDefaults.store.integer(forKey: "rateLimitWarningThreshold")
+        dangerPct = AppDefaults.store.integer(forKey: "rateLimitDangerThreshold")
+        codexWarnPct = AppDefaults.store.integer(forKey: "codexWarningThreshold")
     }
 
     static var widgetsDir = NSString(string: "~/.claude/widgets").expandingTildeInPath
@@ -58,8 +58,8 @@ final class UsageStore: ObservableObject {
     private let queue = DispatchQueue(label: "usage.store", qos: .userInitiated)
 
     private func saveZone(_ key: String, _ v: Int) {
-        guard UserDefaults.standard.integer(forKey: key) != v else { return }
-        UserDefaults.standard.set(v, forKey: key)
+        guard AppDefaults.store.integer(forKey: key) != v else { return }
+        AppDefaults.store.set(v, forKey: key)
     }
 
     /// Both are file reads and cheap. Opening the panel never starts Codex:

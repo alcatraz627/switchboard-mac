@@ -500,8 +500,8 @@ func probeRuns() -> [String] {
     // timers of the probe's own, so real ones are never read, started or cleared
     let realKey = TimerStore.key
     TimerStore.key = "switchboard.timers.countdowns.probe-runs"
-    defer { UserDefaults.standard.removeObject(forKey: TimerStore.key); TimerStore.key = realKey }
-    UserDefaults.standard.removeObject(forKey: TimerStore.key)
+    defer { AppDefaults.store.removeObject(forKey: TimerStore.key); TimerStore.key = realKey }
+    AppDefaults.store.removeObject(forKey: TimerStore.key)
     let ts = TimerStore()
     ts.chimeAloud = false
     defer { ts.stop() }

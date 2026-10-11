@@ -113,7 +113,7 @@ final class PaletteStore {
 
     /// Returns the user-set override if present, else the baked-in default.
     func color(for token: PaletteToken) -> NSColor {
-        if let hex = UserDefaults.standard.string(forKey: prefix + token.rawValue),
+        if let hex = AppDefaults.store.string(forKey: prefix + token.rawValue),
            let c = NSColor.fromHex(hex) {
             return c
         }
@@ -127,22 +127,22 @@ final class PaletteStore {
 
     /// True if the user has overridden this token.
     func isOverridden(_ token: PaletteToken) -> Bool {
-        return UserDefaults.standard.string(forKey: prefix + token.rawValue) != nil
+        return AppDefaults.store.string(forKey: prefix + token.rawValue) != nil
     }
 
     func set(_ token: PaletteToken, hex: String) {
-        UserDefaults.standard.set(hex, forKey: prefix + token.rawValue)
+        AppDefaults.store.set(hex, forKey: prefix + token.rawValue)
         NotificationCenter.default.post(name: Self.didChangeNotification, object: nil)
     }
 
     func reset(_ token: PaletteToken) {
-        UserDefaults.standard.removeObject(forKey: prefix + token.rawValue)
+        AppDefaults.store.removeObject(forKey: prefix + token.rawValue)
         NotificationCenter.default.post(name: Self.didChangeNotification, object: nil)
     }
 
     func resetAll() {
         for t in PaletteToken.allCases {
-            UserDefaults.standard.removeObject(forKey: prefix + t.rawValue)
+            AppDefaults.store.removeObject(forKey: prefix + t.rawValue)
         }
         NotificationCenter.default.post(name: Self.didChangeNotification, object: nil)
     }

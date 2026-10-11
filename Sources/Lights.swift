@@ -165,7 +165,7 @@ final class LightsStore: ObservableObject {
 
     /// The owner's arrangement, by MAC; a bulb not in it goes at the end.
     private static let orderKey = "switchboard.bulbOrder"
-    private var order: [String] { UserDefaults.standard.stringArray(forKey: Self.orderKey) ?? [] }
+    private var order: [String] { AppDefaults.store.stringArray(forKey: Self.orderKey) ?? [] }
 
     /// Move a bulb while it is dragged; `saveOrder` keeps it on the drop.
     func move(_ dragged: String, to target: String) {
@@ -173,7 +173,7 @@ final class LightsStore: ObservableObject {
         bulbs = applyOrder(bulbs, ids)
     }
 
-    func saveOrder() { UserDefaults.standard.set(bulbs.map(\.id), forKey: Self.orderKey) }
+    func saveOrder() { AppDefaults.store.set(bulbs.map(\.id), forKey: Self.orderKey) }
 
     /// Send one change to one bulb. The row shows the change at once; the
     /// bulb's own report replaces it, or the old state comes back on failure.
@@ -211,10 +211,10 @@ final class LightsStore: ObservableObject {
 
     private static let lastOnKey = "switchboard.bulbLastOn"
     private static func loadLastOn() -> [String: Date] {
-        (UserDefaults.standard.dictionary(forKey: lastOnKey) as? [String: Double] ?? [:]).mapValues { Date(timeIntervalSince1970: $0) }
+        (AppDefaults.store.dictionary(forKey: lastOnKey) as? [String: Double] ?? [:]).mapValues { Date(timeIntervalSince1970: $0) }
     }
     private func saveLastOn() {
-        UserDefaults.standard.set(lastOn.mapValues(\.timeIntervalSince1970), forKey: Self.lastOnKey)
+        AppDefaults.store.set(lastOn.mapValues(\.timeIntervalSince1970), forKey: Self.lastOnKey)
     }
     private func noteOn(_ list: [Bulb]) {
         var changed = false

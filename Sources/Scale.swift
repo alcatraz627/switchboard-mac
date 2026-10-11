@@ -34,8 +34,8 @@ enum UISize: String, CaseIterable {
 final class UIScale: ObservableObject {
     static let shared = UIScale()
     static let key = "switchboard.uiSize"
-    @Published var size: UISize = UISize(rawValue: UserDefaults.standard.string(forKey: UIScale.key) ?? "") ?? .sm {
-        didSet { UserDefaults.standard.set(size.rawValue, forKey: Self.key) }
+    @Published var size: UISize = UISize(rawValue: AppDefaults.store.string(forKey: UIScale.key) ?? "") ?? .sm {
+        didSet { AppDefaults.store.set(size.rawValue, forKey: Self.key) }
     }
     /// A probe or snapshot can draw at a size without touching the saved choice.
     static var override: UISize?
