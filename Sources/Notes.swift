@@ -128,6 +128,26 @@ func probeNotes() -> String {
     f.remindAt = Date().addingTimeInterval(3600)
     s.update(f)
     check("a failed save says why", s.error?.contains("read-only") == true, s.error ?? "nil")
+    // A reminder for the phone is rung there: Reminders gets no copy, and the file says so after remind_repeat.
+    saveFails = false
+    var ph = s.add("Phone rings it")!
+    ph.remindAt = Date().addingTimeInterval(3600); ph.remindRepeat = .weekly; ph.remindOn = "phone"
+    let copies = saved.count
+    s.update(ph)
+    let phoneBack = s.notes.first { $0.id == ph.id }
+    check("a reminder set for the phone creates no Reminders item", saved.count == copies && phoneBack?.reminderID == nil, "\(saved.count - copies) saved")
+    let phoneFile = (try? String(contentsOfFile: ph.path, encoding: .utf8)) ?? ""
+    check("remind_on is written bare, right after remind_repeat", phoneFile.contains("\nremind_repeat: weekly\nremind_on: phone\n"), phoneFile)
+    var toMac = phoneBack!
+    toMac.remindOn = nil
+    s.update(toMac)
+    check("moving it back to this Mac creates the Reminders item", saved.count == copies + 1 && s.notes.first { $0.id == ph.id }?.reminderID != nil)
+    var toPhone = s.notes.first { $0.id == ph.id }!
+    toPhone.remindOn = "phone"
+    s.update(toPhone)
+    check("and moving it to the phone again removes it", s.notes.first { $0.id == ph.id }?.reminderID == nil)
+    check("a note with no remind_on writes none and reads as this Mac", !NotesStore.render(NotesStore.parse(id: "m", "---\ntitle: \"M\"\nremind_at: 2026-10-12T10:00:00Z\n---\nb\n")!).contains("remind_on")
+          && NotesStore.parse(id: "m", "---\ntitle: \"M\"\nremind_at: 2026-10-12T10:00:00Z\nremind_on: mac\n---\nb\n")?.remindOn == "mac")
     NotesStore.remindersOff = true
 
     // A folder of the owner's own, holding a markdown file written by hand.
@@ -452,6 +472,8 @@ struct Note: Identifiable, Equatable {
     var expires: Date?
     var remindAt: Date?
     var remindRepeat: Repeat = .never
+    /// Which device rings the reminder: "phone", or "mac" and absent for this Mac (so no old note changes).
+    var remindOn: String? = nil
     /// The Reminders item this note owns, so it can be changed or removed.
     var reminderID: String?
     /// Pinned notes are the ones the menu-bar quick page lists.
@@ -742,7 +764,7 @@ final class NotesStore: ObservableObject {
         // an editor holding an older copy must not undo a move that arrived since
         if let old { n.pos = old.pos }
         var problem: String?
-        if old?.remindAt != n.remindAt || old?.remindRepeat != n.remindRepeat || old?.title != n.title { problem = syncReminder(&n) }
+        if old?.remindAt != n.remindAt || old?.remindRepeat != n.remindRepeat || old?.title != n.title || old?.remindOn != n.remindOn { problem = syncReminder(&n) }
         // pinning or tagging is not editing: keep the file's time, which the hover card reads as "last edited"
         let keepTime = old.map { $0.title == n.title && $0.body == n.body && $0.tags == n.tags } == true ? old?.modified : nil
         guard write(n) else { return }
@@ -863,6 +885,7 @@ final class NotesStore: ObservableObject {
         if let r = n.remindAt {
             lines.append("remind_at: " + iso.string(from: r))
             if n.remindRepeat != .never { lines.append("remind_repeat: " + n.remindRepeat.rawValue) }
+            if let o = n.remindOn, !o.isEmpty { lines.append("remind_on: " + o) }
         }
         if let id = n.reminderID, !id.isEmpty { lines.append("reminder_id: " + q(id)) }
         if n.pinned { lines.append("pinned: true") }
@@ -882,7 +905,7 @@ final class NotesStore: ObservableObject {
         let text = raw.replacingOccurrences(of: "\r\n", with: "\n")
         var fields: [String: String] = [:]
         var extra: [String] = []
-        let known: Set<String> = ["title", "created", "tags", "expires", "remind_at", "remind_repeat", "reminder_id",
+        let known: Set<String> = ["title", "created", "tags", "expires", "remind_at", "remind_repeat", "remind_on", "reminder_id",
                                   "pinned", "color", "agent", "source", "url", "pos"]
         var body = text
         // from offset 3, so an empty block ("---" then "---") closes too
@@ -919,6 +942,7 @@ final class NotesStore: ObservableObject {
                     expires: fields["expires"].flatMap(iso.date),
                     remindAt: fields["remind_at"].flatMap(iso.date),
                     remindRepeat: fields["remind_repeat"].flatMap(Note.Repeat.init) ?? .never,
+                    remindOn: fields["remind_on"].flatMap { $0.isEmpty ? nil : $0 },
                     reminderID: fields["reminder_id"],
                     pinned: fields["pinned"] == "true",
                     color: fields["color"].flatMap(noteColorName),
@@ -941,7 +965,8 @@ final class NotesStore: ObservableObject {
     /// Returns what went wrong in plain words, or nil.
     private func syncReminder(_ n: inout Note) -> String? {
         guard !Self.remindersOff else { return nil }
-        guard n.remindAt != nil else {
+        // a reminder the phone rings has no Apple Reminders item here; an old one is removed like a cleared reminder
+        guard n.remindAt != nil, n.remindOn != "phone" else {
             guard let id = n.reminderID else { return nil }
             // Keep the id when removal fails, so the reminder can still be found later.
             if let why = reminders.remove(id) { return "the reminder could not be removed: \(why)" }

@@ -64,6 +64,12 @@ final class NotesSync: ObservableObject {
         try? (t.hasSuffix("\n") ? t : t + "\n").appending("order.json.migrated*\n").write(toFile: p, atomically: true, encoding: .utf8)
     }
 
+    /// Sync now rather than at the next tick: a run aimed at the phone should not wait half a minute to leave.
+    func syncSoon() {
+        commitWork?.cancel()
+        sync()
+    }
+
     /// Commit what changed, a moment after the last save, so a burst of typing is one commit.
     func commit(_ reason: String) {
         commitWork?.cancel()
@@ -113,7 +119,13 @@ final class NotesSync: ObservableObject {
         let url = remote.trimmingCharacters(in: .whitespaces)
         guard !syncing else { return }
         // with no Pi to talk to, the timer still turns what other tools wrote (bfb, a hand edit) into versions
-        if url.isEmpty { queue.async { [weak self] in self?.commitNow("save") }; return }
+        if url.isEmpty {
+            queue.async { [weak self] in
+                self?.commitNow("save")
+                DispatchQueue.main.async { if !NotesStore.probing { Runs.shared.reload() } }
+            }
+            return
+        }
         syncing = true
         queue.async { [weak self] in
             guard let self else { return }
@@ -128,6 +140,8 @@ final class NotesSync: ObservableObject {
                     if failure == nil { self.lastSync = Date() }
                     self.conflicts = Self.countConflicts(in: self.dir)
                     NotesStore.shared.loadInBackground()
+                    // what the other device wrote, read now that the sync landed
+                    if !NotesStore.probing { Runs.shared.reload() }
                 }
             }
             if self.git(["remote", "get-url", Self.remoteName]).out.trimmingCharacters(in: .whitespacesAndNewlines) != url {
@@ -292,5 +306,5 @@ func probeNotesSync() -> [String] {
     let r = sync.git(["ls-remote", "nobody@203.0.113.1:Notes.git"])
     check("a remote that does not answer fails fast with words, never a prompt", r.code != 0 && !r.err.isEmpty)
     UserDefaults.standard.removeObject(forKey: NotesSync.remoteKey)
-    return lines
+    return lines + probeRuns()
 }

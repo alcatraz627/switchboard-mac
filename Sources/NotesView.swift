@@ -812,7 +812,7 @@ struct NoteRow: View {
         if firstLink == nil, let first = bodyLines.dropFirst(note.title.isEmpty ? 1 : 0).first { parts.append(first) }
         if !note.tags.isEmpty { parts.append(note.tags.map { "#" + $0 }.joined(separator: " ")) }
         if let r = note.remindAt {
-            parts.append("reminds " + f.string(from: r) + (note.remindRepeat == .never ? "" : ", " + note.remindRepeat.rawValue))
+            parts.append("reminds " + f.string(from: r) + (note.remindRepeat == .never ? "" : ", " + note.remindRepeat.rawValue) + (note.remindOn == "phone" ? ", on the phone" : ""))
         }
         if let e = note.expires { parts.append((note.expired ? "expired " : "expires ") + f.string(from: e)) }
         return parts.joined(separator: " · ")
@@ -1130,7 +1130,7 @@ struct NoteRow: View {
         if d.wrappedValue.expires != nil {
             clearButton("Remove the expiry") { d.wrappedValue.expires = nil; expireWithReminder = false }
         }
-        WhenButton(title: "Remind me in macOS Reminders", presets: WhenPreset.long,
+        WhenButton(title: "Remind me", presets: WhenPreset.long,
                    choices: ["Once", "Every day", "Every week", "Every month"],
                    extra: d.wrappedValue.remindAt == nil ? [] : [("No reminder", { d.wrappedValue.remindAt = nil; expireWithReminder = false })],
                    initial: d.wrappedValue.remindAt,
@@ -1147,8 +1147,22 @@ struct NoteRow: View {
         }
         .keyRing(ringed(.reminder), radius: 11)
         if d.wrappedValue.remindAt != nil {
-            clearButton("Remove the reminder") { d.wrappedValue.remindAt = nil; expireWithReminder = false }
+            remindOnMenu(d)
+            clearButton("Remove the reminder") { d.wrappedValue.remindAt = nil; d.wrappedValue.remindOn = nil; expireWithReminder = false }
         }
+    }
+
+    /// Which device rings the reminder. The phone's choice stops macOS Reminders from getting a copy.
+    private func remindOnMenu(_ d: Binding<Note>) -> some View {
+        let phone = d.wrappedValue.remindOn == "phone"
+        return Menu {
+            Button { d.wrappedValue.remindOn = nil } label: { Label("Remind on this Mac", systemImage: phone ? "desktopcomputer" : "checkmark") }
+            Button { d.wrappedValue.remindOn = "phone" } label: { Label("Remind on the phone", systemImage: phone ? "checkmark" : "iphone") }
+        } label: {
+            chip(icon: phone ? "iphone" : "desktopcomputer", phone ? "Phone" : "Mac", set: true)
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .help(phone ? "The phone rings this reminder; macOS Reminders gets no copy" : "macOS Reminders rings this one; choose the phone to ring it there instead")
     }
 
     private var saveState: some View {
