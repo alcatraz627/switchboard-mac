@@ -711,8 +711,9 @@ struct QuickCard: View {
                         .help(n.pinned ? "Pinned" : "Edited in the last two hours")
                     // the note's colour, as the Notes tab shows it
                     if let c = n.color { Circle().fill(timerColor(c)).frame(width: si(7), height: si(7)) }
-                    Text(n.heading).font(.sb(11.5)).fixedSize(horizontal: false, vertical: true)
-                    Spacer()
+                    // one line however long the title; the tooltip carries all of it
+                    Text(n.heading).font(.sb(11.5)).nameFit(n.heading)
+                    Spacer(minLength: 6)
                     Button { openReveal("notes", NotesNav.revealKey(n.id)) } label: { Image(systemName: "square.and.pencil").font(.sbIcon(10.5)) }
                         .buttonStyle(.borderless).foregroundStyle(.secondary).help("Open the note to read or edit")
                     Button {
