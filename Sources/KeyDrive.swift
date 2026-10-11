@@ -24,7 +24,7 @@ final class KeyDrive {
     init(out: String) { self.out = out }
 
     func run() {
-        guard UserDefaults.standard.string(forKey: NotesStore.folderKey)?.isEmpty ?? true else {
+        guard AppDefaults.store.string(forKey: NotesStore.folderKey)?.isEmpty ?? true else {
             print("FAIL a notes folder is chosen in Settings; the drive only runs on a scratch state folder"); exit(1)
         }
         try? FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
@@ -32,7 +32,7 @@ final class KeyDrive {
         TimerStore.key = "switchboard.timers.countdowns.drive"
         let seed = [SBTimer(label: "Tea", color: "green", start: Date(), fireAt: Date().addingTimeInterval(600)),
                     SBTimer(label: "Bread", color: "orange", start: Date(), fireAt: Date().addingTimeInterval(900))]
-        UserDefaults.standard.set(try? JSONEncoder().encode(seed), forKey: TimerStore.key)
+        AppDefaults.store.set(try? JSONEncoder().encode(seed), forKey: TimerStore.key)
         store.load()
         // an awkward note sits in the list the whole way: non-Latin, an emoji, a title past the width, markdown in the body
         _ = store.add(title: "Café ☕ 中文 — a title that goes on past the width of the panel to see what the row does with it",
@@ -334,7 +334,7 @@ final class KeyDrive {
             self.snapStack("stack-folded")
             self.check(self.stack?.items.first?.children?.last?.isCollapsed == true)
             self.stack?.closeAll()
-            UserDefaults.standard.removeObject(forKey: DeskPanels.saveKey)
+            AppDefaults.store.removeObject(forKey: DeskPanels.saveKey)
         }
     }
 
@@ -344,7 +344,7 @@ final class KeyDrive {
     /// Two real cards (the Notes tab and a short page) pinned and combined, on a panel list of the drive's own.
     private func showStack() {
         DeskPanels.saveKey = "switchboard.deskPanels.drive"
-        UserDefaults.standard.removeObject(forKey: DeskPanels.saveKey)
+        AppDefaults.store.removeObject(forKey: DeskPanels.saveKey)
         let d = DeskPanels(probe: true)
         d.content = { i in
             i.id == "notes" ? AnyView(DeskTab(concern: SwitchboardConcern(id: "notes", title: "Notes", subtitle: "", icon: "note.text", footer: "",
@@ -444,7 +444,7 @@ final class KeyDrive {
     }
 
     private func finish() {
-        UserDefaults.standard.removeObject(forKey: TimerStore.key)
+        AppDefaults.store.removeObject(forKey: TimerStore.key)
         print(lines.joined(separator: "\n"))
         exit(lines.contains { $0.hasPrefix("FAIL") } ? 1 : 0)
     }

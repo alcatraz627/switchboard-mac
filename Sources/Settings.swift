@@ -29,7 +29,7 @@ struct SettingsTabView: View {
         ("general", "General", "gearshape"), ("tabs", "Tabs", "square.grid.2x2"),
         ("hover", "Hover card", "rectangle.on.rectangle"), ("desk", "Desk", "note.text"),
     ]
-    @AppStorage("switchboard.settings.section") private var savedSection = "general"
+    @AppStorage("switchboard.settings.section", store: AppDefaults.store) private var savedSection = "general"
     /// Set by a snapshot, so a picture never changes the owner's last sub-tab.
     static var sectionOverride: String?
     private var section: String {
@@ -223,7 +223,7 @@ struct SettingsTabView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @AppStorage(TimerStore.soundKey) private var timerSound = "Glass"
+    @AppStorage(TimerStore.soundKey, store: AppDefaults.store) private var timerSound = "Glass"
 
     /// The ring sound, from every sound macOS ships, with a play button to hear it.
     private var timerSoundRow: some View {
@@ -241,7 +241,7 @@ struct SettingsTabView: View {
         .padding(.horizontal, PT.rowH).padding(.vertical, PT.rowV + 2)
     }
 
-    @AppStorage(TimerStore.ringKey) private var ringSeconds = 0
+    @AppStorage(TimerStore.ringKey, store: AppDefaults.store) private var ringSeconds = 0
 
     /// How long a timer rings, as a menu beside the sound's, so the two rows read alike.
     private var ringLengthRow: some View {
@@ -290,7 +290,7 @@ struct SettingsTabView: View {
                           tip: "Applies while Keep Awake is on",
                           action: {
                               keepScreen.toggle()
-                              UserDefaults.standard.set(keepScreen, forKey: SwitchboardApp.keepScreenKey)
+                              AppDefaults.store.set(keepScreen, forKey: SwitchboardApp.keepScreenKey)
                               if let app = NSApp.delegate as? SwitchboardApp, app.keepAwakeOn { app.setKeepAwake(true) }
                           })
         r.icon = "display"
@@ -488,7 +488,7 @@ struct SettingsTabView: View {
         r.showsBadge = false
         r.labelIsName = true
         r.buttons = [RowButton(label: "Set remote", kind: .ask(placeholder: "user@host:Notes", { line in
-            UserDefaults.standard.set(line.trimmingCharacters(in: .whitespaces), forKey: NotesSync.remoteKey)
+            AppDefaults.store.set(line.trimmingCharacters(in: .whitespaces), forKey: NotesSync.remoteKey)
             DispatchQueue.main.async { NotesSync.shared.sync(); store.objectWillChange.send() }
             return nil
         }), help: "Set the remote and sync now", icon: "arrow.triangle.2.circlepath")]
@@ -503,7 +503,7 @@ struct SettingsTabView: View {
     /// Choose a folder for notes; existing notes stay where they are, so a
     /// move is a Finder job the owner does on purpose.
     private var notesFolderRow: SystemRow {
-        let custom = UserDefaults.standard.string(forKey: NotesStore.folderKey)?.isEmpty == false
+        let custom = AppDefaults.store.string(forKey: NotesStore.folderKey)?.isEmpty == false
         var r = SystemRow(label: abbreviateHome(NotesStore.dir), state: .off,
                           note: custom ? "chosen by you; notes already saved elsewhere stay there" : "the default", tip: "")
         r.key = "settings-notes-folder"
@@ -515,7 +515,7 @@ struct SettingsTabView: View {
                 p.prompt = "Use this folder"
                 NSApp.activate(ignoringOtherApps: true)
                 if p.runModal() == .OK, let url = p.url {
-                    UserDefaults.standard.set(url.path, forKey: NotesStore.folderKey)
+                    AppDefaults.store.set(url.path, forKey: NotesStore.folderKey)
                     NotesStore.shared.load()
                     store.objectWillChange.send()
                 }
@@ -525,7 +525,7 @@ struct SettingsTabView: View {
         if custom {
             r.buttons.append(RowButton(label: "Reset", kind: .run({
                 DispatchQueue.main.async {
-                    UserDefaults.standard.removeObject(forKey: NotesStore.folderKey)
+                    AppDefaults.store.removeObject(forKey: NotesStore.folderKey)
                     NotesStore.shared.load()
                     store.objectWillChange.send()
                 }

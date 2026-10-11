@@ -69,12 +69,12 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
     override init() {
         recordsRuns = Self.key == Self.defaultKey
         super.init()
-        if let d = UserDefaults.standard.data(forKey: Self.key) {
+        if let d = AppDefaults.store.data(forKey: Self.key) {
             if let t = try? JSONDecoder().decode([SBTimer].self, from: d) {
                 timers = t
             } else {
                 // Keep the damaged copy aside: the next save would otherwise overwrite it for good.
-                UserDefaults.standard.set(d, forKey: Self.key + ".unreadable")
+                AppDefaults.store.set(d, forKey: Self.key + ".unreadable")
                 loadError = "The saved timers could not be read, so the list started empty."
                 dwarn("timers: saved list could not be decoded; kept under \(Self.key).unreadable")
             }
@@ -100,9 +100,9 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
     static let soundKey = "switchboard.timers.sound"
     static let ringKey = "switchboard.timers.ringSeconds"
     /// The sound a timer rings with, by its macOS name.
-    static var soundName: String { UserDefaults.standard.string(forKey: soundKey) ?? "Glass" }
+    static var soundName: String { AppDefaults.store.string(forKey: soundKey) ?? "Glass" }
     /// How long a timer rings; 0 rings until stopped, capped so a forgotten one ends.
-    static var ringSeconds: Int { UserDefaults.standard.object(forKey: ringKey) as? Int ?? 0 }
+    static var ringSeconds: Int { AppDefaults.store.object(forKey: ringKey) as? Int ?? 0 }
     static let ringChoices: [(seconds: Int, title: String)] = [(30, "30 s"), (60, "1 min"), (300, "5 min"), (0, "Until stopped")]
     static let ringCap = 60 * 60
     /// Every sound macOS ships, for the picker.
@@ -216,13 +216,13 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
     struct Recent: Codable, Hashable { var label: String; var seconds: TimeInterval; var color: String }
     static let recentKey = "switchboard.timers.recent"
     @Published private(set) var recent: [Recent] = {
-        guard let d = UserDefaults.standard.data(forKey: TimerStore.recentKey) else { return [] }
+        guard let d = AppDefaults.store.data(forKey: TimerStore.recentKey) else { return [] }
         return (try? JSONDecoder().decode([Recent].self, from: d)) ?? []
     }()
     private func remember(_ t: SBTimer) {
         let r = Recent(label: t.label, seconds: t.fireAt.timeIntervalSince(t.start).rounded(), color: t.color)
         recent = Self.recentList(adding: r, to: recent)
-        if let d = try? JSONEncoder().encode(recent) { UserDefaults.standard.set(d, forKey: Self.recentKey) }
+        if let d = try? JSONEncoder().encode(recent) { AppDefaults.store.set(d, forKey: Self.recentKey) }
     }
     /// Newest first, one entry per label and length, five at most.
     static func recentList(adding r: Recent, to list: [Recent]) -> [Recent] {
@@ -279,7 +279,7 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
     }
 
     func save() {
-        if let d = try? JSONEncoder().encode(timers) { UserDefaults.standard.set(d, forKey: Self.key) }
+        if let d = try? JSONEncoder().encode(timers) { AppDefaults.store.set(d, forKey: Self.key) }
     }
 
     /// Runs the one-second tick only while something counts down.
@@ -573,8 +573,8 @@ func probeTimers() -> String {
     // A key of the probe's own: real timers are never read, cleared or rewritten.
     let realKey = TimerStore.key
     TimerStore.key = "switchboard.timers.countdowns.probe"
-    defer { UserDefaults.standard.removeObject(forKey: TimerStore.key); TimerStore.key = realKey }
-    UserDefaults.standard.removeObject(forKey: TimerStore.key)
+    defer { AppDefaults.store.removeObject(forKey: TimerStore.key); TimerStore.key = realKey }
+    AppDefaults.store.removeObject(forKey: TimerStore.key)
     let s = TimerStore()
     defer { s.stop() }
     s.chimeAloud = false
@@ -621,7 +621,7 @@ func probeTimers() -> String {
 
     // One that came due ten minutes ago, while the app was closed.
     let missed = SBTimer(label: "Missed", color: "red", start: Date().addingTimeInterval(-900), fireAt: Date().addingTimeInterval(-600))
-    if let d = try? JSONEncoder().encode([missed]) { UserDefaults.standard.set(d, forKey: TimerStore.key) }
+    if let d = try? JSONEncoder().encode([missed]) { AppDefaults.store.set(d, forKey: TimerStore.key) }
     let relaunched = TimerStore()
     relaunched.chimeAloud = false
     pump(1.5)

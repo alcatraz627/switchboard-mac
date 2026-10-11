@@ -334,7 +334,7 @@ final class PolicyStore: ObservableObject {
     /// Tabs and sections hidden in Settings; kept in step with Visibility's store.
     /// Tab ids in the owner's order; the tab bar and Settings both follow it.
     @Published var tabOrder: [String] = Visibility.tabOrder {
-        didSet { UserDefaults.standard.set(tabOrder, forKey: Visibility.orderKey) }
+        didSet { AppDefaults.store.set(tabOrder, forKey: Visibility.orderKey) }
     }
     func moveTab(_ dragged: String, to target: String) {
         tabOrder = reordered(tabOrder, moving: dragged, to: target)
@@ -344,20 +344,20 @@ final class PolicyStore: ObservableObject {
     /// Pages that start hidden, for the owner to switch on in Settings.
     static let quickPagesOffAtFirst: Set<String> = ["controls", "models"]
     static let quickOrderKey = "switchboard.quickPageOrder", quickHiddenKey = "switchboard.quickPagesHidden"
-    @Published var quickPageOrder: [String] = PolicyStore.mergedOrder(saved: UserDefaults.standard.stringArray(forKey: PolicyStore.quickOrderKey) ?? [],
+    @Published var quickPageOrder: [String] = PolicyStore.mergedOrder(saved: AppDefaults.store.stringArray(forKey: PolicyStore.quickOrderKey) ?? [],
                                                                        all: PolicyStore.quickPageIDs) {
-        didSet { UserDefaults.standard.set(quickPageOrder, forKey: Self.quickOrderKey) }
+        didSet { AppDefaults.store.set(quickPageOrder, forKey: Self.quickOrderKey) }
     }
     @Published var hiddenQuickPages: Set<String> = PolicyStore.timersShownOnce(PolicyStore.startingHidden(
-        saved: UserDefaults.standard.stringArray(forKey: PolicyStore.quickHiddenKey) ?? [],
-        seen: UserDefaults.standard.stringArray(forKey: PolicyStore.quickOrderKey) ?? [])) {
-        didSet { UserDefaults.standard.set(Array(hiddenQuickPages).sorted(), forKey: Self.quickHiddenKey) }
+        saved: AppDefaults.store.stringArray(forKey: PolicyStore.quickHiddenKey) ?? [],
+        seen: AppDefaults.store.stringArray(forKey: PolicyStore.quickOrderKey) ?? [])) {
+        didSet { AppDefaults.store.set(Array(hiddenQuickPages).sorted(), forKey: Self.quickHiddenKey) }
     }
     /// How long the hover card stays after the pointer leaves, in whole seconds from 1 to 15.
     /// Show what waits on the owner as a small card under every hover page.
     static let approvalsCardKey = "switchboard.approvalsUnderEveryPage"
-    @Published var approvalsUnderEveryPage: Bool = UserDefaults.standard.bool(forKey: PolicyStore.approvalsCardKey) {
-        didSet { UserDefaults.standard.set(approvalsUnderEveryPage, forKey: Self.approvalsCardKey) }
+    @Published var approvalsUnderEveryPage: Bool = AppDefaults.store.bool(forKey: PolicyStore.approvalsCardKey) {
+        didSet { AppDefaults.store.set(approvalsUnderEveryPage, forKey: Self.approvalsCardKey) }
     }
     static let hoverLingerKey = "switchboard.hoverLinger"
     /// The mouse-away delays on offer: fine steps where a tenth matters, coarser
@@ -370,16 +370,16 @@ final class PolicyStore: ObservableObject {
     }
     /// The saved delay, or the default when none was ever chosen (0 is a real choice now).
     static var savedLinger: Double {
-        UserDefaults.standard.object(forKey: hoverLingerKey) == nil ? defaultLinger
-            : clampedLinger(UserDefaults.standard.double(forKey: hoverLingerKey))
+        AppDefaults.store.object(forKey: hoverLingerKey) == nil ? defaultLinger
+            : clampedLinger(AppDefaults.store.double(forKey: hoverLingerKey))
     }
     @Published var hoverLinger: Double = PolicyStore.savedLinger {
-        didSet { UserDefaults.standard.set(hoverLinger, forKey: Self.hoverLingerKey) }
+        didSet { AppDefaults.store.set(hoverLinger, forKey: Self.hoverLingerKey) }
     }
     static let timersShownKey = "switchboard.timersPageShownOnce"
     /// Timers once started hidden and that default was saved as if chosen; the owner asked for timers on
     /// the card, so it is shown one time. Hiding it again after that is kept.
-    static func timersShownOnce(_ hidden: Set<String>, defaults: UserDefaults = .standard) -> Set<String> {
+    static func timersShownOnce(_ hidden: Set<String>, defaults: UserDefaults = AppDefaults.store) -> Set<String> {
         guard !defaults.bool(forKey: timersShownKey) else { return hidden }
         defaults.set(true, forKey: timersShownKey)
         return hidden.subtracting(["timers"])
@@ -402,14 +402,14 @@ final class PolicyStore: ObservableObject {
         return new.filter(quickPagesNewFirst.contains) + saved.filter(all.contains) + new.filter { !quickPagesNewFirst.contains($0) }
     }
     @Published var hiddenTabs: Set<String> = Visibility.hiddenTabs {
-        didSet { UserDefaults.standard.set(Array(hiddenTabs).sorted(), forKey: Visibility.tabsKey) }
+        didSet { AppDefaults.store.set(Array(hiddenTabs).sorted(), forKey: Visibility.tabsKey) }
     }
     @Published var hiddenSections: Set<String> = Visibility.hiddenSections {
-        didSet { UserDefaults.standard.set(Array(hiddenSections).sorted(), forKey: Visibility.sectionsKey) }
+        didSet { AppDefaults.store.set(Array(hiddenSections).sorted(), forKey: Visibility.sectionsKey) }
     }
     /// What the hover preview shows, chosen in Settings.
     @Published var hoverItems: Set<HoverItem> = HoverItem.chosen {
-        didSet { UserDefaults.standard.set(hoverItems.map(\.rawValue).sorted(), forKey: HoverItem.key) }
+        didSet { AppDefaults.store.set(hoverItems.map(\.rawValue).sorted(), forKey: HoverItem.key) }
     }
     /// The Approvals tab's sections: pushes and asks waiting on the owner.
     @Published var needGroups: [SystemGroup] = []

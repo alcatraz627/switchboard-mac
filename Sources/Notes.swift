@@ -101,7 +101,7 @@ func probeNotes() -> String {
     if let b = savedFolder { NotesStore.defaults.set(b, forKey: NotesStore.folderKey) } else { NotesStore.defaults.removeObject(forKey: NotesStore.folderKey) }
     check("a store that has not read yet is not loaded", !NotesStore().loaded)
     check("the probe's folder choice never touches the app's own defaults",
-          UserDefaults.standard.string(forKey: NotesStore.folderKey) != gone && NotesStore.probing)
+          AppDefaults.store.string(forKey: NotesStore.folderKey) != gone && NotesStore.probing)
 
     // Reminders through a stand-in: the permission dialog stays up until answer() runs.
     NotesStore.remindersOff = false
@@ -544,7 +544,7 @@ final class NotesStore: ObservableObject {
     /// Set by --probe-notes so the folder choice is read and written in a throwaway suite, never the app's own domain.
     static var probing = false
     static var defaults: UserDefaults {
-        probing ? (UserDefaults(suiteName: "switchboard.probe-notes") ?? .standard) : .standard
+        probing ? (UserDefaults(suiteName: "switchboard.probe-notes") ?? AppDefaults.store) : AppDefaults.store
     }
     /// `~/Notes`, the one folder the Mac, the Pi and the phone share (contract 2026-10-10).
     /// A probe's scratch state keeps its own folder so no check ever touches the owner's notes.

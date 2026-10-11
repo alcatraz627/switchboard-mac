@@ -32,7 +32,7 @@ final class NotesSync: ObservableObject {
     /// How many notes hold both sides of a clash right now.
     @Published private(set) var conflicts = 0
 
-    var remote: String { UserDefaults.standard.string(forKey: Self.remoteKey) ?? "" }
+    var remote: String { AppDefaults.store.string(forKey: Self.remoteKey) ?? "" }
     var dir: String { NotesStore.dir }
     private var commitWork: DispatchWorkItem?
     private var pendingReason: String?
@@ -314,15 +314,15 @@ func probeNotesSync() -> [String] {
     check("the clash shows on the note", s.notes.first { $0.id == "clash" }?.conflicted == true)
     try? FileManager.default.removeItem(atPath: NotesStore.dir + "/clash.md")
     // with no remote set, the timer's sync still turns a file another tool wrote into a version
-    UserDefaults.standard.removeObject(forKey: NotesSync.remoteKey)
+    AppDefaults.store.removeObject(forKey: NotesSync.remoteKey)
     try? "---\ntitle: by hand\n---\nwritten by another tool\n".write(toFile: NotesStore.dir + "/byhand.md", atomically: true, encoding: .utf8)
     sync.sync()
     RunLoop.current.run(until: Date().addingTimeInterval(0.8))
     check("a file another tool wrote becomes a version on the next tick, remote or not",
           sync.history(of: "byhand").count == 1, "\(sync.history(of: "byhand").count)")
-    UserDefaults.standard.set("nobody@203.0.113.1:Notes.git", forKey: NotesSync.remoteKey)
+    AppDefaults.store.set("nobody@203.0.113.1:Notes.git", forKey: NotesSync.remoteKey)
     let r = sync.git(["ls-remote", "nobody@203.0.113.1:Notes.git"])
     check("a remote that does not answer fails fast with words, never a prompt", r.code != 0 && !r.err.isEmpty)
-    UserDefaults.standard.removeObject(forKey: NotesSync.remoteKey)
+    AppDefaults.store.removeObject(forKey: NotesSync.remoteKey)
     return lines + probeRuns()
 }

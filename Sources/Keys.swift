@@ -809,8 +809,8 @@ final class PanelKeys: ObservableObject {
 final class PanelPin: ObservableObject {
     static let shared = PanelPin()
     static let key = "switchboard.pinnedOpen"
-    @Published var on = UserDefaults.standard.bool(forKey: PanelPin.key) {
-        didSet { UserDefaults.standard.set(on, forKey: Self.key) }
+    @Published var on = AppDefaults.store.bool(forKey: PanelPin.key) {
+        didSet { AppDefaults.store.set(on, forKey: Self.key) }
     }
 }
 

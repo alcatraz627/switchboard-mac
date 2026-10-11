@@ -42,6 +42,19 @@ enum AppPaths {
     static let debugLogPrev = logDir + "/switchboard.log.1"
 }
 
+// ── App settings ────────────────────────────────────────────────────────────
+
+/// The one place the app reads and writes its settings. A scratch run (SWITCHBOARD_STATE set) gets its
+/// own domain named after that folder, so a probe, snapshot or drive can never touch the owner's real settings.
+enum AppDefaults {
+    static let store: UserDefaults = {
+        guard let state = ProcessInfo.processInfo.environment["SWITCHBOARD_STATE"], !state.isEmpty else { return .standard }
+        var h: UInt64 = 5381
+        for b in state.utf8 { h = (h &* 33) &+ UInt64(b) }
+        return UserDefaults(suiteName: "switchboard.scratch.\(String(h, radix: 16))") ?? .standard
+    }()
+}
+
 // ── Logging ──────────────────────────────────────────────────────────────────
 // One line per event, size-rotated at 1 MB with one backup kept.
 
@@ -179,7 +192,7 @@ enum PreferenceMigration {
                        "switchboard.timers", "ui.fontScale", "appearance.mode", "time.use24h"]
 
     static func run() {
-        let mine = UserDefaults.standard
+        let mine = AppDefaults.store
         guard !mine.bool(forKey: doneKey), let old = UserDefaults(suiteName: "claude-instances-bar") else { return }
         var copied: [String] = []
         for k in keys where mine.object(forKey: k) == nil {
@@ -319,19 +332,19 @@ enum Visibility {
     /// The tab each space opens on: the one last used in it.
     static let spaceTabKey = "switchboard.spaceTab"
     static func lastTab(in space: String) -> String? {
-        (UserDefaults.standard.dictionary(forKey: spaceTabKey) as? [String: String])?[space]
+        (AppDefaults.store.dictionary(forKey: spaceTabKey) as? [String: String])?[space]
     }
     static func rememberTab(_ tab: String) {
         guard let s = space(of: tab) else { return }
-        var d = (UserDefaults.standard.dictionary(forKey: spaceTabKey) as? [String: String]) ?? [:]
+        var d = (AppDefaults.store.dictionary(forKey: spaceTabKey) as? [String: String]) ?? [:]
         d[s] = tab
-        UserDefaults.standard.set(d, forKey: spaceTabKey)
+        AppDefaults.store.set(d, forKey: spaceTabKey)
     }
 
     /// The owner's saved order, with any tab it does not know yet placed after
     /// the tab it follows by default.
     static var tabOrder: [String] {
-        var order = UserDefaults.standard.stringArray(forKey: orderKey) ?? []
+        var order = AppDefaults.store.stringArray(forKey: orderKey) ?? []
         guard !order.isEmpty else { return defaultTabOrder }
         order = order.filter(defaultTabOrder.contains)
         for (i, id) in defaultTabOrder.enumerated() where !order.contains(id) {
@@ -341,8 +354,8 @@ enum Visibility {
         return order
     }
 
-    static var hiddenTabs: Set<String> { Set(UserDefaults.standard.stringArray(forKey: tabsKey) ?? []) }
-    static var hiddenSections: Set<String> { Set(UserDefaults.standard.stringArray(forKey: sectionsKey) ?? []) }
+    static var hiddenTabs: Set<String> { Set(AppDefaults.store.stringArray(forKey: tabsKey) ?? []) }
+    static var hiddenSections: Set<String> { Set(AppDefaults.store.stringArray(forKey: sectionsKey) ?? []) }
 
     static func tabHidden(_ tab: String) -> Bool { hiddenTabs.contains(tab) }
     /// A section of a hidden tab counts as hidden too.
@@ -410,7 +423,7 @@ enum HoverItem: String, CaseIterable {
     static let defaults: Set<HoverItem> = [.approvals, .problems, .timers]
 
     static var chosen: Set<HoverItem> {
-        guard let raw = UserDefaults.standard.stringArray(forKey: key) else { return defaults }
+        guard let raw = AppDefaults.store.stringArray(forKey: key) else { return defaults }
         return Set(raw.compactMap(HoverItem.init(rawValue:)))
     }
 }

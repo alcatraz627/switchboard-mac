@@ -119,6 +119,11 @@ enum LocalNetwork {
         let where_ = nets.isEmpty ? "This Mac has no network address right now." : "This Mac searched from \(nets.joined(separator: " and "))."
         return where_ + " The bulbs may be on another network."
     }
+
+    /// The same note without the network detail, for a narrow row.
+    static func shortNote() -> String {
+        searched().isEmpty ? "No network address. Bulbs may be elsewhere." : "Bulbs may be on another network."
+    }
 }
 
 final class LightsStore: ObservableObject {
@@ -165,7 +170,7 @@ final class LightsStore: ObservableObject {
 
     /// The owner's arrangement, by MAC; a bulb not in it goes at the end.
     private static let orderKey = "switchboard.bulbOrder"
-    private var order: [String] { UserDefaults.standard.stringArray(forKey: Self.orderKey) ?? [] }
+    private var order: [String] { AppDefaults.store.stringArray(forKey: Self.orderKey) ?? [] }
 
     /// Move a bulb while it is dragged; `saveOrder` keeps it on the drop.
     func move(_ dragged: String, to target: String) {
@@ -173,7 +178,7 @@ final class LightsStore: ObservableObject {
         bulbs = applyOrder(bulbs, ids)
     }
 
-    func saveOrder() { UserDefaults.standard.set(bulbs.map(\.id), forKey: Self.orderKey) }
+    func saveOrder() { AppDefaults.store.set(bulbs.map(\.id), forKey: Self.orderKey) }
 
     /// Send one change to one bulb. The row shows the change at once; the
     /// bulb's own report replaces it, or the old state comes back on failure.
@@ -211,10 +216,10 @@ final class LightsStore: ObservableObject {
 
     private static let lastOnKey = "switchboard.bulbLastOn"
     private static func loadLastOn() -> [String: Date] {
-        (UserDefaults.standard.dictionary(forKey: lastOnKey) as? [String: Double] ?? [:]).mapValues { Date(timeIntervalSince1970: $0) }
+        (AppDefaults.store.dictionary(forKey: lastOnKey) as? [String: Double] ?? [:]).mapValues { Date(timeIntervalSince1970: $0) }
     }
     private func saveLastOn() {
-        UserDefaults.standard.set(lastOn.mapValues(\.timeIntervalSince1970), forKey: Self.lastOnKey)
+        AppDefaults.store.set(lastOn.mapValues(\.timeIntervalSince1970), forKey: Self.lastOnKey)
     }
     private func noteOn(_ list: [Bulb]) {
         var changed = false
@@ -299,6 +304,13 @@ final class LightsStore: ObservableObject {
     }
 
     func loadForSnapshot() {
+        // --demo-bulbs: two bulbs that do not answer, so the "may be on another network" line can be drawn
+        if CommandLine.arguments.contains("--demo-bulbs") {
+            bulbs = [["ip": "192.168.1.40", "mac": "aa:aa:aa:00:00:01", "name": "Desk lamp"],
+                     ["ip": "192.168.1.41", "mac": "aa:aa:aa:00:00:02", "name": "Hall"]].compactMap(Bulb.init)
+            lastScan = Date()
+            return
+        }
         let r = WizCLI.run(["discover"])
         bulbs = applyOrder((r.json as? [[String: Any]])?.compactMap(Bulb.init) ?? [], order)
         error = r.err
@@ -369,10 +381,17 @@ struct LightsTabView: View {
                 }
             }
             if !lights.bulbs.isEmpty, !lights.discovering, !lights.bulbs.contains(where: { $0.reachable }) {
-                Label(LocalNetwork.silentNote(), systemImage: "network")
-                    .font(SBStyle.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4)
+                // One line: the full sentence when it fits, a short one when it does not, the whole text in the tooltip
+                let full = LocalNetwork.silentNote()
+                ViewThatFits(in: .horizontal) {
+                    Label(full, systemImage: "network").lineLimit(1).fixedSize()
+                    Label(LocalNetwork.shortNote(), systemImage: "network").lineLimit(1).fixedSize()
+                    Label("Bulbs may be elsewhere", systemImage: "network").lineLimit(1).truncationMode(.tail)
+                }
+                .font(SBStyle.caption).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+                .help(full)
             }
             Text("WiZ bulbs on your home network, controlled directly over the LAN. No account or cloud involved.")
                 .font(SBStyle.caption).foregroundStyle(.tertiary)

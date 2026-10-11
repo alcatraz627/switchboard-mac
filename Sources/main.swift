@@ -219,7 +219,7 @@ if let out = argAfter("--snapshot") {
     // Demo timers go under a key of their own, set before the store first loads.
     if args.contains("--demo-states") {
         TimerStore.key = "switchboard.timers.countdowns.demo"
-        UserDefaults.standard.removeObject(forKey: TimerStore.key)
+        AppDefaults.store.removeObject(forKey: TimerStore.key)
     }
     if args.contains("--notifications-off") { TimerStore.shared.notificationsOff = true }
     SettingsTabView.sectionOverride = argAfter("--settings-section")

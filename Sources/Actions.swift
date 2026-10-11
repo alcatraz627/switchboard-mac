@@ -150,8 +150,8 @@ final class ActionRegistry: ObservableObject {
     /// ⌘ has been held long enough to ask for the hints.
     @Published var hints = false
     /// The ⓘ in the header: hints stay up on every tab until it is clicked again.
-    @Published var hintsPinned = UserDefaults.standard.bool(forKey: ActionRegistry.pinnedKey) {
-        didSet { UserDefaults.standard.set(hintsPinned, forKey: Self.pinnedKey) }
+    @Published var hintsPinned = AppDefaults.store.bool(forKey: ActionRegistry.pinnedKey) {
+        didSet { AppDefaults.store.set(hintsPinned, forKey: Self.pinnedKey) }
     }
     var showHints: Bool { hints || hintsPinned }
 

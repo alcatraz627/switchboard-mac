@@ -52,11 +52,11 @@ final class DeskPanels: NSObject, NSWindowDelegate {
     static var foldedHeight: CGFloat { sc(30) }
 
     static func load() -> [DeskItem] {
-        guard let d = UserDefaults.standard.data(forKey: saveKey) else { return [] }
+        guard let d = AppDefaults.store.data(forKey: saveKey) else { return [] }
         return (try? JSONDecoder().decode([DeskItem].self, from: d)) ?? []
     }
     private func save() {
-        if let d = try? JSONEncoder().encode(items) { UserDefaults.standard.set(d, forKey: Self.saveKey) }
+        if let d = try? JSONEncoder().encode(items) { AppDefaults.store.set(d, forKey: Self.saveKey) }
     }
 
     /// Whether a page or tab is pinned, on its own or inside a stack.
@@ -459,8 +459,8 @@ func probeDesk() -> [String] {
     // folding, combining and taking out, on a list of the probe's own
     let real = DeskPanels.saveKey
     DeskPanels.saveKey = "switchboard.deskPanels.probe"
-    UserDefaults.standard.removeObject(forKey: DeskPanels.saveKey)
-    defer { UserDefaults.standard.removeObject(forKey: DeskPanels.saveKey); DeskPanels.saveKey = real }
+    AppDefaults.store.removeObject(forKey: DeskPanels.saveKey)
+    defer { AppDefaults.store.removeObject(forKey: DeskPanels.saveKey); DeskPanels.saveKey = real }
     let d = DeskPanels(probe: true)
     d.content = { i in AnyView(Text(i.id).frame(width: 200, height: 120)) }
     d.title = { $0.id }
