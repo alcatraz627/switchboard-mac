@@ -434,14 +434,15 @@ struct QuickCard: View {
             }
             if let pin, !state.onDesk {
                 Button { pin(state.page) } label: {
-                    Image(systemName: "pin.square").font(.sbIcon(12, weight: .medium))
+                    // a floating window, not a pin: a pin is what notes carry
+                    Image(systemName: "pip.enter").font(.sbIcon(12, weight: .medium))
                 }
                 .buttonStyle(.borderless).foregroundStyle(.secondary)
                 .help("Pin \(state.page.title) to the desktop as a panel that stays up")
             }
             if let tab = state.page.tab {
                 Button { openTab(tab) } label: {
-                    Image(systemName: "arrow.up.forward.app").font(.sbIcon(12, weight: .medium))
+                    Image(systemName: "arrow.up.left.and.arrow.down.right").font(.sbIcon(12, weight: .medium))
                 }
                 .buttonStyle(.borderless).foregroundStyle(.secondary).help("Open \(state.page.title) in the panel")
             } else {
