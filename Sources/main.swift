@@ -221,6 +221,34 @@ if let out = argAfter("--snapshot") {
     exit(ok ? 0 : 1)
 }
 
+// One list tab's rows as JSON, built by the same readers the panel draws, for the phone (via the csync agent).
+func rowJSON(_ r: SystemRow) -> [String: Any] {
+    var d: [String: Any] = ["label": r.label, "note": r.note, "enabled": r.enabled]
+    switch r.state {
+    case .on: d["state"] = "on"
+    case .off: d["state"] = "off"
+    case .count(let n, _): d["state"] = "count"; d["count"] = n
+    case .ok: d["state"] = "ok"
+    }
+    if let k = r.key { d["key"] = k }
+    if !r.tip.isEmpty, r.tip != r.note { d["tip"] = r.tip }   // most rows repeat the note as the tip
+    if let l = r.link { d["link"] = l }
+    if r.action != nil { d["acts"] = true }
+    if let c = r.choices { d["choices"] = c; d["selected"] = r.selected }
+    if !r.buttons.isEmpty { d["buttons"] = r.buttons.map { b -> [String: Any] in ["label": b.label, "icon": b.icon ?? ""] } }
+    if !r.children.isEmpty { d["children"] = r.children.map(rowJSON) }
+    return d
+}
+if let tab = argAfter("--json") {
+    guard let reader = catalogReaders[tab] else {
+        print("{\"error\": \"no list tab named \(tab); try \(catalogReaders.keys.sorted().joined(separator: ", "))\"}"); exit(2)
+    }
+    let groups = reader().map { g -> [String: Any] in ["title": g.title, "rows": g.rows.map(rowJSON)] }
+    let data = (try? JSONSerialization.data(withJSONObject: ["tab": tab, "groups": groups], options: [.sortedKeys])) ?? Data()
+    print(String(data: data, encoding: .utf8) ?? "{}")
+    exit(0)
+}
+
 // Each note in a folder as Switchboard reads it, one tab-separated line per file, for a test to diff.
 if let dir = argAfter("--dump-notes") {
     let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).filter { $0.hasSuffix(".md") }.sorted()
