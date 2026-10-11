@@ -59,8 +59,17 @@ func probeNotes() -> String {
     check("a drag after that rewrites exactly one note", afterDrag.filter { beforeDrag[$0.key] != $0.value }.map(\.key) == [c.id],
           afterDrag.filter { beforeDrag[$0.key] != $0.value }.map(\.key).joined(separator: ","))
     check("and puts it back on top of its group", s.notes.map(\.id) == [a!.id, c.id, b!.id], s.notes.map(\.title).joined(separator: ","))
+    // typing, then a drag inside the two-second commit wait: the typing must not ride in the move commit
+    var typed = s.notes.first { $0.id == b?.id }!
+    typed.body += "\ntyped just before a drag"
+    s.update(typed)
+    s.move(b!.id, to: c.id)
+    s.commitMove(visible: s.notes.map(\.id))
+    let last2 = NotesSync.shared.git(["log", "-2", "--format=%s"]).out.split(separator: "\n").map(String.init)
+    check("a save just before a drag is its own commit, then the move", last2 == ["move", "save"], last2.joined(separator: ","))
+    s.load()
     s.move(a!.id, to: c.id)
-    check("a row cannot be dragged across the pin line", s.notes.map(\.id) == [a!.id, c.id, b!.id])
+    check("a row cannot be dragged across the pin line", s.notes.map(\.id) == [a!.id, b!.id, c.id], s.notes.map(\.title).joined(separator: ","))
     check("the old order file is never written", !FileManager.default.fileExists(atPath: NotesStore.dir + "/order.json"))
     s.delete(c)
     check("delete removes the file", !FileManager.default.fileExists(atPath: c.path) && !s.notes.contains { $0.id == c.id })
@@ -655,21 +664,22 @@ final class NotesStore: ObservableObject {
     /// yet gets keys once, one `pos` line per note, so the order it shows today is kept.
     func arrange(_ id: String, after anchor: String?) {
         guard let m = notes.first(where: { $0.id == id }) else { return }
-        func others() -> [Note] { NoteOrder.sorted(notes).filter { $0.pinned == m.pinned && $0.id != id } }
-        var group = others()
-        let loose = group.filter { $0.pos == nil }
-        let anchorNote = group.first { $0.id == anchor }
-        if !loose.isEmpty, anchorNote == nil || anchorNote?.pos == nil {
-            let below = group.first { NotePos.usable($0.pos) }?.pos
-            for (n, key) in zip(loose, NotePos.fresh(loose.count, below: below)) { setPos(n.id, key) }
-            group = others()
+        NotesSync.shared.commitAlone("move") {
+            func others() -> [Note] { NoteOrder.sorted(notes).filter { $0.pinned == m.pinned && $0.id != id } }
+            var group = others()
+            let loose = group.filter { $0.pos == nil }
+            let anchorNote = group.first { $0.id == anchor }
+            if !loose.isEmpty, anchorNote == nil || anchorNote?.pos == nil {
+                let below = group.first { NotePos.usable($0.pos) }?.pos
+                for (n, key) in zip(loose, NotePos.fresh(loose.count, below: below)) { setPos(n.id, key) }
+                group = others()
+            }
+            let at = anchor.flatMap { a in group.firstIndex { $0.id == a } } ?? -1
+            let lower = group.prefix(at + 1).last { NotePos.usable($0.pos) }?.pos ?? ""
+            let upper = group.dropFirst(at + 1).first { NotePos.usable($0.pos) }?.pos
+            setPos(id, NotePos.between(lower, upper))
+            resort()
         }
-        let at = anchor.flatMap { a in group.firstIndex { $0.id == a } } ?? -1
-        let lower = group.prefix(at + 1).last { NotePos.usable($0.pos) }?.pos ?? ""
-        let upper = group.dropFirst(at + 1).first { NotePos.usable($0.pos) }?.pos
-        setPos(id, NotePos.between(lower, upper))
-        resort()
-        NotesSync.shared.commit("move")
     }
 
     /// Writes a note's `pos` only; a reorder is not an edit, so the file keeps its time.
@@ -690,12 +700,14 @@ final class NotesStore: ObservableObject {
         guard fm.fileExists(atPath: path), Self.missingFolder == nil else { return }
         let saved = fm.contents(atPath: path).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String] } ?? []
         let named = applyOrder(notes.sorted { $0.created > $1.created }, saved).filter { saved.contains($0.id) }
-        for (n, key) in zip(named, NotePos.spread(named.count)) { setPos(n.id, key) }
         var aside = path + ".migrated"
         if fm.fileExists(atPath: aside) { aside += "-" + String(Int(Date().timeIntervalSince1970)) }
-        try? fm.moveItem(atPath: path, toPath: aside)
-        resort()
-        if !named.isEmpty { NotesSync.shared.commit("order: migrate") }
+        let write = {
+            for (n, key) in zip(named, NotePos.spread(named.count)) { self.setPos(n.id, key) }
+            try? fm.moveItem(atPath: path, toPath: aside)
+            self.resort()
+        }
+        if named.isEmpty { write() } else { NotesSync.shared.commitAlone("order: migrate", write: write) }
         dlog("notes order: \(named.count) notes moved from order.json to pos")
     }
 

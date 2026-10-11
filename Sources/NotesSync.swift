@@ -32,6 +32,7 @@ final class NotesSync: ObservableObject {
     var remote: String { UserDefaults.standard.string(forKey: Self.remoteKey) ?? "" }
     var dir: String { NotesStore.dir }
     private var commitWork: DispatchWorkItem?
+    private var pendingReason: String?
     private let queue = DispatchQueue(label: "switchboard.notes.git", qos: .utility)
     private var timer: Timer?
 
@@ -73,9 +74,23 @@ final class NotesSync: ObservableObject {
     /// Commit what changed, a moment after the last save, so a burst of typing is one commit.
     func commit(_ reason: String) {
         commitWork?.cancel()
-        let w = DispatchWorkItem { [weak self] in self?.commitNow(reason) }
+        let w = DispatchWorkItem { [weak self] in self?.pendingReason = nil; self?.commitNow(reason) }
         commitWork = w
+        pendingReason = reason
         queue.asyncAfter(deadline: .now() + 2, execute: w)
+    }
+
+    /// Writes and commits a change on its own, at once: other devices ignore "move" commits for edit
+    /// times, so typing still waiting is committed first under its own reason.
+    func commitAlone(_ reason: String, write: () -> Void) {
+        if let w = commitWork, let r = pendingReason {
+            w.cancel()
+            commitWork = nil
+            pendingReason = nil
+            queue.sync { commitNow(r) }
+        }
+        write()
+        queue.sync { commitNow(reason) }
     }
 
     func commitNow(_ reason: String) {
