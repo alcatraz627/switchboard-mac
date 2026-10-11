@@ -202,6 +202,7 @@ private struct NotesList: View {
                 Text(nav.query.isEmpty ? "No notes in the chosen colours." : "No notes match \u{201C}\(nav.query)\u{201D}.").font(PT.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
             }
             NotesFolderLink()
+            if !notes.trashed.isEmpty { RecentlyDeleted(notes: notes) }
             if !notes.expired.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
                     Button { withAnimation(Motion.slow) { showExpired.toggle() } } label: {
@@ -328,6 +329,51 @@ struct NoteFilterBar: View {
             sortMenu
         }
         .padding(.horizontal, 4)
+    }
+}
+
+/// Deleted notes, folded away until asked for: each can be brought back or removed for good.
+struct RecentlyDeleted: View {
+    @ObservedObject var notes: NotesStore
+    @State private var show = RecentlyDeleted.startOpen
+    /// A snapshot run with --show-trash draws the section opened.
+    static var startOpen = CommandLine.arguments.contains("--show-trash")
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Button { withAnimation(Motion.slow) { show.toggle() } } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "chevron.right").font(.sbIcon(8, weight: .semibold)).rotationEffect(.degrees(show ? 90 : 0))
+                    Image(systemName: "trash").font(.sbIcon(9.5))
+                    Text("Recently deleted \(notes.trashed.count)").font(PT.section)
+                }
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain).padding(.leading, 4).help("Deleted notes wait here until you bring them back or remove them for good")
+            if show {
+                Card {
+                    ForEach(Array(notes.trashed.enumerated()), id: \.element.id) { i, t in
+                        if i > 0 { Divider().padding(.leading, PT.rowH) }
+                        row(t)
+                    }
+                }
+            }
+        }
+    }
+
+    private func row(_ t: NotesStore.Trashed) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(t.note.heading.isEmpty ? "Untitled" : t.note.heading).font(PT.label).lineLimit(1).truncationMode(.middle)
+                Text("Deleted " + age(t.deleted)).font(PT.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Button { notes.restore(t) } label: { Label("Restore", systemImage: "arrow.uturn.backward").lineLimit(1).fixedSize() }
+                .sbControlSize(.small).help("Put this note back in the list")
+            Button { notes.purge(t) } label: { Label("Remove", systemImage: "trash").lineLimit(1).fixedSize() }
+                .sbControlSize(.small).help("Remove this note for good (it goes to the macOS Trash)")
+        }
+        .padding(.horizontal, PT.rowH).padding(.vertical, PT.rowV + 2)
     }
 }
 

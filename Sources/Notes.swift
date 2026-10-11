@@ -168,6 +168,40 @@ func probeNotes() -> String {
     check("a resolved note is no longer a clash", !NotesSync.conflicted(NotesSync.resolve(clash, keep: .both)))
     check("an unclosed block loses nothing", NotesSync.resolve("a\n<<<<<<< x\nb\n=======\nc", keep: .mine) == "a\nb\nc")
 
+    // Delete puts a note in .trash; Recently deleted brings it back or removes it for good.
+    // earlier checks deleted notes too; start this one from an empty .trash
+    try? FileManager.default.removeItem(atPath: NotesStore.trashDir)
+    s.loadTrash()
+    let doomed = s.add("Delete me\nbody kept")!
+    s.delete(doomed)
+    check("delete moves the file to .trash", !FileManager.default.fileExists(atPath: doomed.path)
+          && FileManager.default.fileExists(atPath: NotesStore.trashDir + "/" + doomed.id + ".md"))
+    check("the deleted note is listed with its title", s.trashed.map(\.note.title) == ["Delete me"], s.trashed.map(\.note.title).joined(separator: ","))
+    check("it is gone from the notes", !s.notes.contains { $0.id == doomed.id })
+    check("restore brings it back with its text", s.restore(s.trashed[0])?.body == "body kept" && s.trashed.isEmpty && s.notes.contains { $0.id == doomed.id })
+    let twin = s.add("Twin")!
+    s.delete(twin)
+    let again = s.add("Twin")!
+    s.delete(again)
+    check("two deleted notes of one name are both kept", s.trashed.count == 2, "\(s.trashed.count)")
+    let holder = s.add("Holder")!
+    s.delete(holder)
+    let sameID = NotesStore.dir + "/" + holder.id + ".md"
+    try? "---\ntitle: \"Squatter\"\n---\nx\n".write(toFile: sameID, atomically: true, encoding: .utf8)
+    s.load()
+    let revived = s.restore(s.trashed.first { $0.note.title == "Holder" }!)
+    check("a restore never overwrites a note that took its name", revived?.title == "Holder" && revived?.id != holder.id
+          && s.notes.first { $0.id == holder.id }?.title == "Squatter")
+    var reminded = s.add("Remind me")!
+    reminded.remindAt = Date().addingTimeInterval(3600)
+    s.update(reminded)
+    s.delete(s.notes.first { $0.id == reminded.id }!)
+    check("a restored note comes back without its reminder", s.restore(s.trashed.first { $0.note.title == "Remind me" }!)?.remindAt == nil)
+    s.purge(s.trashed[0])
+    check("remove for good takes it out of the list", s.trashed.count == 1, "\(s.trashed.count)")
+    for t in s.trashed { s.purge(t) }
+    check("the hidden folder is not read as notes", !s.notes.contains { $0.id.hasPrefix(".") })
+
     // A link is a note by itself; sorts and the tag filter only change the view.
     let pin = s.add(title: "", body: "", url: "https://example.com/a")
     check("a note with only a link is saved and keeps it", pin != nil && pin?.heading == "https://example.com/a")
@@ -340,6 +374,7 @@ final class NotesStore: ObservableObject {
     private func apply(_ r: (notes: [Note], problem: String?)) {
         notes = r.notes
         loaded = true
+        loadTrash()
         // A read problem clears itself when the next read is clean (a drive plugged back in).
         if let p = r.problem { readProblem = p; error = p }
         else if let old = readProblem { readProblem = nil; if error == old { error = nil } }
@@ -420,14 +455,82 @@ final class NotesStore: ObservableObject {
         var gone = n
         gone.remindAt = nil
         let reminderProblem = syncReminder(&gone)
-        do { try FileManager.default.removeItem(atPath: n.path) } catch {
+        // into .trash beside the notes (bfb does the same), so Recently deleted can bring it back
+        do { try moveToTrash(n) } catch {
             self.error = "\(n.title) could not be removed: \(error.localizedDescription)"; return
         }
         notes.removeAll { $0.id == n.id }
         saveOrder()
+        loadTrash()
         NotesSync.shared.commit("delete")
         // The note is gone either way; a reminder left behind would fire for nothing.
         if let p = reminderProblem { self.error = "The note was deleted, but its reminder was not removed: \(p)" }
+    }
+
+    // ── Recently deleted ────────────────────────────────────────────────────
+
+    /// A deleted note waiting in `.trash`, with when it went there.
+    struct Trashed: Identifiable {
+        let file: String
+        let note: Note
+        let deleted: Date
+        var id: String { file }
+    }
+    @Published private(set) var trashed: [Trashed] = []
+    static var trashDir: String { dir + "/.trash" }
+
+    private func moveToTrash(_ n: Note) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(atPath: Self.trashDir, withIntermediateDirectories: true)
+        var name = n.id + ".md"
+        while fm.fileExists(atPath: Self.trashDir + "/" + name) { name = n.id + "-" + String(Int(Date().timeIntervalSince1970)) + String(Int.random(in: 0..<100)) + ".md" }
+        try fm.moveItem(atPath: n.path, toPath: Self.trashDir + "/" + name)
+    }
+
+    /// Reads `.trash`, newest deletion first; a folder that is not there is an empty list.
+    func loadTrash() {
+        let fm = FileManager.default
+        let names = ((try? fm.contentsOfDirectory(atPath: Self.trashDir)) ?? []).filter { $0.hasSuffix(".md") }
+        trashed = names.compactMap { f -> Trashed? in
+            let path = Self.trashDir + "/" + f
+            guard let text = try? String(contentsOfFile: path, encoding: .utf8), let n = Self.parse(id: String(f.dropLast(3)), text) else { return nil }
+            let url = URL(fileURLWithPath: path)
+            let when = (try? url.resourceValues(forKeys: [.addedToDirectoryDateKey]))?.addedToDirectoryDate
+                ?? (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date ?? Date()
+            return Trashed(file: f, note: n, deleted: when)
+        }.sorted { $0.deleted > $1.deleted }
+    }
+
+    /// Puts a deleted note back in the list, under a new name if its own is taken. Its reminder
+    /// was removed when it was deleted, so it comes back without one.
+    @discardableResult
+    func restore(_ t: Trashed) -> Note? {
+        let fm = FileManager.default
+        var id = t.note.id
+        while fm.fileExists(atPath: Self.dir + "/" + id + ".md") { id += "x" }
+        do { try fm.moveItem(atPath: Self.trashDir + "/" + t.file, toPath: Self.dir + "/" + id + ".md") } catch {
+            self.error = "\(t.note.heading) could not be brought back: \(error.localizedDescription)"; return nil
+        }
+        load()
+        guard var n = notes.first(where: { $0.id == id }) else { return nil }
+        if n.remindAt != nil || n.reminderID != nil {
+            n.remindAt = nil; n.reminderID = nil
+            update(n)
+        } else {
+            NotesSync.shared.commit("restore")
+        }
+        saveOrder()
+        return notes.first { $0.id == id }
+    }
+
+    /// Removes one deleted note for good, into the macOS Trash so even that can be undone.
+    func purge(_ t: Trashed) {
+        let url = URL(fileURLWithPath: Self.trashDir + "/" + t.file)
+        // a probe never fills the owner's macOS Trash
+        do { if Self.probing { try FileManager.default.removeItem(at: url) } else { try FileManager.default.trashItem(at: url, resultingItemURL: nil) } } catch {
+            self.error = "\(t.note.heading) could not be removed: \(error.localizedDescription)"
+        }
+        loadTrash()
     }
 
     func move(_ dragged: String, to target: String) {
