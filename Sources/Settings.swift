@@ -79,6 +79,9 @@ struct SettingsTabView: View {
                     Card { SystemRowView(row: commandWatchRow, store: store) }
                 }
             }
+            if (matches("quit") || matches("restart") || matches("login") || matches("switchboard")) && on("general") {
+                group("Switchboard", note: "The app itself.", rows: [loginRow, restartRow, quitRow])
+            }
             if prompts && on("general") {
                 group("Claude's permission prompts",
                       note: "When on, a prompt Claude Code would ask in the terminal waits under Claude asks in Approvals for \(PermissionRoute.wait) seconds first.",
@@ -261,6 +264,59 @@ struct SettingsTabView: View {
             .help("How long a timer rings before it stops on its own; Until stopped ends after an hour")
         }
         .padding(.horizontal, PT.rowH).padding(.vertical, PT.rowV + 2)
+    }
+
+    // ── The app: start at login, restart, quit (owner ledger K15) ───────────
+    private static var agentTarget: String { "gui/\(getuid())/" + (Bundle.main.bundleIdentifier ?? "io.github.alcatraz627.switchboard") }
+    @State private var loginOn = SettingsTabView.loginEnabled()
+
+    /// On when the install's LaunchAgent is present and not disabled in launchd.
+    static func loginEnabled() -> Bool {
+        let id = Bundle.main.bundleIdentifier ?? "io.github.alcatraz627.switchboard"
+        guard FileManager.default.fileExists(atPath: NSHomeDirectory() + "/Library/LaunchAgents/\(id).plist") else { return false }
+        let r = Services.run("/bin/launchctl", ["print-disabled", "gui/\(getuid())"], timeout: 4)
+        return !r.out.contains("\"\(id)\" => disabled") && !r.out.contains("\"\(id)\" => true")
+    }
+
+    private var loginRow: SystemRow {
+        var r = SystemRow(label: "Start at login", state: loginOn ? .on(menuGreen) : .off,
+                          note: loginOn ? "on" : "off", tip: "Switches the install's login item on or off; nothing is deleted",
+                          action: {
+                              _ = Services.run("/bin/launchctl", [loginOn ? "disable" : "enable", Self.agentTarget], timeout: 4)
+                              loginOn = SettingsTabView.loginEnabled()
+                          })
+        r.icon = "power"
+        r.key = "settings-login"
+        return r
+    }
+
+    private var restartRow: SystemRow {
+        var r = SystemRow(label: "Restart Switchboard", state: .ok, note: "", tip: "Quit and open again")
+        r.icon = "arrow.clockwise"
+        r.key = "settings-restart"
+        r.showsBadge = false
+        r.buttons = [RowButton(label: "Restart", kind: .run({
+            let path = Bundle.main.bundlePath
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", path]
+            try? p.run()
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+            return nil
+        }), help: "Quit and open again", icon: "arrow.clockwise")]
+        r.buttons[0].words = true
+        return r
+    }
+
+    private var quitRow: SystemRow {
+        var r = SystemRow(label: "Quit Switchboard", state: .ok, note: "", tip: "It opens again at your next login when Start at login is on")
+        r.icon = "xmark.circle"
+        r.key = "settings-quit"
+        r.showsBadge = false
+        r.buttons = [RowButton(label: "Quit", kind: .run({ DispatchQueue.main.async { NSApp.terminate(nil) }; return nil }),
+                               help: "Quit Switchboard", icon: "xmark.circle", confirm: "Quit Switchboard?")]
+        r.buttons[0].words = true
+        return r
     }
 
     private var sizeRow: SystemRow {
