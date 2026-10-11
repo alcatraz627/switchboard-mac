@@ -77,6 +77,20 @@ func probeFormat() -> [String] {
     func check(_ name: String, _ ok: Bool, _ got: String = "") {
         lines.append("\(ok ? "ok  " : "FAIL") \(name)\(ok || got.isEmpty ? "" : " (got: \(got))")")
     }
+    // A screenshot copied as a file puts its path on the clipboard too; the picture must win.
+    let shot = NSTemporaryDirectory() + "sb-paste-\(getpid()).png"
+    let tiny = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2, bitsPerSample: 8, samplesPerPixel: 4,
+                                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+    try? tiny?.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: shot))
+    let pb = NSPasteboard(name: NSPasteboard.Name("sb-probe-\(getpid())"))
+    pb.clearContents()
+    pb.writeObjects([URL(fileURLWithPath: shot) as NSURL, shot as NSString])
+    check("a copied picture file pastes as the picture, not its path", EditorTextView.pastedImageFile(pb).flatMap { NSBitmapImageRep(data: $0) } != nil)
+    pb.clearContents()
+    pb.writeObjects([URL(fileURLWithPath: NSTemporaryDirectory() + "notes.txt") as NSURL])
+    check("a copied text file is left to paste as text", EditorTextView.pastedImageFile(pb) == nil)
+    pb.releaseGlobally()
+    try? FileManager.default.removeItem(atPath: shot)
     let w = NoteFormat.wrap("buy milk", NSRange(location: 4, length: 4), "**")
     check("bold wraps the selection and keeps it selected", w == .init(text: "buy **milk**", selection: NSRange(location: 6, length: 4)), "\(w)")
     let u = NoteFormat.wrap("buy **milk**", NSRange(location: 4, length: 8), "**")

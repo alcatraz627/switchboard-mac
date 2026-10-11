@@ -108,8 +108,18 @@ final class EditorTextView: NSTextView {
     }
     override func paste(_ sender: Any?) {
         let pb = NSPasteboard.general
+        // A copied picture file (a screenshot's thumbnail, a Finder copy) also carries its path as
+        // text; it is the picture that is meant, so it goes in as one, not as the path.
+        if let onImage, let d = Self.pastedImageFile(pb) { onImage(d); return }
         if let onImage, pb.string(forType: .string) == nil, let d = pb.data(forType: .png) ?? pb.data(forType: .tiff) { onImage(d); return }
         super.paste(sender)
+    }
+    /// The first picture file on the clipboard, read as data; nil when it holds no picture file.
+    static func pastedImageFile(_ pb: NSPasteboard) -> Data? {
+        let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        let pictures: Set<String> = ["png", "jpg", "jpeg", "heic", "gif", "tiff", "tif", "webp", "bmp"]
+        guard let url = urls.first(where: { pictures.contains($0.pathExtension.lowercased()) }) else { return nil }
+        return try? Data(contentsOf: url)
     }
     override func mouseDown(with e: NSEvent) {
         if !isEditable { onClickReadOnly?() }
