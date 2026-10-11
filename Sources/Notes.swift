@@ -174,7 +174,10 @@ struct Note: Identifiable, Equatable {
     /// Both sides of a clash are in the body, marked by git; the owner sorts it out when they like.
     var conflicted: Bool { NotesSync.conflicted(body) }
     /// When the note's file last changed, which is when it was last edited.
-    var modified: Date? { (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date }
+    /// By its last commit when there is one (a sync touches every file's own time), else the file's time.
+    var modified: Date? {
+        NotesSync.shared.editTime(id) ?? (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+    }
     /// Pinned, or edited in the last two hours: shown as a row on the hover card, not a chip.
     static func keepsRow(pinned: Bool, modified: Date?, now: Date = Date()) -> Bool {
         pinned || (modified.map { now.timeIntervalSince($0) < 2 * 3600 } ?? false)

@@ -73,6 +73,32 @@ final class NotesSync: ObservableObject {
         if r.code != 0, !r.err.contains("nothing to commit"), !r.out.contains("nothing to commit") {
             DispatchQueue.main.async { self.problem = "commit failed: \(r.err.isEmpty ? r.out : r.err)" }
         }
+        readEditTimes()
+    }
+
+    /// When each note was last edited, by its last commit: a file's own time changes for
+    /// every note a sync or checkout touches, so "edited lately" lit up on all of them.
+    private(set) var editTimes: [String: Date] = [:]
+    private let editLock = NSLock()
+    private var editTimesRead = false
+    func editTime(_ id: String) -> Date? {
+        // the first reader before any commit reads the history once
+        editLock.lock(); let read = editTimesRead; editLock.unlock()
+        if !read { readEditTimes() }
+        editLock.lock(); defer { editLock.unlock() }; return editTimes[id]
+    }
+
+    private func readEditTimes() {
+        var times: [String: Date] = [:], when: Date?
+        // newest first, so the first time a file appears is its last edit
+        for line in git(["log", "--format=@%ct", "--name-only", "--", "*.md"]).out.split(separator: "\n") {
+            if line.hasPrefix("@"), let t = TimeInterval(line.dropFirst()) { when = Date(timeIntervalSince1970: t) }
+            else if line.hasSuffix(".md"), let w = when {
+                let id = String(line.dropLast(3))
+                if times[id] == nil { times[id] = w }
+            }
+        }
+        editLock.lock(); editTimes = times; editTimesRead = true; editLock.unlock()
     }
 
     /// Pull the Pi's changes and push ours. A clash is committed with both sides kept.
