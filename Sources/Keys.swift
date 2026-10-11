@@ -560,8 +560,11 @@ enum KeyRouter {
             if let id = nav.focusedID { FocusScroll.shared.show("timer-" + id) }
             return true
         }
+        // S stops whatever is ringing, wherever the keyboard is on the tab (review SB-03)
+        if !typing, case .char("s") = k, !store.ringing.isEmpty { store.silence(); return true }
         guard !typing, let id = nav.focusedID, let t = store.timers.first(where: { $0.id == id }) else { return false }
         switch k {
+        case .enter where store.ringing.contains(id): store.stopRinging(id)   // Return answers a ringing timer
         case .enter: nav.renaming = id
         case .char("+"), .char("="): store.extend(t, by: 60)
         case .delete:

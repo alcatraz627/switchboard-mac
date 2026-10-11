@@ -83,7 +83,8 @@ enum KeyTable {
     static let timers: [KeyAction] = [
         a("timers.field.leave", "Leave the new timer for the list", "To the list", "Esc", "timers", "field"),
         a("timers.list.move", "Move between timers (↑ from the first goes back to the box)", "Timers", "↑/↓", "timers", "tab"),
-        a("timers.row.rename", "Rename", "Rename", "Return", "timers", "row"),
+        a("timers.tab.stop", "Stop whatever is ringing", "Stop ring", "S", "timers", "tab"),
+        a("timers.row.rename", "Rename; on a ringing timer, stop it", "Rename / Stop", "Return", "timers", "row"),
         a("timers.row.extend", "Add a minute", "+1 min", "+", "timers", "row"),
         a("timers.row.clear", "Clear the timer", "Clear", "⌫", "timers", "row"),
     ]
