@@ -177,6 +177,8 @@ if let out = argAfter("--snapshot-quick") {
     }
     NotesStore.shared.load()
     let state = QuickState()
+    // the header as a first-time owner sees it: the pages that are on until switched off
+    state.pages = QuickPage.allCases.filter { !PolicyStore.quickPagesOffAtFirst.contains($0.rawValue) || $0 == page }
     state.page = page
     // every badge kind, with the longest wording seen live, so wrapping shows
     let problems = [Problem(text: "refresh session index failed (exit 1)", tab: "runtime", level: .error, query: "refresh session index")]
@@ -185,7 +187,7 @@ if let out = argAfter("--snapshot-quick") {
     state.badges = [StatusBadge(id: "approvals", icon: "hand.raised.fill", text: "12 waiting", kind: .waiting, help: "", opens: .approvals)]
         + problems.enumerated().map { StatusBadge(problem: $1, index: $0) }
         + [StatusBadge(id: "down", icon: "bolt.slash.fill", text: "Down: kanban, session hub", kind: .error, help: "", tab: "runtime"),
-           StatusBadge(id: "timer", icon: Icons.tab["timers"] ?? "timer", text: "Tea · 4:05", kind: .info, help: "", tab: "timers")]
+           StatusBadge(id: "timer", icon: Icons.tab["timers"] ?? "timer", text: "Tea", kind: .info, help: "", tab: "timers", until: Date().addingTimeInterval(245))]
     // Pages that read on appear are filled first, so the card is measured at its real size.
     let controls = ControlsStore()
     if page == .controls { controls.load(devices: false) }

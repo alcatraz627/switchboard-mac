@@ -268,6 +268,18 @@ final class NotesNav: ObservableObject {
         let n = NotesNav(); spaces[s] = n; return n
     }
 
+    /// The key a link uses to land on one note's row.
+    static func revealKey(_ id: String) -> String { "note-" + id }
+    /// The note a reveal key names, if it names one.
+    static func noteID(fromRevealKey key: String) -> String? {
+        key.hasPrefix("note-") ? String(key.dropFirst("note-".count)) : nil
+    }
+    /// Where the keyboard goes when a link lands on a note: that note, open to read.
+    /// Without this the tab stays on whichever note was open last (the one just written).
+    static func focus(forRevealKey key: String) -> NoteFocus? {
+        noteID(fromRevealKey: key).map { .open($0, nil, typing: false) }
+    }
+
     @Published var focus: NoteFocus = .none
     @Published var filter: Set<String> = []
     @Published var query = ""

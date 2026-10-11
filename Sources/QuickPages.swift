@@ -210,7 +210,17 @@ func probeQuickCycle() -> String {
           PolicyStore.clampedLinger(0) == 0 && PolicyStore.clampedLinger(0.4) == 0.5 && PolicyStore.clampedLinger(40) == 15
           && PolicyStore.clampedLinger(7.6) == 8 && PolicyStore.clampedLinger(1) == 0.8)
     check("the new pages start hidden for someone who never saw them",
-          PolicyStore.startingHidden(saved: [], seen: ["home", "limits", "approvals", "bulbs", "notes"]) == ["timers", "controls", "models"])
+          PolicyStore.startingHidden(saved: [], seen: ["home", "limits", "approvals", "bulbs", "notes"]) == ["controls", "models"])
+    check("the header offers Timers to someone who never changed the page list",
+          !PolicyStore.startingHidden(saved: [], seen: []).contains("timers") && QuickPage.allCases.contains(.timers))
+    check("Models stays an opt-in page", PolicyStore.startingHidden(saved: [], seen: []).contains("models"))
+    let tick = StatusBadge(id: "t", icon: "timer", text: "Tea", kind: .info, help: "", until: Date(timeIntervalSince1970: 1000))
+    check("a timer badge counts down with the clock, not with when it was made",
+          tick.text(at: Date(timeIntervalSince1970: 940)) == "Tea · 1:00" && tick.text(at: Date(timeIntervalSince1970: 970)) == "Tea · 0:30"
+          && tick.text(at: Date(timeIntervalSince1970: 1100)) == "Tea · 0:00")
+    check("a pinned note's Open and row click carry that note's id",
+          NotesNav.focus(forRevealKey: NotesNav.revealKey("abc")) == .open("abc", nil, typing: false)
+          && NotesNav.focus(forRevealKey: "timer-abc") == nil)
     check("a page the owner already switched on stays on",
           PolicyStore.startingHidden(saved: ["bulbs"], seen: PolicyStore.quickPageIDs) == ["bulbs"])
     check("a saved page order survives, a gone page drops out, a new one joins at the end",
@@ -262,6 +272,14 @@ struct StatusBadge: Identifiable {
     var tab: String? = nil
     /// The search that finds the badge's row in its tab.
     var query: String? = nil
+    /// A countdown badge: `text` is its lead ("Tea") and the time left to this moment follows it, redrawn each second.
+    var until: Date? = nil
+
+    /// What the badge says at a moment; a countdown badge reads the time left then.
+    func text(at now: Date) -> String {
+        guard let until else { return text }
+        return "\(text) · \(clock(max(0, until.timeIntervalSince(now))))"
+    }
 
     var tint: Color {
         switch kind {
@@ -273,9 +291,9 @@ struct StatusBadge: Identifiable {
     }
 
     init(id: String, icon: String, text: String, kind: Kind, help: String,
-         opens: QuickPage? = nil, tab: String? = nil, query: String? = nil) {
+         opens: QuickPage? = nil, tab: String? = nil, query: String? = nil, until: Date? = nil) {
         self.id = id; self.icon = icon; self.text = text; self.kind = kind; self.help = help
-        self.opens = opens; self.tab = tab; self.query = query
+        self.opens = opens; self.tab = tab; self.query = query; self.until = until
     }
 
     init(problem p: Problem, index: Int) {
@@ -294,7 +312,14 @@ struct StatusBadgeView: View {
             // the colour rides on the icon and the fill; the words stay full contrast to read
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Image(systemName: badge.icon).font(.sbIcon(9.5, weight: .semibold)).foregroundStyle(badge.tint)
-                Text(badge.text).font(.sb(10.5, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                if badge.until != nil {
+                    // ticks each second while the card is open, as the Timers page does
+                    TimelineView(.periodic(from: .now, by: 1)) { t in
+                        Text(badge.text(at: t.date)).font(.sb(10.5, weight: .medium).monospacedDigit()).fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    Text(badge.text).font(.sb(10.5, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                }
             }
             .padding(.horizontal, 7).padding(.vertical, 3)
             .background(RoundedRectangle(cornerRadius: 8).fill(badge.tint.opacity(0.22)))
@@ -613,7 +638,7 @@ struct QuickCard: View {
                     if let c = n.color { Circle().fill(timerColor(c)).frame(width: si(7), height: si(7)) }
                     Text(n.heading).font(.sb(11.5)).fixedSize(horizontal: false, vertical: true)
                     Spacer()
-                    Button { openReveal("notes", "note-" + n.id) } label: { Image(systemName: "square.and.pencil").font(.sbIcon(10.5)) }
+                    Button { openReveal("notes", NotesNav.revealKey(n.id)) } label: { Image(systemName: "square.and.pencil").font(.sbIcon(10.5)) }
                         .buttonStyle(.borderless).foregroundStyle(.secondary).help("Open the note to read or edit")
                     Button {
                         NSPasteboard.general.clearContents()
@@ -625,13 +650,17 @@ struct QuickCard: View {
                     }
                     .buttonStyle(.borderless).foregroundStyle(.secondary).help(n.pinned ? "Unpin" : "Pin")
                 }
-                .onMiddleClick("qnote-" + n.id, space: state.space) { openReveal("notes", "note-" + n.id) }
+                // a click anywhere on the row opens the note, as its Open button does; the buttons keep their own clicks
+                .contentShape(Rectangle())
+                .onTapGesture { openReveal("notes", NotesNav.revealKey(n.id)) }
+                .help("Open the note")
+                .onMiddleClick("qnote-" + n.id, space: state.space) { openReveal("notes", NotesNav.revealKey(n.id)) }
             }
             createButton("New note", tab: "notes")
             if !rest.isEmpty {
                 ChipFlow(items: rest.map { n in
                     ChipItem(id: n.id, icon: "pin", text: chipLabel(n.heading), enabled: true, help: "Pin \u{201C}\(n.heading)\u{201D}. Middle-click to open it in Notes.",
-                             middle: { openReveal("notes", "note-" + n.id) }) {
+                             middle: { openReveal("notes", NotesNav.revealKey(n.id)) }) {
                         var m = n; m.pinned = true; notes.update(m)
                     }
                 }, overflow: { more in

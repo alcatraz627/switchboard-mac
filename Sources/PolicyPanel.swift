@@ -1516,8 +1516,8 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         if chosen.contains(.timers) {
             for t in TimerStore.shared.running.prefix(2) {
                 out.append(StatusBadge(id: "timer-\(t.id)", icon: Icons.tab["timers"] ?? "timer",
-                                       text: "\(t.label.isEmpty ? "Timer" : t.label) · \(clock(t.fireAt.timeIntervalSinceNow))",
-                                       kind: .info, help: "Open Timers", tab: "timers"))
+                                       text: t.label.isEmpty ? "Timer" : t.label,
+                                       kind: .info, help: "Open Timers", tab: "timers", until: t.fireAt))
             }
             for (i, f) in appTimedFlips().enumerated() {
                 out.append(StatusBadge(id: "flip-\(i)", icon: "timer", text: f, kind: .info, help: "Open Machine", tab: "system"))
@@ -1894,6 +1894,8 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     /// Opens the panel on a tab and lands on one row there: scrolled into view and flashed.
     func reveal(tab: String, key: String) {
         peek?.hide()
+        // a note's row is opened, not just scrolled to, and it must be the clicked note
+        if tab == "notes", let f = NotesNav.focus(forRevealKey: key) { NotesNav.forSpace(ScrollTargets.space).focus = f }
         if popover.isShown {
             UserDefaults.standard.set(tab, forKey: PolicyPanel.tabKey)
             Visibility.rememberTab(tab)

@@ -342,7 +342,7 @@ final class PolicyStore: ObservableObject {
     /// The hover card's pages in the owner's order (every page, shown or not), and the hidden ones.
     static let quickPageIDs = ["sessions", "home", "limits", "approvals", "bulbs", "notes", "timers", "controls", "models"]   // QuickPage.allCases, checked by --probe-quick
     /// Pages that start hidden, for the owner to switch on in Settings.
-    static let quickPagesOffAtFirst: Set<String> = ["timers", "controls", "models"]
+    static let quickPagesOffAtFirst: Set<String> = ["controls", "models"]
     static let quickOrderKey = "switchboard.quickPageOrder", quickHiddenKey = "switchboard.quickPagesHidden"
     @Published var quickPageOrder: [String] = PolicyStore.mergedOrder(saved: UserDefaults.standard.stringArray(forKey: PolicyStore.quickOrderKey) ?? [],
                                                                        all: PolicyStore.quickPageIDs) {
