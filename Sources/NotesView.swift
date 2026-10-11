@@ -454,6 +454,8 @@ struct NoteRow: View {
             .onHover { hovering = $0 }
             // every action the note has, each with its icon, grouped (owner: "ALL actions + icons ... groups by list divider")
             .contextMenu {
+                // macOS draws menu items as words only unless the labels ask for their icons
+                Group {
                 Button { if !open { toggleOpen() } } label: { Label("Open", systemImage: "square.and.pencil") }
                 Button { setPinned(!note.pinned) } label: {
                     Label(note.pinned ? "Unpin" : "Pin to the quick page", systemImage: note.pinned ? "pin.slash" : "pin")
@@ -481,6 +483,8 @@ struct NoteRow: View {
                 }
                 Divider()
                 Button(role: .destructive) { confirmDelete() } label: { Label("Delete…", systemImage: "trash") }
+                }
+                .labelStyle(.titleAndIcon)
             }
             if open, draft != nil { editor.transition(Motion.arrive) }
         }
