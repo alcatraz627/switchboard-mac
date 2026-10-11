@@ -183,6 +183,12 @@ func probeQuickCycle() -> String {
     _ = m.scroll(delta: -1, precise: false, phase: .none, momentum: false, at: 0)
     check("scrolling follows the owner's order", m.page == .notes, m.page.rawValue)
 
+    // Hiding a page from the card.
+    let hp = QuickCard.hidePlan(pages: [.home, .limits, .notes], current: .limits)
+    check("hiding a page turns to the one after it", hp?.next == .notes && hp?.hide == "limits")
+    check("hiding the last page turns to the one before it", QuickCard.hidePlan(pages: [.home, .limits], current: .limits)?.next == .home)
+    check("the only page cannot be hidden", QuickCard.hidePlan(pages: [.home], current: .home) == nil)
+
     // Number keys.
     let order: [QuickPage] = [.home, .limits, .approvals, .bulbs, .notes]
     check("2 opens the second page", QuickCycle.page(forKey: "2", in: order, typing: false) == .limits)
@@ -416,6 +422,16 @@ struct QuickCard: View {
             // A desk panel shows one page and names it in its own title row, so it needs no pills.
             if !state.onDesk { ViewThatFits(in: .horizontal) { pills(named: true); pills(named: false) } }
             Spacer(minLength: 4)
+            if !state.onDesk, let plan = QuickCard.hidePlan(pages: state.pages, current: state.page) {
+                Button {
+                    state.page = plan.next
+                    policy.hiddenQuickPages.insert(plan.hide)
+                } label: {
+                    Image(systemName: "eye.slash").font(.sbIcon(12, weight: .medium))
+                }
+                .buttonStyle(.borderless).foregroundStyle(.secondary)
+                .help("Hide \(state.page.title) from the hover card. Bring it back in Settings, Hover card.")
+            }
             if let pin, !state.onDesk {
                 Button { pin(state.page) } label: {
                     Image(systemName: "pin.square").font(.sbIcon(12, weight: .medium))
@@ -436,6 +452,13 @@ struct QuickCard: View {
                 .buttonStyle(.borderless).foregroundStyle(.secondary).help("Hover card settings: pages, delay, what Now shows")
             }
         }
+    }
+
+    /// Hiding the page on show: the page to turn to first (the one after it, else the one before) and the id to hide.
+    /// Nothing when it is the only page, so the card always has one.
+    static func hidePlan(pages: [QuickPage], current: QuickPage) -> (next: QuickPage, hide: String)? {
+        guard pages.count > 1, let i = pages.firstIndex(of: current) else { return nil }
+        return (pages[i + 1 < pages.count ? i + 1 : i - 1], current.rawValue)
     }
 
     private func pills(named: Bool) -> some View {

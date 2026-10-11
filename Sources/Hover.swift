@@ -210,8 +210,8 @@ final class HoverPeek: NSObject {
 }
 
 /// Draws any hover card offscreen, the way it looks under the menu bar.
-func snapshotCard(_ card: AnyView, to path: String) -> Bool {
-    let appearance = NSAppearance(named: .vibrantDark)!
+func snapshotCard(_ card: AnyView, to path: String, dark: Bool = true) -> Bool {
+    let appearance = NSAppearance(named: dark ? .vibrantDark : .aqua)!
     let host = NSHostingView(rootView: card.background(Color(nsColor: .windowBackgroundColor)))
     host.appearance = appearance
     host.frame = NSRect(origin: .zero, size: host.fittingSize)

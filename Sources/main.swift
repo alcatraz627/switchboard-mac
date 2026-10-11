@@ -176,6 +176,8 @@ if let out = argAfter("--snapshot-quick") {
         while lights.discovering && Date() < until { RunLoop.main.run(until: Date().addingTimeInterval(0.1)) }
     }
     NotesStore.shared.load()
+    // awkward notes into the scratch store only; never into ~/Notes
+    if args.contains("--demo-notes"), ProcessInfo.processInfo.environment["SWITCHBOARD_STATE"] != nil, NotesStore.shared.notes.isEmpty { NotesFixture.seed(NotesStore.shared) }
     let state = QuickState()
     // the header as a first-time owner sees it: the pages that are on until switched off
     state.pages = QuickPage.allCases.filter { !PolicyStore.quickPagesOffAtFirst.contains($0.rawValue) || $0 == page }
@@ -202,10 +204,10 @@ if let out = argAfter("--snapshot-quick") {
     if args.contains("--approvals-card") { policy.approvalsUnderEveryPage = true }
     let desk = args.contains("--desk")
     if desk { state.pages = [page]; state.onDesk = true; state.space = DeskItem(kind: .page, id: page.rawValue).space }
-    let card = QuickCard(state: state, policy: policy, usage: usage, lights: lights, notes: NotesStore.shared, controls: controls, openTab: { _ in })
+    let card = QuickCard(state: state, policy: policy, usage: usage, lights: lights, notes: NotesStore.shared, controls: controls, openTab: { _ in }, pin: { _ in })
     let shown = desk ? AnyView(DeskFrame(item: DeskItem(kind: .page, id: page.rawValue), title: page.title, inStack: false, first: true, others: { [] }, toggleTop: {}, toggleFold: {}, combine: { _ in }, takeOut: {}, close: {}) { card })
                      : AnyView(card)
-    let ok = snapshotCard(shown, to: out)
+    let ok = snapshotCard(shown, to: out, dark: !args.contains("--light"))
     print(ok ? "wrote \(out)" : "snapshot failed")
     exit(ok ? 0 : 1)
 }
