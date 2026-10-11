@@ -734,13 +734,15 @@ struct NoteRow: View {
                         Button { NSWorkspace.shared.open(url) } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: url.isFileURL ? "doc" : "link").font(.sbIcon(9.5))
-                                Text(linkLabel(url)).font(PT.caption).lineLimit(2).multilineTextAlignment(.leading)
+                                // one line, cut in the middle so the host and the end of the path both show
+                                Text(linkLabel(url)).font(PT.caption).lineLimit(1).truncationMode(.middle)
                             }
                         }
                         .buttonStyle(.link).help("Open \(url.absoluteString)")
                     }
                     if !summary.isEmpty {
-                        Text(summary).font(PT.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        // one line too: the first words and the reminder at the end stay, the middle gives way; the tooltip has all of it
+                        Text(summary).font(PT.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).help(summary)
                     }
                 }
     }
