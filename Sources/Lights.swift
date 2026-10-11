@@ -90,6 +90,37 @@ enum WizCLI {
     }
 }
 
+/// The Mac's own IPv4 networks, so a silent scan can say where it looked.
+enum LocalNetwork {
+    /// "192.168.1.20 on 192.168.1.0/24", one entry per active non-loopback interface.
+    static func searched() -> [String] {
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0, let first = head else { return [] }
+        defer { freeifaddrs(head) }
+        var out: [String] = []
+        var p: UnsafeMutablePointer<ifaddrs>? = first
+        while let i = p?.pointee {
+            defer { p = i.ifa_next }
+            let up = Int32(i.ifa_flags) & (IFF_UP | IFF_RUNNING | IFF_LOOPBACK) == (IFF_UP | IFF_RUNNING)
+            guard up, let a = i.ifa_addr, let m = i.ifa_netmask, a.pointee.sa_family == UInt8(AF_INET) else { continue }
+            let ip = a.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
+            let mask = m.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
+            // 169.254.x.x is no real network, and a /32 (a VPN tunnel) has no neighbours to find bulbs among
+            if ip >> 16 == 0xA9FE || mask.nonzeroBitCount >= 32 { continue }
+            func dotted(_ v: UInt32) -> String { "\(v >> 24).\((v >> 16) & 255).\((v >> 8) & 255).\(v & 255)" }
+            out.append("\(dotted(ip)) on \(dotted(ip & mask))/\(mask.nonzeroBitCount)")
+        }
+        return out
+    }
+
+    /// One calm sentence for when no bulb answers.
+    static func silentNote() -> String {
+        let nets = searched()
+        let where_ = nets.isEmpty ? "This Mac has no network address right now." : "This Mac searched from \(nets.joined(separator: " and "))."
+        return where_ + " The bulbs may be on another network."
+    }
+}
+
 final class LightsStore: ObservableObject {
     @Published private(set) var bulbs: [Bulb] = []
     @Published private(set) var discovering = false
@@ -321,8 +352,9 @@ struct LightsTabView: View {
                     .padding(.horizontal, 4)
                 SBCard {
                     if lights.bulbs.isEmpty && !lights.discovering && lights.error == nil {
-                        Text("No bulbs answered on this network.")
+                        Text("No bulbs answered. " + LocalNetwork.silentNote())
                             .font(SBStyle.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, SBStyle.rowH).padding(.vertical, 8)
                     }
                     ReorderStack(items: lights.bulbs, move: { lights.move($0, to: $1) }, commit: { lights.saveOrder() }) { i, b, grip in
@@ -335,6 +367,12 @@ struct LightsTabView: View {
                         }
                     }
                 }
+            }
+            if !lights.bulbs.isEmpty, !lights.discovering, !lights.bulbs.contains(where: { $0.reachable }) {
+                Label(LocalNetwork.silentNote(), systemImage: "network")
+                    .font(SBStyle.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
             }
             Text("WiZ bulbs on your home network, controlled directly over the LAN. No account or cloud involved.")
                 .font(SBStyle.caption).foregroundStyle(.tertiary)
@@ -392,7 +430,7 @@ struct BulbRow: View {
                     }
                     Text(bulb.reachable
                          ? (bulb.on ? "\(bulb.dimming)% · \(bulb.modeText)" : "off")
-                         : "not answering")
+                         : (lights.bulbs.contains { $0.reachable } ? "not answering" : "not seen from here"))
                         .font(SBStyle.caption).foregroundStyle(.secondary)
                 }
                 Spacer()

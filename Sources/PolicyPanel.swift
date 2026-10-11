@@ -389,32 +389,16 @@ struct PolicyPanel: View {
         }
     }
 
-    /// The chosen space's tabs, each with its own icon, the current one underlined.
+    /// The chosen space's tabs, each with its own icon, the current one filled.
     private var subTabs: some View {
-        HStack(spacing: 14) {
-            ForEach(currentSpaceTabs) { c in
-                let on = c.id == current.id
-                Button { open(c) } label: {
-                    VStack(spacing: 3) {
-                        HStack(spacing: 4) {
-                            Image(systemName: c.icon).font(.sbIcon(10.5))
-                            Text(c.title).font(.sb(11.5, weight: on ? .semibold : .regular)).lineLimit(1)
-                            if let n = c.badge() { TabBadge(count: n, onAccent: false) }
-                            else if let l = store.problemLevels[c.id] { ProblemMark(level: l) }
-                        }
-                        .foregroundStyle(on ? Color.primary : Color.secondary)
-                        Capsule().fill(on ? Color.accentColor : .clear).frame(height: 2)
-                    }
-                    .fixedSize()
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .keyRing(keys.zone == .tabs && on, radius: 4)
-                .help(c.subtitle)
-            }
-            Spacer(minLength: 0)
+        SubTabStrip(items: currentSpaceTabs.map { c in
+                        SubTabItem(id: c.id, title: c.title, icon: c.icon, help: c.subtitle,
+                                   badge: c.badge(), problem: store.problemLevels[c.id])
+                    },
+                    selected: current.id, ringed: keys.zone == .tabs) { id in
+            if let c = currentSpaceTabs.first(where: { $0.id == id }) { open(c) }
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 2)
         // scrolling over the tab row moves along it, on its own, without changing space
         .scrollSteps("panel.tabs") { by in
             let tabs = currentSpaceTabs.map(\.id)
