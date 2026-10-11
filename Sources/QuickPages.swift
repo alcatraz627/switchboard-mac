@@ -189,6 +189,15 @@ func probeQuickCycle() -> String {
     check("hiding the last page turns to the one before it", QuickCard.hidePlan(pages: [.home, .limits], current: .limits)?.next == .home)
     check("the only page cannot be hidden", QuickCard.hidePlan(pages: [.home], current: .home) == nil)
 
+    // The header's focus ring.
+    check("a focused control stays unringed until the keyboard is used",
+          !QuickState.ringShows(focused: "pill-home", id: "pill-home", keyboardDriven: false))
+    check("after Tab the focused control is ringed", QuickState.ringShows(focused: "pill-home", id: "pill-home", keyboardDriven: true))
+    check("only the one focused control is ringed",
+          ["pill-home", "pill-limits", "hide", "desk", "open"].filter { QuickState.ringShows(focused: "hide", id: $0, keyboardDriven: true) } == ["hide"])
+    check("nothing is ringed when nothing is focused",
+          !QuickState.ringShows(focused: nil, id: "pill-home", keyboardDriven: true))
+
     // The dot beside a tab.
     let standing = Problem.hooks(unwired: 8, missing: 1) + [Problem(text: "1 gate is off", tab: "rules", level: .warn)]
     check("hook and gate warnings put no dot on their tab", Problem.tabMarks(standing).isEmpty)
@@ -284,6 +293,14 @@ final class QuickState: ObservableObject {
     var space = ScrollTargets.cardSpace
     /// A desk panel: it stays on screen, so it refreshes at a calmer pace than the hover card.
     var onDesk = false
+    /// Set by a Tab or arrow key on the card, cleared when the card opens. The header's focus ring
+    /// draws only while this is set, so nothing sits ringed just because the card appeared.
+    @Published var keyboardDriven = false
+
+    /// The header control that wears the ring: the focused one, and only after the keyboard was used.
+    static func ringShows(focused: String?, id: String, keyboardDriven: Bool) -> Bool {
+        keyboardDriven && focused == id
+    }
 }
 
 /// One standard badge for something that needs the owner, coloured by how
@@ -363,6 +380,15 @@ let quickLaunchTabs: [(id: String, title: String)] = [
     ("timers", "Timers"), ("controls", "Controls"), ("system", "Machine"),
 ]
 
+extension View {
+    /// A header control's own focus ring in place of the system one, which sat on the first icon
+    /// as soon as the card opened. Drawn only for the focused control after a Tab or arrow key.
+    func headerRing(_ id: String, _ focus: FocusState<String?>.Binding, _ state: QuickState, radius: CGFloat = 5) -> some View {
+        focusEffectDisabled().focused(focus, equals: id)
+            .keyRing(QuickState.ringShows(focused: focus.wrappedValue, id: id, keyboardDriven: state.keyboardDriven), radius: radius)
+    }
+}
+
 /// The hover card: a header with the page's name and dots for every page,
 /// then the page itself.
 struct QuickCard: View {
@@ -384,6 +410,8 @@ struct QuickCard: View {
     var pin: ((QuickPage) -> Void)? = nil
     /// Why the footer's Hub button could not open the hub, if it could not.
     @State private var hubFailed: String?
+    /// Which header control the keyboard is on; at most one, so at most one ring.
+    @FocusState private var focus: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -445,7 +473,7 @@ struct QuickCard: View {
                 } label: {
                     Image(systemName: "eye.slash").font(.sbIcon(12, weight: .medium))
                 }
-                .buttonStyle(.borderless).foregroundStyle(.secondary)
+                .buttonStyle(.borderless).foregroundStyle(.secondary).headerRing("hide", $focus, state)
                 .help("Hide \(state.page.title) from the hover card. Bring it back in Settings, Hover card.")
             }
             if let pin, !state.onDesk {
@@ -453,20 +481,22 @@ struct QuickCard: View {
                     // a floating window, not a pin: a pin is what notes carry
                     Image(systemName: "pip.enter").font(.sbIcon(12, weight: .medium))
                 }
-                .buttonStyle(.borderless).foregroundStyle(.secondary)
+                .buttonStyle(.borderless).foregroundStyle(.secondary).headerRing("desk", $focus, state)
                 .help("Pin \(state.page.title) to the desktop as a panel that stays up")
             }
             if let tab = state.page.tab {
                 Button { openTab(tab) } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right").font(.sbIcon(12, weight: .medium))
                 }
-                .buttonStyle(.borderless).foregroundStyle(.secondary).help("Open \(state.page.title) in the panel")
+                .buttonStyle(.borderless).foregroundStyle(.secondary).headerRing("open", $focus, state)
+                .help("Open \(state.page.title) in the panel")
             } else {
                 // Now has no tab of its own; its button opens the hover card's own settings
                 Button { openSearch("settings", "hover") } label: {
                     Image(systemName: "gearshape").font(.sbIcon(12, weight: .medium))
                 }
-                .buttonStyle(.borderless).foregroundStyle(.secondary).help("Hover card settings: pages, delay, what Now shows")
+                .buttonStyle(.borderless).foregroundStyle(.secondary).headerRing("gear", $focus, state)
+                .help("Hover card settings: pages, delay, what Now shows")
             }
         }
     }
@@ -496,7 +526,7 @@ struct QuickCard: View {
                     .foregroundStyle(on ? .primary : .secondary)
                     .contentShape(Capsule())
                 }
-                .buttonStyle(.plain).help("\(p.title) (\(i + 1))")
+                .buttonStyle(.plain).headerRing("pill-" + p.rawValue, $focus, state, radius: 11).help("\(p.title) (\(i + 1))")
             }
         }
         .fixedSize()

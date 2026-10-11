@@ -125,6 +125,8 @@ final class HoverPeek: NSObject {
         // ⌘ and a number opens the panel on that space, the same key it is inside the panel.
         keyWatch = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
             guard let self, self.popover.isShown, let w = self.cardWindow, e.window === w else { return e }
+            // Tab or an arrow: from here the header may show a focus ring
+            if [48, 123, 124, 125, 126].contains(e.keyCode) { self.state.keyboardDriven = true }
             if e.modifierFlags.intersection([.command, .control, .option, .shift]) == .command,
                let n = e.charactersIgnoringModifiers?.first?.wholeNumberValue, n >= 1, n <= Visibility.spaces.count {
                 self.openSpace?(n)
@@ -192,6 +194,7 @@ final class HoverPeek: NSObject {
 
     private func present() {
         guard let b = button, let host = popover.contentViewController else { return }
+        state.keyboardDriven = false
         host.view.layoutSubtreeIfNeeded()
         popover.contentSize = host.view.fittingSize
         popover.show(relativeTo: b.bounds, of: b, preferredEdge: .minY)
