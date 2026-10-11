@@ -665,6 +665,22 @@ struct NoteRow: View {
     private var editor: some View {
         let d = Binding(get: { draft ?? note }, set: { draft = $0 })
         return VStack(alignment: .leading, spacing: 8) {
+            // owner N1: "if there's a merge I am able to reconcile them"
+            if NotesSync.conflicted(d.wrappedValue.body) {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.merge").font(.sbIcon(10.5)).foregroundStyle(.orange)
+                    Text("Two versions · keep").font(PT.caption).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                    Spacer(minLength: 4)
+                    ForEach([("This Mac", "desktopcomputer", NotesSync.Keep.mine, "Keep this Mac's side of every clash"),
+                             ("Other", "iphone", NotesSync.Keep.theirs, "Keep the other device's side of every clash"),
+                             ("Both", "square.on.square", NotesSync.Keep.both, "Keep both sides, this Mac's first")], id: \.0) { title, icon, keep, help in
+                        Button { d.wrappedValue.body = NotesSync.resolve(d.wrappedValue.body, keep: keep); save() } label: {
+                            Label(title, systemImage: icon).lineLimit(1).fixedSize()
+                        }
+                        .sbControlSize(.small).help(help)
+                    }
+                }
+            }
             // title and body are one sheet, like a note app, not two boxed fields
             VStack(alignment: .leading, spacing: 0) {
                 if reading {

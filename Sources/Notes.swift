@@ -142,6 +142,14 @@ func probeNotes() -> String {
     // Opening a tab: the new input takes the keyboard unless something is being edited.
     check("the new input is focused when nothing is being edited", InputRules.focusNewInput(editing: nil))
     check("an edit in progress keeps the keyboard", !InputRules.focusNewInput(editing: "20261001-120000"))
+
+    // A note holding both sides of a clash settles to one side, or both, with nothing else lost.
+    let clash = "top\n<<<<<<< HEAD\nmac line\n=======\npi line\n>>>>>>> pi/main\nmiddle\n<<<<<<< phone\nA\n=======\nB\n>>>>>>> csync-pi\nend"
+    check("resolve keeps mine", NotesSync.resolve(clash, keep: .mine) == "top\nmac line\nmiddle\nA\nend")
+    check("resolve keeps theirs", NotesSync.resolve(clash, keep: .theirs) == "top\npi line\nmiddle\nB\nend")
+    check("resolve keeps both, mine first", NotesSync.resolve(clash, keep: .both) == "top\nmac line\npi line\nmiddle\nA\nB\nend")
+    check("a resolved note is no longer a clash", !NotesSync.conflicted(NotesSync.resolve(clash, keep: .both)))
+    check("an unclosed block loses nothing", NotesSync.resolve("a\n<<<<<<< x\nb\n=======\nc", keep: .mine) == "a\nb\nc")
     lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
     return lines.joined(separator: "\n")
 }

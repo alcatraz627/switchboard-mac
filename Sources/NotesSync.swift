@@ -162,6 +162,31 @@ final class NotesSync: ObservableObject {
         text.hasPrefix("<<<<<<< ") || text.contains("\n<<<<<<< ")
     }
 
+    enum Keep { case mine, theirs, both }
+
+    /// The text with every clash block settled: the first side (this Mac's), the second
+    /// (the Pi's or the phone's), or both, mine first. Text outside the blocks is kept as is.
+    static func resolve(_ text: String, keep: Keep) -> String {
+        var out: [Substring] = [], mine: [Substring] = [], theirs: [Substring] = []
+        enum Part { case outside, mine, theirs }
+        var part = Part.outside
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            switch part {
+            case .outside where line.hasPrefix("<<<<<<< ") || line == "<<<<<<<": part = .mine; mine = []; theirs = []
+            case .outside: out.append(line)
+            case .mine where line == "=======": part = .theirs
+            case .mine: mine.append(line)
+            case .theirs where line.hasPrefix(">>>>>>> ") || line == ">>>>>>>":
+                part = .outside
+                out += keep == .theirs ? theirs : keep == .mine ? mine : mine + theirs
+            case .theirs: theirs.append(line)
+            }
+        }
+        // an unclosed block keeps everything it held, so nothing is lost
+        if part != .outside { out += mine + theirs }
+        return out.joined(separator: "\n")
+    }
+
     static func countConflicts(in dir: String) -> Int {
         ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).filter { $0.hasSuffix(".md") }
             .filter { conflicted((try? String(contentsOfFile: dir + "/" + $0, encoding: .utf8)) ?? "") }.count
