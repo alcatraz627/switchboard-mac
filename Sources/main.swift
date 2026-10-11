@@ -255,6 +255,40 @@ if let tab = argAfter("--json") {
     exit(0)
 }
 
+// One button on one list-tab row, pressed from the phone: the same closure the panel's button runs.
+// A button that asks first answers with its question until the phone sends --confirmed.
+func findRow(_ rows: [SystemRow], key: String) -> SystemRow? {
+    for r in rows {
+        if r.key == key { return r }
+        if let c = findRow(r.children, key: key) { return c }
+    }
+    return nil
+}
+if let tab = argAfter("--act") {
+    func reply(_ d: [String: Any], _ code: Int32) -> Never {
+        let data = (try? JSONSerialization.data(withJSONObject: d, options: [.sortedKeys])) ?? Data()
+        print(String(data: data, encoding: .utf8) ?? "{}")
+        exit(code)
+    }
+    guard let reader = catalogReaders[tab] else { reply(["error": "no list tab named \(tab)"], 2) }
+    guard let key = argAfter("--key"), let row = findRow(reader().flatMap { $0.rows }, key: key) else {
+        reply(["error": "That row is no longer on the Mac; refresh the list"], 3)
+    }
+    if let label = argAfter("--button") {
+        guard let button = row.buttons.first(where: { $0.label == label }) else {
+            reply(["error": "\(row.label) has no \(label) button on the Mac now; refresh the list"], 3)
+        }
+        if let ask = button.confirm, !args.contains("--confirmed") { reply(["confirm": ask], 0) }
+        guard case .run(let run) = button.kind else { reply(["error": "\(label) works only on the Mac"], 4) }
+        if let why = run() { reply(["ok": false, "error": "Couldn't \(button.doing ?? label.lowercased()): \(why)"], 1) }
+    } else if let action = row.action {
+        action()
+    } else {
+        reply(["error": "\(row.label) has nothing to run"], 4)
+    }
+    reply(["ok": true], 0)
+}
+
 // Each note in a folder as Switchboard reads it, one tab-separated line per file, for a test to diff.
 if let dir = argAfter("--dump-notes") {
     let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).filter { $0.hasSuffix(".md") }.sorted()
