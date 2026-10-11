@@ -80,7 +80,7 @@ struct SettingsTabView: View {
                 }
             }
             if (matches("quit") || matches("restart") || matches("login") || matches("switchboard")) && on("general") {
-                group("Switchboard", note: "The app itself.", rows: [loginRow, restartRow, quitRow])
+                group("Switchboard", note: "The app itself.", rows: [loginRow, keepScreenRow, restartRow, quitRow])
             }
             if prompts && on("general") {
                 group("Claude's permission prompts",
@@ -287,6 +287,22 @@ struct SettingsTabView: View {
                           })
         r.icon = "power"
         r.key = "settings-login"
+        return r
+    }
+
+    @State private var keepScreen = SwitchboardApp.keepScreen
+
+    private var keepScreenRow: SystemRow {
+        var r = SystemRow(label: "Keep Awake keeps the screen on", state: keepScreen ? .on(menuGreen) : .off,
+                          note: keepScreen ? "on: the display stays lit" : "off: the Mac stays awake, the display may sleep",
+                          tip: "Applies while Keep Awake is on",
+                          action: {
+                              keepScreen.toggle()
+                              UserDefaults.standard.set(keepScreen, forKey: SwitchboardApp.keepScreenKey)
+                              if let app = NSApp.delegate as? SwitchboardApp, app.keepAwakeOn { app.setKeepAwake(true) }
+                          })
+        r.icon = "display"
+        r.key = "settings-keep-screen"
         return r
     }
 

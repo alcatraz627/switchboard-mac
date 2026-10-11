@@ -135,8 +135,15 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
 
     // ── Keep Awake ───────────────────────────────────────────────────────────
 
+    /// Keep Awake also keeps the screen on; off (the old behaviour) lets the display sleep.
+    static let keepScreenKey = "switchboard.keepAwakeScreen"
+    static var keepScreen: Bool { UserDefaults.standard.bool(forKey: keepScreenKey) }
+    private var keepScreenAssertionID: IOPMAssertionID = 0
+
     func setKeepAwake(_ on: Bool) {
+        if keepScreenAssertionID != 0 { IOPMAssertionRelease(keepScreenAssertionID); keepScreenAssertionID = 0 }
         if on {
+            if keepAwakeAssertionID != 0 { IOPMAssertionRelease(keepAwakeAssertionID); keepAwakeAssertionID = 0 }
             var id = IOPMAssertionID(0)
             let rc = IOPMAssertionCreateWithName(
                 kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
@@ -145,6 +152,15 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             keepAwakeOn = rc == kIOReturnSuccess
             if keepAwakeOn { keepAwakeAssertionID = id }
             dlog(keepAwakeOn ? "keep-awake ON (assertion \(id))" : "keep-awake assertion FAILED rc=\(rc)")
+            // owner 05:4x: Keep Awake was on and the screen still slept
+            if keepAwakeOn, Self.keepScreen {
+                var sid = IOPMAssertionID(0)
+                if IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+                                               IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                                               "Switchboard: Keep Awake (screen)" as CFString, &sid) == kIOReturnSuccess {
+                    keepScreenAssertionID = sid
+                }
+            }
         } else {
             if keepAwakeAssertionID != 0 {
                 IOPMAssertionRelease(keepAwakeAssertionID)
