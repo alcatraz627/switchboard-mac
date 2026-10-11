@@ -13,6 +13,7 @@ import UniformTypeIdentifiers
 struct NoteCompose: View {
     @ObservedObject var notes: NotesStore
     @ObservedObject private var nav: NotesNav
+    @ObservedObject private var palette = NotePalette.shared
     @State private var expanded = false
     @State private var flash: String?
     @State private var focus: NoteSheet.Field?
@@ -57,7 +58,7 @@ struct NoteCompose: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top, spacing: 6) {
                 // the new note's colour, the same dot every note wears
-                ColorDot(selection: $nav.draftColor, size: si(9)).padding(.top, 7)
+                ColorDot(selection: $nav.draftColor, size: si(9), palette: palette.colors).padding(.top, 7)
                 Group {
                     if expanded {
                         VStack(alignment: .leading, spacing: 0) {
@@ -150,6 +151,17 @@ struct NotesTabView: View {
     var body: some View { NotesList(notes: notes, nav: NotesNav.forSpace(space)) }
 }
 
+/// What just happened to a note (duplicated, shown on the Pi), until it clears itself.
+private struct NoticeLine: View {
+    @ObservedObject var notes: NotesStore
+    var body: some View {
+        if let n = notes.notice {
+            Label(n.text, systemImage: n.ok ? "checkmark.circle" : "exclamationmark.triangle").font(PT.caption)
+                .foregroundStyle(n.ok ? Color.secondary : Color.orange).padding(.horizontal, 4).transition(Motion.arrive)
+        }
+    }
+}
+
 /// The notes under the colour filter, each row knowing whether it has the keyboard.
 private struct NotesList: View {
     @ObservedObject var notes: NotesStore
@@ -165,8 +177,11 @@ private struct NotesList: View {
 
     var body: some View {
         if let n = openNote {
-            Card { NoteRow(note: n, notes: notes, nav: nav, grip: AnyView(EmptyView()), takeover: true).id("note-" + n.id) }
-                .padding(PT.gap)
+            VStack(alignment: .leading, spacing: 6) {
+                NoticeLine(notes: notes)
+                Card { NoteRow(note: n, notes: notes, nav: nav, grip: AnyView(EmptyView()), takeover: true).id("note-" + n.id) }
+            }
+            .padding(PT.gap)
         } else {
             list
         }
@@ -178,6 +193,7 @@ private struct NotesList: View {
             if let e = notes.error {
                 ReadingStatus(state: .failed(e)).padding(.horizontal, 4)
             }
+            NoticeLine(notes: notes)
             if !notes.loaded {
                 ReadingStatus(state: .loading).padding(.horizontal, 4)
             } else if notes.live.isEmpty && notes.expired.isEmpty && notes.error == nil {
@@ -185,11 +201,11 @@ private struct NotesList: View {
                     .padding(.horizontal, 4)
             }
             if !notes.live.isEmpty {
-                NoteFilterBar(nav: nav, hidden: notes.live.count - shown.count)
+                NoteFilterBar(nav: nav, hidden: notes.live.count - shown.count, tags: notes.live.tagCounts)
             }
             if !shown.isEmpty {
                 Card {
-                    ReorderStack(items: shown, move: { notes.move($0, to: $1) }, commit: { notes.saveOrder() }) { i, n, grip in
+                    ReorderStack(items: shown, move: { if nav.sort == .manual { notes.move($0, to: $1) } }, commit: { if nav.sort == .manual { notes.saveOrder() } }) { i, n, grip in
                         VStack(spacing: 0) {
                             if i > 0 { Divider().padding(.leading, PT.rowH) }
                             NoteRow(note: n, notes: notes, nav: nav, grip: grip)
@@ -201,6 +217,7 @@ private struct NotesList: View {
                 Text(nav.query.isEmpty ? "No notes in the chosen colours." : "No notes match \u{201C}\(nav.query)\u{201D}.").font(PT.caption).foregroundStyle(.secondary).padding(.horizontal, 4)
             }
             NotesFolderLink()
+            if !notes.trashed.isEmpty { RecentlyDeleted(notes: notes) }
             if !notes.expired.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
                     Button { withAnimation(Motion.slow) { showExpired.toggle() } } label: {
@@ -232,7 +249,10 @@ private struct NotesList: View {
 /// ← and → walk it from the keyboard, Space picks.
 struct NoteFilterBar: View {
     @ObservedObject var nav: NotesNav
+    @ObservedObject private var palette = NotePalette.shared
     let hidden: Int
+    /// Every tag the live notes carry, for the tag row.
+    var tags: [(tag: String, count: Int)] = []
     @FocusState private var searching: Bool
 
     var body: some View {
@@ -258,7 +278,44 @@ struct NoteFilterBar: View {
             // the list can come back (a note closed) with the keyboard already sent to the search
             .onAppear { if nav.focus == .search, !searching { DispatchQueue.main.async { searching = true } } }
             dots
+            if !tags.isEmpty { tagRow }
         }
+    }
+
+    /// Tags as chips: choosing several keeps the notes that carry all of them.
+    private var tagRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 5) {
+                Image(systemName: "tag").font(.sbIcon(9.5)).foregroundStyle(.tertiary)
+                ForEach(tags, id: \.tag) { t in
+                    let on = nav.tagFilter.contains(t.tag)
+                    Button { if on { nav.tagFilter.remove(t.tag) } else { nav.tagFilter.insert(t.tag) } } label: {
+                        Text("#\(t.tag) \(t.count)").font(.sb(10.5, weight: on ? .semibold : .regular)).lineLimit(1)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Capsule().fill(on ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.07)))
+                            .foregroundStyle(on ? Color.primary : .secondary)
+                    }
+                    .buttonStyle(.plain).help(on ? "Stop filtering by #\(t.tag)" : "Only notes tagged #\(t.tag); choose more to narrow further")
+                }
+                if !nav.tagFilter.isEmpty {
+                    Button { nav.tagFilter = [] } label: { Label("Clear", systemImage: "xmark.circle").font(.sb(10.5)).lineLimit(1) }
+                        .buttonStyle(.plain).foregroundStyle(.tertiary).help("Show every tag again")
+                }
+            }
+            .padding(.horizontal, 4)
+        }
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            ForEach(NoteSort.allCases) { o in
+                Button { nav.sort = o } label: { Label(o.label, systemImage: nav.sort == o ? "checkmark" : o.icon) }
+            }
+        } label: {
+            Label(nav.sort == .manual ? "Sort" : nav.sort.label, systemImage: "arrow.up.arrow.down").font(PT.caption).lineLimit(1).fixedSize()
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().foregroundStyle(nav.sort == .manual ? .secondary : Color.primary)
+        .help(nav.sort == .manual ? "Sort the list; your own order is kept" : "Sorted \(nav.sort.label.lowercased()); choose My order to drag again")
     }
 
     private var dots: some View {
@@ -270,7 +327,7 @@ struct NoteFilterBar: View {
                 .keyRing(nav.focus == .filter(0), radius: 8)
                 .contentShape(Rectangle())
                 .onTapGesture { nav.toggleFilter(0) }
-            ForEach(Array(timerColors.enumerated()), id: \.element.0) { i, c in
+            ForEach(Array(palette.colors.enumerated()), id: \.element.0) { i, c in
                 let on = nav.filter.contains(c.0)
                 Circle().fill(c.1).frame(width: si(10), height: si(10))
                     .opacity(nav.filter.isEmpty || on ? 1 : 0.35)
@@ -279,12 +336,59 @@ struct NoteFilterBar: View {
                     .keyRing(nav.focus == .filter(i + 1), radius: 9)
                     .contentShape(Circle())
                     .onTapGesture { nav.toggleFilter(i + 1) }
-                    .accessibilityLabel(c.0)
+                    .accessibilityLabel(palette.label(c.0))
+                    .help(palette.label(c.0))
             }
             Spacer(minLength: 4)
-            if hidden > 0 { Text("\(hidden) hidden").font(PT.caption).foregroundStyle(.tertiary) }
+            if hidden > 0 { Text("\(hidden) hidden").font(PT.caption).foregroundStyle(.tertiary).lineLimit(1).fixedSize() }
+            sortMenu
         }
         .padding(.horizontal, 4)
+    }
+}
+
+/// Deleted notes, folded away until asked for: each can be brought back or removed for good.
+struct RecentlyDeleted: View {
+    @ObservedObject var notes: NotesStore
+    @State private var show = RecentlyDeleted.startOpen
+    /// A snapshot run with --show-trash draws the section opened.
+    static var startOpen = CommandLine.arguments.contains("--show-trash")
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Button { withAnimation(Motion.slow) { show.toggle() } } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "chevron.right").font(.sbIcon(8, weight: .semibold)).rotationEffect(.degrees(show ? 90 : 0))
+                    Image(systemName: "trash").font(.sbIcon(9.5))
+                    Text("Recently deleted \(notes.trashed.count)").font(PT.section)
+                }
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain).padding(.leading, 4).help("Deleted notes wait here until you bring them back or remove them for good")
+            if show {
+                Card {
+                    ForEach(Array(notes.trashed.enumerated()), id: \.element.id) { i, t in
+                        if i > 0 { Divider().padding(.leading, PT.rowH) }
+                        row(t)
+                    }
+                }
+            }
+        }
+    }
+
+    private func row(_ t: NotesStore.Trashed) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(t.note.heading.isEmpty ? "Untitled" : t.note.heading).font(PT.label).lineLimit(1).truncationMode(.middle)
+                Text("Deleted " + age(t.deleted)).font(PT.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Button { notes.restore(t) } label: { Label("Restore", systemImage: "arrow.uturn.backward").lineLimit(1).fixedSize() }
+                .sbControlSize(.small).help("Put this note back in the list")
+            Button { notes.purge(t) } label: { Label("Remove", systemImage: "trash").lineLimit(1).fixedSize() }
+                .sbControlSize(.small).help("Remove this note for good (it goes to the macOS Trash)")
+        }
+        .padding(.horizontal, PT.rowH).padding(.vertical, PT.rowV + 2)
     }
 }
 
@@ -324,6 +428,7 @@ struct NoteRow: View {
     let note: Note
     @ObservedObject var notes: NotesStore
     @ObservedObject var nav: NotesNav
+    @ObservedObject private var palette = NotePalette.shared
     let grip: AnyView
     /// The note is the whole tab: a way back to the list, Write and Read, and room for the text.
     let takeover: Bool
@@ -348,6 +453,12 @@ struct NoteRow: View {
     static var startReading = false
 
     @State private var hovering = false
+    @State private var editingTitle = false
+    @State private var titleDraft = ""
+    @State private var hoveringTitle = false
+    @FocusState private var titleFocused: Bool
+    /// A snapshot run with --edit-title draws the open note with its title box up.
+    static var startTitleEdit = CommandLine.arguments.contains("--edit-title")
 
     /// This note's place in the keyboard's path: open (and which block, reading or typing) or not.
     private var openState: (block: NoteBlock?, typing: Bool)? {
@@ -428,9 +539,9 @@ struct NoteRow: View {
             HStack(alignment: .center, spacing: 6) {
                 if takeover { backToList; readWriteSwitch } else { grip }
                 // the note's one colour: shown here, and changed here
-                ColorDot(selection: colorBinding, size: si(9), isOpen: open ? pickerBinding(.color) : nil)
+                ColorDot(selection: colorBinding, size: si(9), isOpen: open ? pickerBinding(.color) : nil, palette: palette.colors)
                     .keyRing(ringed(.color), radius: 8)
-                if !takeover { heading }
+                if !takeover { heading } else { titleHeader }
                 Spacer(minLength: 4)
                 // two actions, out of the way until the row is pointed at, open or has the keyboard
                 let shown = hovering || open || nav.focus == .row(note.id)
@@ -457,13 +568,14 @@ struct NoteRow: View {
                 // macOS draws menu items as words only unless the labels ask for their icons
                 Group {
                 Button { if !open { toggleOpen() } } label: { Label("Open", systemImage: "square.and.pencil") }
+                Button { duplicate() } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
                 Button { setPinned(!note.pinned) } label: {
                     Label(note.pinned ? "Unpin" : "Pin to the quick page", systemImage: note.pinned ? "pin.slash" : "pin")
                 }
                 Menu {
-                    ForEach(timerColors, id: \.0) { name, _ in
+                    ForEach(palette.colors, id: \.0) { name, _ in
                         Button { colorBinding.wrappedValue = name } label: {
-                            Label(name.capitalized, systemImage: note.color == name ? "checkmark.circle.fill" : "circle.fill")
+                            Label(palette.label(name), systemImage: note.color == name ? "checkmark.circle.fill" : "circle.fill")
                         }
                     }
                     Divider()
@@ -473,6 +585,9 @@ struct NoteRow: View {
                 Button { openTo(.reminder) } label: { Label(note.remindAt == nil ? "Remind me…" : "Change the reminder…", systemImage: "bell") }
                 Button { openTo(.expiry) } label: { Label(note.expires == nil ? "Expire it…" : "Change the expiry…", systemImage: "hourglass") }
                 Button { openTo(.history) } label: { Label("Versions…", systemImage: "clock.arrow.circlepath") }
+                Divider()
+                Button { send() } label: { Label("Send…", systemImage: "square.and.arrow.up") }
+                Button { showOnPi() } label: { Label("Show on the Pi screen", systemImage: "tv") }
                 Divider()
                 if !note.title.isEmpty { Button { copy(note.title) } label: { Label("Copy title", systemImage: "textformat") } }
                 if !note.body.isEmpty { Button { copy(note.body) } label: { Label("Copy text", systemImage: "text.alignleft") } }
@@ -486,6 +601,7 @@ struct NoteRow: View {
                 }
                 .labelStyle(.titleAndIcon)
             }
+            if takeover, editingTitle { titleBox }
             if open, draft != nil { editor.transition(Motion.arrive) }
         }
     }
@@ -525,17 +641,66 @@ struct NoteRow: View {
         .buttonStyle(.plain).foregroundStyle(on ? Color.primary : .secondary)
     }
 
+    /// The open note's title on one line, cut in the middle; a click opens a box holding all of it.
+    private var titleHeader: some View {
+        let t = (draft ?? note).title
+        return Button { startTitleEdit() } label: {
+            HStack(spacing: 4) {
+                Text(t.isEmpty ? "Untitled" : t).font(PT.label).lineLimit(1).truncationMode(.middle)
+                    .foregroundStyle(t.isEmpty ? Color.secondary : Color.primary)
+                Image(systemName: "pencil").font(.sbIcon(9)).foregroundStyle(.tertiary).opacity(hoveringTitle ? 1 : 0).layoutPriority(1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).onHover { hoveringTitle = $0 }
+        .opacity(editingTitle ? 0 : 1).allowsHitTesting(!editingTitle)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .help(t.isEmpty ? "Give this note a title" : "\(t)\nClick to edit the whole title")
+    }
+
+    /// The whole title, every line of it, under the header. Return saves it, Esc leaves it as it was.
+    private var titleBox: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "textformat").font(.sbIcon(10)).foregroundStyle(.tertiary).padding(.top, 6)
+            TextField("Title", text: $titleDraft, axis: .vertical).textFieldStyle(.plain).font(PT.label).lineLimit(1...8)
+                .focused($titleFocused).inputBox(focused: true)
+                .onSubmit { commitTitle() }
+                .onExitCommand { editingTitle = false }
+                .onAppear { titleFocused = true }
+                .onChange(of: titleFocused) { f in if !f, editingTitle { commitTitle() } }
+        }
+        .padding(.horizontal, 6).padding(.bottom, 6)
+    }
+
+    private func startTitleEdit() {
+        titleDraft = (draft ?? note).title
+        // the keyboard leaves the note's own parts, so Esc and Return reach the box and not the key rules
+        nav.focus = .open(note.id, nil, typing: false)
+        editingTitle = true
+    }
+    private func commitTitle() {
+        guard editingTitle else { return }
+        editingTitle = false
+        let clean = titleDraft.components(separatedBy: .newlines).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        guard clean != (draft ?? note).title else { return }
+        draft?.title = clean
+        save()
+    }
+
     /// The closed row's text: the heading, the marks, a link, and a line of what is set.
     private var heading: some View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
-                        Text(note.heading).font(PT.label).fixedSize(horizontal: false, vertical: true)
-                            .strikethrough(note.expired)
+                        // one line, cut in the middle so the end of a long title still shows; the marks keep their room
+                        Text(note.heading).font(PT.label).lineLimit(1).truncationMode(.middle)
+                            .strikethrough(note.expired).help(note.heading)
                         if note.conflicted {
                             KeyPill(text: "both sides").help("Edited on two devices apart; both versions are in the body, marked")
+                                .layoutPriority(1).fixedSize()
                         }
                         if let a = note.agent {
                             Image(systemName: "cpu").font(.sbIcon(9)).foregroundStyle(.secondary).help("Written by the \(a) agent")
+                                .layoutPriority(1)
                         }
                     }
                     if let url = firstLink {
@@ -575,6 +740,21 @@ struct NoteRow: View {
         if draft != nil { draft = n }
         notes.update(n)
     }
+    private func duplicate() {
+        if notes.duplicate(draft ?? note) != nil { notes.say("Duplicated \u{201C}\(note.heading)\u{201D}.") }
+    }
+    /// The macOS share menu with the note's words: AirDrop, Messages, Mail and the rest.
+    private func send() {
+        guard let view = NSApp.keyWindow?.contentView, let e = NSApp.currentEvent else { return }
+        let picker = NSSharingServicePicker(items: [note.content])
+        let p = view.convert(e.locationInWindow, from: nil)
+        picker.show(relativeTo: NSRect(x: p.x, y: p.y, width: 1, height: 1), of: view, preferredEdge: .minY)
+    }
+    private func showOnPi() {
+        let n = draft ?? note
+        notes.say("Sending to the Pi…")
+        PiLink.show(n, remote: NotesSync.shared.remote) { ok, message in notes.say(message, ok: ok) }
+    }
     private func copy(_ s: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(s, forType: .string)
@@ -590,6 +770,7 @@ struct NoteRow: View {
         if Self.startOpen, notes.live.first?.id == note.id {
             _snapshotOpen = State(initialValue: true)
             _draft = State(initialValue: note)
+            if Self.startTitleEdit { _editingTitle = State(initialValue: true); _titleDraft = State(initialValue: note.title) }
         }
     }
 
@@ -713,6 +894,14 @@ struct NoteRow: View {
                 }
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .keyRing(ringed(.tags), radius: 5)
+                // a pin: the address this note is about, opened from the row
+                HStack(spacing: 4) {
+                    Image(systemName: "link").font(.sbIcon(10)).foregroundStyle(.tertiary)
+                    TextField("link", text: Binding(get: { d.wrappedValue.url ?? "" },
+                                                    set: { d.wrappedValue.url = $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }))
+                        .textFieldStyle(.plain).font(PT.caption)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 3)
                 .padding(.bottom, 4)
             }
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
@@ -892,8 +1081,9 @@ struct NoteRow: View {
         if !tagsText.isEmpty, draft != nil { commitTag(Binding(get: { draft ?? note }, set: { draft = $0 })) }
         guard var n = draft, n != note else { refused = false; return }
         // a note with neither title nor text is refused, not saved; Delete is how a note goes
-        guard InputRules.canSave(title: n.title, body: n.body) else { refused = true; return }
+        guard InputRules.canSave(title: n.title, body: n.body, url: n.url ?? "") else { refused = true; return }
         n.title = n.title.trimmingCharacters(in: .whitespaces)
+        n.url = n.url.map { $0.trimmingCharacters(in: .whitespaces) }.flatMap { $0.isEmpty ? nil : $0 }
         refused = false
         notes.update(n)
         savedAt = Date()

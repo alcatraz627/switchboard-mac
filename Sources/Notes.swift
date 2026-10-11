@@ -167,6 +167,172 @@ func probeNotes() -> String {
     check("resolve keeps both, mine first", NotesSync.resolve(clash, keep: .both) == "top\nmac line\npi line\nmiddle\nA\nB\nend")
     check("a resolved note is no longer a clash", !NotesSync.conflicted(NotesSync.resolve(clash, keep: .both)))
     check("an unclosed block loses nothing", NotesSync.resolve("a\n<<<<<<< x\nb\n=======\nc", keep: .mine) == "a\nb\nc")
+
+    // Delete puts a note in .trash; Recently deleted brings it back or removes it for good.
+    // earlier checks deleted notes too; start this one from an empty .trash
+    try? FileManager.default.removeItem(atPath: NotesStore.trashDir)
+    s.loadTrash()
+    let doomed = s.add("Delete me\nbody kept")!
+    s.delete(doomed)
+    check("delete moves the file to .trash", !FileManager.default.fileExists(atPath: doomed.path)
+          && FileManager.default.fileExists(atPath: NotesStore.trashDir + "/" + doomed.id + ".md"))
+    check("the deleted note is listed with its title", s.trashed.map(\.note.title) == ["Delete me"], s.trashed.map(\.note.title).joined(separator: ","))
+    check("it is gone from the notes", !s.notes.contains { $0.id == doomed.id })
+    check("restore brings it back with its text", s.restore(s.trashed[0])?.body == "body kept" && s.trashed.isEmpty && s.notes.contains { $0.id == doomed.id })
+    let twin = s.add("Twin")!
+    s.delete(twin)
+    let again = s.add("Twin")!
+    s.delete(again)
+    check("two deleted notes of one name are both kept", s.trashed.count == 2, "\(s.trashed.count)")
+    let holder = s.add("Holder")!
+    s.delete(holder)
+    let sameID = NotesStore.dir + "/" + holder.id + ".md"
+    try? "---\ntitle: \"Squatter\"\n---\nx\n".write(toFile: sameID, atomically: true, encoding: .utf8)
+    s.load()
+    let revived = s.restore(s.trashed.first { $0.note.title == "Holder" }!)
+    check("a restore never overwrites a note that took its name", revived?.title == "Holder" && revived?.id != holder.id
+          && s.notes.first { $0.id == holder.id }?.title == "Squatter")
+    var reminded = s.add("Remind me")!
+    reminded.remindAt = Date().addingTimeInterval(3600)
+    s.update(reminded)
+    s.delete(s.notes.first { $0.id == reminded.id }!)
+    check("a restored note comes back without its reminder", s.restore(s.trashed.first { $0.note.title == "Remind me" }!)?.remindAt == nil)
+    s.purge(s.trashed[0])
+    check("remove for good takes it out of the list", s.trashed.count == 1, "\(s.trashed.count)")
+    for t in s.trashed { s.purge(t) }
+    check("the hidden folder is not read as notes", !s.notes.contains { $0.id.hasPrefix(".") })
+
+    // Duplicate: the same words, tags, colour and link, but never the pin or a reminder.
+    var src = s.add(title: "Source", body: "words", color: "blue", url: "https://example.com/s")!
+    src.tags = ["t1"]; src.pinned = true
+    src.remindAt = Date().addingTimeInterval(3600)
+    s.update(src)
+    let dup = s.duplicate(s.notes.first { $0.id == src.id }!)
+    s.load()
+    let dupBack = s.notes.first { $0.id == dup?.id }
+    check("a duplicate keeps the words, tags, colour and link", dupBack?.title == "Source copy" && dupBack?.body == "words"
+          && dupBack?.tags == ["t1"] && dupBack?.color == "blue" && dupBack?.url == "https://example.com/s")
+    check("a duplicate is not pinned and has no reminder", dupBack?.pinned == false && dupBack?.remindAt == nil && dupBack?.reminderID == nil)
+    check("the original is left as it was", s.notes.first { $0.id == src.id }?.pinned == true && s.notes.first { $0.id == src.id }?.title == "Source")
+    check("a duplicate sits under its original", { let ids = s.notes.map(\.id); return (ids.firstIndex(of: src.id) ?? -9) + 1 == ids.firstIndex(of: dup?.id ?? "") }())
+
+    // Show on the Pi: the address, the request, and a stand-in Pi that answers, refuses or is not there.
+    check("the Pi's host is the notes remote's", PiLink.host(remote: "alcatraz627@100.65.188.9:Notes") == "100.65.188.9"
+          && PiLink.host(remote: "me@pi.example:Notes.git") == "pi.example" && PiLink.host(remote: "") == PiLink.defaultHost)
+    let req = PiLink.request(title: "T", body: "line one\nline two", base: "http://h:1", token: "tok")
+    check("the request is a POST of the note's words with the token", req?.url?.absoluteString == "http://h:1/v1/display/show" && req?.httpMethod == "POST"
+          && req?.value(forHTTPHeaderField: "X-Csync-Token") == "tok" && String(data: req?.httpBody ?? Data(), encoding: .utf8)?.contains("line one") == true)
+    check("a title-only note shows its title", String(data: PiLink.request(title: "Only", body: "", base: "http://h:1", token: "t")?.httpBody ?? Data(), encoding: .utf8)?.contains("\"text\":\"Only\"") == true)
+    check("a note with no words makes no request", PiLink.request(title: " ", body: "", base: "http://h:1", token: "t") == nil)
+    check("long text is cut after a whole word under 4000", PiLink.screenText(String(repeating: "word ", count: 1200)).count <= 4000
+          && PiLink.screenText(String(repeating: "word ", count: 1200)).hasSuffix("word"))
+    /// A one-answer web server on the loopback address, standing in for the Pi.
+    func piStub(status: String, body: String) -> (Int32, UInt16, () -> String)? {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return nil }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size); addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1"); addr.sin_port = 0
+        let bound = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
+        guard bound == 0, listen(fd, 1) == 0 else { close(fd); return nil }
+        var got = sockaddr_in(); var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &got) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) } }
+        let port = UInt16(bigEndian: got.sin_port)
+        let seen = NSMutableString()
+        DispatchQueue.global().async {
+            let c = accept(fd, nil, nil)
+            guard c >= 0 else { return }
+            var buf = [UInt8](repeating: 0, count: 65536)
+            var all = Data()
+            // read until the headers and the whole body have arrived
+            while true {
+                let n = recv(c, &buf, buf.count, 0)
+                if n <= 0 { break }
+                all.append(buf, count: n)
+                let text = String(data: all, encoding: .utf8) ?? ""
+                if let r = text.range(of: "\r\n\r\n"),
+                   let cl = text.lowercased().components(separatedBy: "content-length: ").dropFirst().first.flatMap({ Int($0.prefix { $0.isNumber }) }),
+                   all.count >= text.distance(from: text.startIndex, to: r.upperBound) + cl { break }
+            }
+            DispatchQueue.main.sync { seen.append(String(data: all, encoding: .utf8) ?? "") }
+            let r = "HTTP/1.1 \(status)\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+            _ = r.withCString { send(c, $0, strlen($0), 0) }
+            close(c)
+        }
+        return (fd, port, { seen as String })
+    }
+    func askPi(_ note: Note, base: String) -> (Bool, String) {
+        PiLink.baseOverride = base
+        PiLink.tokenOverride = "probe-token"
+        var out: (Bool, String)?
+        PiLink.show(note, remote: "") { ok, msg in out = (ok, msg) }
+        let until = Date().addingTimeInterval(8)
+        while out == nil && Date() < until { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }
+        PiLink.baseOverride = nil; PiLink.tokenOverride = nil
+        return out ?? (false, "no answer")
+    }
+    if let (l, port, seen) = piStub(status: "200 OK", body: "{\"sentToDisplay\":true}") {
+        let r = askPi(src, base: "http://127.0.0.1:\(port)")
+        close(l)
+        check("a Pi that answers is reported as showing", r.0 && r.1.contains("Showing"), r.1)
+        check("the Pi got the path, the token and the words", seen().contains("POST /v1/display/show") && seen().lowercased().contains("x-csync-token: probe-token") && seen().contains("words"), seen())
+    } else { check("a stand-in Pi starts", false) }
+    if let (l, port, _) = piStub(status: "200 OK", body: "{\"sentToDisplay\":false}") {
+        let r = askPi(src, base: "http://127.0.0.1:\(port)"); close(l)
+        check("a Pi with its screen off says so", r.0 && r.1.contains("screen is off"), r.1)
+    }
+    if let (l, port, _) = piStub(status: "401 Unauthorized", body: "{}") {
+        let r = askPi(src, base: "http://127.0.0.1:\(port)"); close(l)
+        check("a refused token is said plainly", !r.0 && r.1.contains("token"), r.1)
+    }
+    let unreachable = askPi(src, base: "http://127.0.0.1:1")
+    check("a Pi that is not there is a sentence, not a crash", !unreachable.0 && unreachable.1.contains("did not answer"), unreachable.1)
+
+    // A link is a note by itself; sorts and the tag filter only change the view.
+    let pin = s.add(title: "", body: "", url: "https://example.com/a")
+    check("a note with only a link is saved and keeps it", pin != nil && pin?.heading == "https://example.com/a")
+    s.load()
+    check("the link survives the file", s.notes.first { $0.id == pin?.id }?.url == "https://example.com/a")
+    func mk(_ id: String, _ title: String, _ day: Int, pinned: Bool = false, tags: [String] = []) -> Note {
+        var n = Note(id: id, title: title, body: "", tags: tags, created: Date(timeIntervalSince1970: Double(day) * 86400))
+        n.pinned = pinned
+        return n
+    }
+    let set = [mk("a", "banana", 3, tags: ["x", "y"]), mk("b", "Apple", 1, pinned: true, tags: ["x"]), mk("c", "cherry", 2)]
+    check("manual keeps the list as given", NoteSort.manual.apply(set).map(\.id) == ["a", "b", "c"])
+    check("newest first, pinned still on top", NoteSort.newest.apply(set).map(\.id) == ["b", "a", "c"])
+    check("oldest first, pinned still on top", NoteSort.oldest.apply(set).map(\.id) == ["b", "c", "a"])
+    check("A to Z ignores case, pinned on top", NoteSort.title.apply(set).map(\.id) == ["b", "a", "c"])
+    check("tags are counted, most used first", set.tagCounts.map(\.tag) == ["x", "y"] && set.tagCounts.map(\.count) == [2, 1])
+    let nav = NotesNav()
+    nav.sort = .manual
+    nav.tagFilter = ["x"]
+    check("one tag keeps the notes carrying it", nav.visible(set).map(\.id) == ["a", "b"])
+    nav.tagFilter = ["x", "y"]
+    check("two tags keep only notes with both", nav.visible(set).map(\.id) == ["a"])
+    nav.tagFilter = []
+
+    // The colour dots can be added to, renamed and removed; a note's file keeps the name it was saved with.
+    let pal = NotePalette.shared
+    pal.reset()
+    check("the palette starts as the shared eight", pal.dots.map(\.key) == timerColors.map(\.0))
+    let sea = pal.add(label: "Deep sea", hex: "#112233")
+    check("an added dot's name is made from its label", sea?.key == "deep-sea" && pal.dots.count == 9, sea?.key ?? "nil")
+    check("a second dot with the same label gets its own name", pal.add(label: "Deep sea", hex: "#445566")?.key == "deep-sea-2")
+    check("an empty label or a bad colour adds nothing", pal.add(label: "  ", hex: "#112233") == nil && pal.add(label: "Bad", hex: "red") == nil && pal.dots.count == 10)
+    pal.rename("red", to: "Urgent")
+    check("a rename changes the label and keeps the file name", pal.label("red") == "Urgent" && noteColorName("red") == "red")
+    check("the palette is read back from disk", NotePalette().dots == pal.dots)
+    let deep = s.add(title: "Deep note", body: "", color: "deep-sea")!
+    s.load()
+    check("a note keeps an added dot's name across the file", s.notes.first { $0.id == deep.id }?.color == "deep-sea")
+    check("the dot is in the note file by its name", ((try? String(contentsOfFile: deep.path, encoding: .utf8)) ?? "").contains("\ncolor: deep-sea\n"))
+    pal.remove("deep-sea")
+    s.load()
+    check("a removed dot leaves its notes with no dot", s.notes.first { $0.id == deep.id }?.color == nil && noteColorName("deep-sea") == nil)
+    pal.reset()
+    check("reset brings back the shared eight", pal.dots == NotePalette.eight && pal.label("red") == "Red")
+    check("the last dot cannot be removed", { let q = NotePalette(); for d in q.dots.dropFirst() { q.remove(d.key) }; q.remove(q.dots[0].key); let one = q.dots.count; q.reset(); return one == 1 }())
     lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
     return lines.joined(separator: "\n")
 }
@@ -215,7 +381,7 @@ struct Note: Identifiable, Equatable {
     var content: String { body.isEmpty ? title : title.isEmpty ? body : title + "\n\n" + body }
     /// What a list shows as the note's name: the title, or the body's first line when there is no title.
     var heading: String {
-        title.isEmpty ? (body.components(separatedBy: "\n").first { !$0.isEmpty } ?? "") : title
+        title.isEmpty ? (body.components(separatedBy: "\n").first { !$0.isEmpty } ?? url ?? "") : title
     }
 }
 
@@ -225,6 +391,14 @@ final class NotesStore: ObservableObject {
 
     @Published private(set) var notes: [Note] = []
     @Published var error: String?
+    /// A short word on something that just happened (duplicated, shown on the Pi); it clears itself.
+    struct Notice: Equatable { let text: String; let ok: Bool }
+    @Published private(set) var notice: Notice?
+    func say(_ text: String, ok: Bool = true) {
+        let n = Notice(text: text, ok: ok)
+        notice = n
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in if self?.notice == n { self?.notice = nil } }
+    }
     /// True once the folder has been read, so an empty list can say "No notes yet" and not "still reading".
     @Published private(set) var loaded = false
 
@@ -294,6 +468,7 @@ final class NotesStore: ObservableObject {
     private func apply(_ r: (notes: [Note], problem: String?)) {
         notes = r.notes
         loaded = true
+        loadTrash()
         // A read problem clears itself when the next read is clean (a drive plugged back in).
         if let p = r.problem { readProblem = p; error = p }
         else if let old = readProblem { readProblem = nil; if error == old { error = nil } }
@@ -335,21 +510,40 @@ final class NotesStore: ObservableObject {
     /// Saves a new note from a title and a body, either of which may be empty
     /// but not both; the same note twice is saved once.
     @discardableResult
-    func add(title rawTitle: String, body rawBody: String, color: String? = nil) -> Note? {
+    func add(title rawTitle: String, body rawBody: String, color: String? = nil, url rawURL: String = "") -> Note? {
         let title = rawTitle.trimmingCharacters(in: .whitespaces)
         let body = rawBody.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard InputRules.canSave(title: title, body: body) else { return nil }
+        let url = rawURL.trimmingCharacters(in: .whitespaces)
+        guard InputRules.canSave(title: title, body: body, url: url) else { return nil }
         // Enter on a note already saved does not make a second copy.
-        if let same = notes.first(where: { $0.title == title && $0.body == body }) { return same }
-        let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
-        var id = f.string(from: Date())
-        while notes.contains(where: { $0.id == id }) { id += "x" }
-        var n = Note(id: id, title: title, body: body, tags: [], created: Date())
-        n.color = color.flatMap(tagColorName)
+        if let same = notes.first(where: { $0.title == title && $0.body == body && ($0.url ?? "") == url }) { return same }
+        var n = Note(id: newID(), title: title, body: body, tags: [], created: Date())
+        n.color = color.flatMap(noteColorName)
+        n.url = url.isEmpty ? nil : url
         guard write(n) else { return nil }
         notes.insert(n, at: 0)
         saveOrder()
         return n
+    }
+
+    private func newID() -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
+        var id = f.string(from: Date())
+        while notes.contains(where: { $0.id == id }) { id += "x" }
+        return id
+    }
+
+    /// A second note with the same words, tags, colour and link, placed under the first.
+    /// It is never pinned and carries no reminder or expiry, so nothing fires twice.
+    @discardableResult
+    func duplicate(_ n: Note) -> Note? {
+        var c = Note(id: newID(), title: n.title.isEmpty ? "" : n.title + " copy", body: n.body, tags: n.tags, created: Date())
+        c.color = n.color
+        c.url = n.url
+        guard write(c) else { return nil }
+        notes.insert(c, at: min((notes.firstIndex { $0.id == n.id } ?? -1) + 1, notes.count))
+        saveOrder()
+        return c
     }
 
     /// Save a changed note; its reminder follows only a change to when, how
@@ -372,14 +566,82 @@ final class NotesStore: ObservableObject {
         var gone = n
         gone.remindAt = nil
         let reminderProblem = syncReminder(&gone)
-        do { try FileManager.default.removeItem(atPath: n.path) } catch {
+        // into .trash beside the notes (bfb does the same), so Recently deleted can bring it back
+        do { try moveToTrash(n) } catch {
             self.error = "\(n.title) could not be removed: \(error.localizedDescription)"; return
         }
         notes.removeAll { $0.id == n.id }
         saveOrder()
+        loadTrash()
         NotesSync.shared.commit("delete")
         // The note is gone either way; a reminder left behind would fire for nothing.
         if let p = reminderProblem { self.error = "The note was deleted, but its reminder was not removed: \(p)" }
+    }
+
+    // ── Recently deleted ────────────────────────────────────────────────────
+
+    /// A deleted note waiting in `.trash`, with when it went there.
+    struct Trashed: Identifiable {
+        let file: String
+        let note: Note
+        let deleted: Date
+        var id: String { file }
+    }
+    @Published private(set) var trashed: [Trashed] = []
+    static var trashDir: String { dir + "/.trash" }
+
+    private func moveToTrash(_ n: Note) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(atPath: Self.trashDir, withIntermediateDirectories: true)
+        var name = n.id + ".md"
+        while fm.fileExists(atPath: Self.trashDir + "/" + name) { name = n.id + "-" + String(Int(Date().timeIntervalSince1970)) + String(Int.random(in: 0..<100)) + ".md" }
+        try fm.moveItem(atPath: n.path, toPath: Self.trashDir + "/" + name)
+    }
+
+    /// Reads `.trash`, newest deletion first; a folder that is not there is an empty list.
+    func loadTrash() {
+        let fm = FileManager.default
+        let names = ((try? fm.contentsOfDirectory(atPath: Self.trashDir)) ?? []).filter { $0.hasSuffix(".md") }
+        trashed = names.compactMap { f -> Trashed? in
+            let path = Self.trashDir + "/" + f
+            guard let text = try? String(contentsOfFile: path, encoding: .utf8), let n = Self.parse(id: String(f.dropLast(3)), text) else { return nil }
+            let url = URL(fileURLWithPath: path)
+            let when = (try? url.resourceValues(forKeys: [.addedToDirectoryDateKey]))?.addedToDirectoryDate
+                ?? (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date ?? Date()
+            return Trashed(file: f, note: n, deleted: when)
+        }.sorted { $0.deleted > $1.deleted }
+    }
+
+    /// Puts a deleted note back in the list, under a new name if its own is taken. Its reminder
+    /// was removed when it was deleted, so it comes back without one.
+    @discardableResult
+    func restore(_ t: Trashed) -> Note? {
+        let fm = FileManager.default
+        var id = t.note.id
+        while fm.fileExists(atPath: Self.dir + "/" + id + ".md") { id += "x" }
+        do { try fm.moveItem(atPath: Self.trashDir + "/" + t.file, toPath: Self.dir + "/" + id + ".md") } catch {
+            self.error = "\(t.note.heading) could not be brought back: \(error.localizedDescription)"; return nil
+        }
+        load()
+        guard var n = notes.first(where: { $0.id == id }) else { return nil }
+        if n.remindAt != nil || n.reminderID != nil {
+            n.remindAt = nil; n.reminderID = nil
+            update(n)
+        } else {
+            NotesSync.shared.commit("restore")
+        }
+        saveOrder()
+        return notes.first { $0.id == id }
+    }
+
+    /// Removes one deleted note for good, into the macOS Trash so even that can be undone.
+    func purge(_ t: Trashed) {
+        let url = URL(fileURLWithPath: Self.trashDir + "/" + t.file)
+        // a probe never fills the owner's macOS Trash
+        do { if Self.probing { try FileManager.default.removeItem(at: url) } else { try FileManager.default.trashItem(at: url, resultingItemURL: nil) } } catch {
+            self.error = "\(t.note.heading) could not be removed: \(error.localizedDescription)"
+        }
+        loadTrash()
     }
 
     func move(_ dragged: String, to target: String) {
@@ -478,7 +740,7 @@ final class NotesStore: ObservableObject {
                     remindRepeat: fields["remind_repeat"].flatMap(Note.Repeat.init) ?? .never,
                     reminderID: fields["reminder_id"],
                     pinned: fields["pinned"] == "true",
-                    color: fields["color"].flatMap(tagColorName),
+                    color: fields["color"].flatMap(noteColorName),
                     agent: fields["agent"].flatMap { $0.isEmpty ? nil : $0 },
                     source: fields["source"].flatMap { $0.isEmpty ? nil : $0 },
                     url: fields["url"].flatMap { $0.isEmpty ? nil : $0 }, extra: extra)
