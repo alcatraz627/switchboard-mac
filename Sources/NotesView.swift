@@ -13,6 +13,7 @@ import UniformTypeIdentifiers
 struct NoteCompose: View {
     @ObservedObject var notes: NotesStore
     @ObservedObject private var nav: NotesNav
+    @ObservedObject private var palette = NotePalette.shared
     @State private var expanded = false
     @State private var flash: String?
     @State private var focus: NoteSheet.Field?
@@ -57,7 +58,7 @@ struct NoteCompose: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top, spacing: 6) {
                 // the new note's colour, the same dot every note wears
-                ColorDot(selection: $nav.draftColor, size: si(9)).padding(.top, 7)
+                ColorDot(selection: $nav.draftColor, size: si(9), palette: palette.colors).padding(.top, 7)
                 Group {
                     if expanded {
                         VStack(alignment: .leading, spacing: 0) {
@@ -232,6 +233,7 @@ private struct NotesList: View {
 /// ← and → walk it from the keyboard, Space picks.
 struct NoteFilterBar: View {
     @ObservedObject var nav: NotesNav
+    @ObservedObject private var palette = NotePalette.shared
     let hidden: Int
     @FocusState private var searching: Bool
 
@@ -270,7 +272,7 @@ struct NoteFilterBar: View {
                 .keyRing(nav.focus == .filter(0), radius: 8)
                 .contentShape(Rectangle())
                 .onTapGesture { nav.toggleFilter(0) }
-            ForEach(Array(timerColors.enumerated()), id: \.element.0) { i, c in
+            ForEach(Array(palette.colors.enumerated()), id: \.element.0) { i, c in
                 let on = nav.filter.contains(c.0)
                 Circle().fill(c.1).frame(width: si(10), height: si(10))
                     .opacity(nav.filter.isEmpty || on ? 1 : 0.35)
@@ -279,7 +281,8 @@ struct NoteFilterBar: View {
                     .keyRing(nav.focus == .filter(i + 1), radius: 9)
                     .contentShape(Circle())
                     .onTapGesture { nav.toggleFilter(i + 1) }
-                    .accessibilityLabel(c.0)
+                    .accessibilityLabel(palette.label(c.0))
+                    .help(palette.label(c.0))
             }
             Spacer(minLength: 4)
             if hidden > 0 { Text("\(hidden) hidden").font(PT.caption).foregroundStyle(.tertiary) }
@@ -324,6 +327,7 @@ struct NoteRow: View {
     let note: Note
     @ObservedObject var notes: NotesStore
     @ObservedObject var nav: NotesNav
+    @ObservedObject private var palette = NotePalette.shared
     let grip: AnyView
     /// The note is the whole tab: a way back to the list, Write and Read, and room for the text.
     let takeover: Bool
@@ -428,7 +432,7 @@ struct NoteRow: View {
             HStack(alignment: .center, spacing: 6) {
                 if takeover { backToList; readWriteSwitch } else { grip }
                 // the note's one colour: shown here, and changed here
-                ColorDot(selection: colorBinding, size: si(9), isOpen: open ? pickerBinding(.color) : nil)
+                ColorDot(selection: colorBinding, size: si(9), isOpen: open ? pickerBinding(.color) : nil, palette: palette.colors)
                     .keyRing(ringed(.color), radius: 8)
                 if !takeover { heading }
                 Spacer(minLength: 4)
@@ -461,9 +465,9 @@ struct NoteRow: View {
                     Label(note.pinned ? "Unpin" : "Pin to the quick page", systemImage: note.pinned ? "pin.slash" : "pin")
                 }
                 Menu {
-                    ForEach(timerColors, id: \.0) { name, _ in
+                    ForEach(palette.colors, id: \.0) { name, _ in
                         Button { colorBinding.wrappedValue = name } label: {
-                            Label(name.capitalized, systemImage: note.color == name ? "checkmark.circle.fill" : "circle.fill")
+                            Label(palette.label(name), systemImage: note.color == name ? "checkmark.circle.fill" : "circle.fill")
                         }
                     }
                     Divider()

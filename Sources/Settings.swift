@@ -64,6 +64,7 @@ struct SettingsTabView: View {
         let sizes = matches("size") || matches("small") || matches("medium") || matches("large") || matches("zoom")
         let prompts = matches("permission") || matches("prompt") || matches("claude asks") || matches("approvals")
         let keys = matches("keyboard") || matches("shortcut") || matches("hotkey") || matches("keys")
+        let dotSettings = matches("colour") || matches("color") || matches("dot")
         let timerSettings = matches("timer") || matches("sound") || matches("ring") || matches("notes")
         VStack(alignment: .leading, spacing: PT.gap) {
             if query.isEmpty { sectionBar }
@@ -161,8 +162,9 @@ struct SettingsTabView: View {
                 group("Now page", note: "The badges on the Now page, and the dot on the menu bar icon.",
                       rows: hover.map(hoverRow))
             }
-            if (folder || timerSettings) && on("desk") {
+            if (folder || timerSettings || dotSettings) && on("desk") {
                 group("Notes", note: "One markdown file per note, every save kept; the Pi and the phone share the folder.", rows: [notesFolderRow, notesRemoteRow])
+                NoteDotsEditor()
                 VStack(alignment: .leading, spacing: 5) {
                     GroupHeader(name: "Timers")
                     note("What a timer does when it goes off.")
@@ -173,7 +175,7 @@ struct SettingsTabView: View {
                     }
                 }
             }
-            if orderedTabs.isEmpty && hover.isEmpty && pages.isEmpty && !linger && !folder && !prompts && !sizes && !keys && !timerSettings {
+            if orderedTabs.isEmpty && hover.isEmpty && pages.isEmpty && !linger && !folder && !prompts && !sizes && !keys && !timerSettings && !dotSettings {
                 Text("Nothing in Settings matches \"\(query)\".").font(PT.caption).foregroundStyle(.secondary)
                     .padding(.horizontal, 4)
             }

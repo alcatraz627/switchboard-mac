@@ -167,6 +167,28 @@ func probeNotes() -> String {
     check("resolve keeps both, mine first", NotesSync.resolve(clash, keep: .both) == "top\nmac line\npi line\nmiddle\nA\nB\nend")
     check("a resolved note is no longer a clash", !NotesSync.conflicted(NotesSync.resolve(clash, keep: .both)))
     check("an unclosed block loses nothing", NotesSync.resolve("a\n<<<<<<< x\nb\n=======\nc", keep: .mine) == "a\nb\nc")
+
+    // The colour dots can be added to, renamed and removed; a note's file keeps the name it was saved with.
+    let pal = NotePalette.shared
+    pal.reset()
+    check("the palette starts as the shared eight", pal.dots.map(\.key) == timerColors.map(\.0))
+    let sea = pal.add(label: "Deep sea", hex: "#112233")
+    check("an added dot's name is made from its label", sea?.key == "deep-sea" && pal.dots.count == 9, sea?.key ?? "nil")
+    check("a second dot with the same label gets its own name", pal.add(label: "Deep sea", hex: "#445566")?.key == "deep-sea-2")
+    check("an empty label or a bad colour adds nothing", pal.add(label: "  ", hex: "#112233") == nil && pal.add(label: "Bad", hex: "red") == nil && pal.dots.count == 10)
+    pal.rename("red", to: "Urgent")
+    check("a rename changes the label and keeps the file name", pal.label("red") == "Urgent" && noteColorName("red") == "red")
+    check("the palette is read back from disk", NotePalette().dots == pal.dots)
+    let deep = s.add(title: "Deep note", body: "", color: "deep-sea")!
+    s.load()
+    check("a note keeps an added dot's name across the file", s.notes.first { $0.id == deep.id }?.color == "deep-sea")
+    check("the dot is in the note file by its name", ((try? String(contentsOfFile: deep.path, encoding: .utf8)) ?? "").contains("\ncolor: deep-sea\n"))
+    pal.remove("deep-sea")
+    s.load()
+    check("a removed dot leaves its notes with no dot", s.notes.first { $0.id == deep.id }?.color == nil && noteColorName("deep-sea") == nil)
+    pal.reset()
+    check("reset brings back the shared eight", pal.dots == NotePalette.eight && pal.label("red") == "Red")
+    check("the last dot cannot be removed", { let q = NotePalette(); for d in q.dots.dropFirst() { q.remove(d.key) }; q.remove(q.dots[0].key); let one = q.dots.count; q.reset(); return one == 1 }())
     lines.append(lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed")
     return lines.joined(separator: "\n")
 }
@@ -345,7 +367,7 @@ final class NotesStore: ObservableObject {
         var id = f.string(from: Date())
         while notes.contains(where: { $0.id == id }) { id += "x" }
         var n = Note(id: id, title: title, body: body, tags: [], created: Date())
-        n.color = color.flatMap(tagColorName)
+        n.color = color.flatMap(noteColorName)
         guard write(n) else { return nil }
         notes.insert(n, at: 0)
         saveOrder()
@@ -478,7 +500,7 @@ final class NotesStore: ObservableObject {
                     remindRepeat: fields["remind_repeat"].flatMap(Note.Repeat.init) ?? .never,
                     reminderID: fields["reminder_id"],
                     pinned: fields["pinned"] == "true",
-                    color: fields["color"].flatMap(tagColorName),
+                    color: fields["color"].flatMap(noteColorName),
                     agent: fields["agent"].flatMap { $0.isEmpty ? nil : $0 },
                     source: fields["source"].flatMap { $0.isEmpty ? nil : $0 },
                     url: fields["url"].flatMap { $0.isEmpty ? nil : $0 }, extra: extra)

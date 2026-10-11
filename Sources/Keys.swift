@@ -117,7 +117,7 @@ enum NotesKeys {
         /// The notes the list shows, top to bottom, after the filter and search.
         var ids: [String]
         /// Dots on the filter row, "all" included.
-        var filterCount = timerColors.count + 1
+        var filterCount = noteColors.count + 1
         /// An editable text field has the keyboard right now.
         var typing = false
         /// Something is typed in the search box.
@@ -192,7 +192,7 @@ enum NotesKeys {
             case .char("c"), .copyAll: return (f, [.copy(id, .all)], true)
             case .char(let d) where d.isNumber:
                 let n = d.wholeNumberValue ?? 0
-                return n <= timerColors.count ? (f, [.color(id, n)], true) : (f, [], true)
+                return n <= noteColors.count ? (f, [.color(id, n)], true) : (f, [], true)
             case .delete: return (f, [.delete(id)], true)
             default: return (f, [], false)
             }
@@ -218,7 +218,7 @@ enum NotesKeys {
             case .char("l") where b == .copy: return (f, [.copy(id, .path)], true)
             case .char(let d) where d.isNumber && b == .color:
                 let n = d.wholeNumberValue ?? 0
-                return n <= timerColors.count ? (f, [.color(id, n)], true) : (f, [], true)
+                return n <= noteColors.count ? (f, [.color(id, n)], true) : (f, [], true)
             // ⌘A and ⌘C belong to the chosen text part, which holds the keyboard read-only
             default: return (f, [], false)
             }
@@ -299,7 +299,7 @@ final class NotesNav: ObservableObject {
     func visible(_ notes: [Note]) -> [Note] {
         let words = query.lowercased().split(separator: " ").map(String.init)
         return notes.filter { n in
-            (filter.isEmpty || (n.color.flatMap(tagColorName).map(filter.contains) ?? false))
+            (filter.isEmpty || (n.color.flatMap(noteColorName).map(filter.contains) ?? false))
                 && words.allSatisfy { w in
                     n.title.lowercased().contains(w) || n.body.lowercased().contains(w) || n.tags.contains { $0.lowercased().contains(w) }
                 }
@@ -322,7 +322,7 @@ final class NotesNav: ObservableObject {
 
     func toggleFilter(_ i: Int) {
         guard i > 0 else { filter = []; return }
-        let name = timerColors[i - 1].0
+        let name = noteColors[i - 1].0
         if filter.contains(name) { filter.remove(name) } else { filter.insert(name) }
     }
 }
@@ -608,7 +608,7 @@ enum KeyRouter {
                 n.pinned.toggle(); store.update(n)
             case .color(let id, let i):
                 guard var n = store.notes.first(where: { $0.id == id }) else { break }
-                n.color = i == 0 ? nil : timerColors[i - 1].0; store.update(n)
+                n.color = i == 0 ? nil : noteColors[i - 1].0; store.update(n)
             case .delete(let id):
                 guard let n = store.notes.first(where: { $0.id == id }) else { break }
                 let a = NSAlert(); a.messageText = "Delete \u{201C}\(n.heading)\u{201D}?"
