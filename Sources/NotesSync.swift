@@ -18,7 +18,10 @@ struct NoteVersion: Identifiable, Equatable {
 final class NotesSync: ObservableObject {
     static let shared = NotesSync()
     /// The remote the Pi serves, e.g. `alcatraz627@100.65.188.9:Notes.git`; empty means local history only.
-    static let remoteKey = "switchboard.notesRemote"
+    /// A run on a scratch state folder (probes, snapshots) gets its own key: the defaults domain is shared
+    /// with the owner's running app, which would otherwise adopt a test remote for the real notes.
+    static let remoteKey = ProcessInfo.processInfo.environment["SWITCHBOARD_STATE"] == nil
+        ? "switchboard.notesRemote" : "switchboard.notesRemote.scratch"
     static let remoteName = "pi"
     static let branch = "main"
 
