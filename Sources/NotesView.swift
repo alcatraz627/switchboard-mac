@@ -205,9 +205,11 @@ private struct NotesList: View {
             }
             if !shown.isEmpty {
                 Card {
-                    ReorderStack(items: shown, move: { if nav.sort == .manual { notes.move($0, to: $1) } }, commit: { if nav.sort == .manual { notes.saveOrder() } }) { i, n, grip in
+                    ReorderStack(items: shown, move: { if nav.sort == .manual { notes.move($0, to: $1) } },
+                                 commit: { if nav.sort == .manual { notes.commitMove(visible: nav.visible(notes.live).map(\.id)) } }) { i, n, grip in
                         VStack(spacing: 0) {
-                            if i > 0 { Divider().padding(.leading, PT.rowH) }
+                            if let head = PinGroupHead.title(at: i, in: shown) { PinGroupHead(text: head, pinned: n.pinned) }
+                            else if i > 0 { Divider().padding(.leading, PT.rowH) }
                             NoteRow(note: n, notes: notes, nav: nav, grip: grip)
                                 .revealFlash("note-" + n.id).id("note-" + n.id)
                         }
@@ -242,6 +244,30 @@ private struct NotesList: View {
             }
         }
         .padding(PT.gap)
+    }
+}
+
+/// The strip that marks where pinned notes end and the rest begin; drags never cross it.
+struct PinGroupHead: View {
+    let text: String
+    let pinned: Bool
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: pinned ? "pin.fill" : "note.text").font(.sbIcon(9))
+            Text(text).font(PT.caption).lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, PT.rowH).padding(.vertical, 4)
+        .background(Color.primary.opacity(0.05))
+    }
+
+    /// The head the row at `i` opens a group with, or nil. Only shown while some pinned note is in view.
+    static func title(at i: Int, in rows: [Note]) -> String? {
+        guard rows.contains(where: \.pinned) else { return nil }
+        if i == 0 { return rows[0].pinned ? "Pinned" : "Other notes" }
+        return rows[i].pinned != rows[i - 1].pinned ? "Other notes" : nil
     }
 }
 
@@ -708,13 +734,15 @@ struct NoteRow: View {
                         Button { NSWorkspace.shared.open(url) } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: url.isFileURL ? "doc" : "link").font(.sbIcon(9.5))
-                                Text(linkLabel(url)).font(PT.caption).lineLimit(2).multilineTextAlignment(.leading)
+                                // one line, cut in the middle so the host and the end of the path both show
+                                Text(linkLabel(url)).font(PT.caption).lineLimit(1).truncationMode(.middle)
                             }
                         }
                         .buttonStyle(.link).help("Open \(url.absoluteString)")
                     }
                     if !summary.isEmpty {
-                        Text(summary).font(PT.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        // one line too: the first words and the reminder at the end stay, the middle gives way; the tooltip has all of it
+                        Text(summary).font(PT.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).help(summary)
                     }
                 }
     }
@@ -786,7 +814,7 @@ struct NoteRow: View {
         if firstLink == nil, let first = bodyLines.dropFirst(note.title.isEmpty ? 1 : 0).first { parts.append(first) }
         if !note.tags.isEmpty { parts.append(note.tags.map { "#" + $0 }.joined(separator: " ")) }
         if let r = note.remindAt {
-            parts.append("reminds " + f.string(from: r) + (note.remindRepeat == .never ? "" : ", " + note.remindRepeat.rawValue))
+            parts.append("reminds " + f.string(from: r) + (note.remindRepeat == .never ? "" : ", " + note.remindRepeat.rawValue) + (note.remindOn == "phone" ? ", on the phone" : ""))
         }
         if let e = note.expires { parts.append((note.expired ? "expired " : "expires ") + f.string(from: e)) }
         return parts.joined(separator: " · ")
@@ -1104,7 +1132,7 @@ struct NoteRow: View {
         if d.wrappedValue.expires != nil {
             clearButton("Remove the expiry") { d.wrappedValue.expires = nil; expireWithReminder = false }
         }
-        WhenButton(title: "Remind me in macOS Reminders", presets: WhenPreset.long,
+        WhenButton(title: "Remind me", presets: WhenPreset.long,
                    choices: ["Once", "Every day", "Every week", "Every month"],
                    extra: d.wrappedValue.remindAt == nil ? [] : [("No reminder", { d.wrappedValue.remindAt = nil; expireWithReminder = false })],
                    initial: d.wrappedValue.remindAt,
@@ -1121,8 +1149,22 @@ struct NoteRow: View {
         }
         .keyRing(ringed(.reminder), radius: 11)
         if d.wrappedValue.remindAt != nil {
-            clearButton("Remove the reminder") { d.wrappedValue.remindAt = nil; expireWithReminder = false }
+            remindOnMenu(d)
+            clearButton("Remove the reminder") { d.wrappedValue.remindAt = nil; d.wrappedValue.remindOn = nil; expireWithReminder = false }
         }
+    }
+
+    /// Which device rings the reminder. The phone's choice stops macOS Reminders from getting a copy.
+    private func remindOnMenu(_ d: Binding<Note>) -> some View {
+        let phone = d.wrappedValue.remindOn == "phone"
+        return Menu {
+            Button { d.wrappedValue.remindOn = nil } label: { Label("Remind on this Mac", systemImage: phone ? "desktopcomputer" : "checkmark") }
+            Button { d.wrappedValue.remindOn = "phone" } label: { Label("Remind on the phone", systemImage: phone ? "checkmark" : "iphone") }
+        } label: {
+            chip(icon: phone ? "iphone" : "desktopcomputer", phone ? "Phone" : "Mac", set: true)
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .help(phone ? "The phone rings this reminder; macOS Reminders gets no copy" : "macOS Reminders rings this one; choose the phone to ring it there instead")
     }
 
     private var saveState: some View {

@@ -41,7 +41,16 @@ func timerColor(_ name: String) -> Color { timerColors.first { $0.0 == tagColorN
 final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
     static let shared = TimerStore()
     /// Probes and demo snapshots point this elsewhere so they never touch real timers.
-    static var key = "switchboard.timers.countdowns"
+    static let defaultKey = "switchboard.timers.countdowns"
+    static var key = defaultKey
+    /// Only the real list tells the run files about itself; demo, drive and probe lists stay out of the notes folder.
+    let recordsRuns: Bool
+    weak var runHook: Runs?
+    private var runs: Runs? { runHook ?? (recordsRuns && self === Self.shared ? Runs.shared : nil) }
+    private func runEvent(_ id: String, _ e: RunEvent) {
+        guard let t = timers.first(where: { $0.id == id }) else { return }
+        runs?.timerEvent(t, e)
+    }
 
     /// Stops this store's clocks, for stores a probe makes and drops.
     func stop() { tick?.invalidate(); tick = nil; silence() }
@@ -58,6 +67,7 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
     @Published var loadError: String?
 
     override init() {
+        recordsRuns = Self.key == Self.defaultKey
         super.init()
         if let d = UserDefaults.standard.data(forKey: Self.key) {
             if let t = try? JSONDecoder().decode([SBTimer].self, from: d) {
@@ -115,7 +125,12 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
         ring = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             guard let self else { return }
             left -= 1; beat += 1
-            if left <= 0 { self.ring?.invalidate(); self.ring = nil; self.ringing = []; return }   // timed out: the notification stays up
+            if left <= 0 {   // timed out: the notification stays up
+                let over = self.ringing
+                self.ring?.invalidate(); self.ring = nil; self.ringing = []
+                for id in over { self.runEvent(id, .answered) }
+                return
+            }
             self.chime()
             if beat % 10 == 0 { for id in self.ringing { if let r = self.timers.first(where: { $0.id == id }) { self.notify(r) } } }
         }
@@ -128,7 +143,9 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
         if Bundle.main.bundleIdentifier != nil {
             UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: Array(ringing))
         }
+        let over = ringing
         ringing = []
+        for id in over { runEvent(id, .answered) }
     }
 
     /// Chimes so far; the probe counts them with the sound off.
@@ -182,13 +199,17 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
 
     var running: [SBTimer] { timers.filter(\.running).sorted { $0.fireAt < $1.fireAt } }
 
-    func add(label: String, color: String, fireAt: Date) {
-        let t = SBTimer(label: label.isEmpty ? "Timer" : label, color: color, start: Date(), fireAt: fireAt)
+    /// Starts a timer. `id` is the run's name when it came from a request file, and `remember: false` keeps a
+    /// timer someone else asked for out of the quick-start chips. Any other start names itself r-… and tells the run files.
+    func add(label: String, color: String, fireAt: Date, id: String? = nil, start: Date? = nil, remember keep: Bool = true) {
+        var t = SBTimer(label: label.isEmpty ? "Timer" : label, color: color, start: start ?? Date(), fireAt: fireAt)
+        t.id = id ?? (runs != nil ? runs!.newID() : t.id)
         timers.insert(t, at: 0)
         save()
         askToNotify()
         resume()
-        remember(t)
+        if keep { remember(t) }
+        runEvent(t.id, .started)
     }
 
     /// The last few timers started, newest first, to start again in one click.
@@ -213,6 +234,7 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
         guard let i = timers.firstIndex(where: { $0.id == t.id }), timers[i].running else { return }
         timers[i].fireAt = max(Date().addingTimeInterval(5), timers[i].fireAt.addingTimeInterval(Double(minutes) * 60))
         save(); resume()
+        runEvent(t.id, .rescheduled)
     }
 
     func extend(_ t: SBTimer, by seconds: TimeInterval) {
@@ -223,6 +245,7 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
         timers[i].firedAt = nil
         stopRinging(t.id)   // restarting a ringing timer answers it
         save(); resume()
+        runEvent(t.id, .rescheduled)
     }
 
     /// Stops one timer's ring; the chime goes quiet once none is left ringing.
@@ -233,6 +256,7 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
             UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [id])
         }
         if ringing.isEmpty { ring?.invalidate(); ring = nil }
+        runEvent(id, .answered)
     }
 
     func rename(_ t: SBTimer, to label: String) {
@@ -244,6 +268,8 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
 
     func remove(_ t: SBTimer) {
         stopRinging(t.id)   // a cleared timer must not keep ringing with nothing on screen to stop it
+        // the run files hear of it while the timer is still in the list, so they can tell stopped from done
+        if let now = timers.first(where: { $0.id == t.id }) { runs?.timerEvent(now, .removed) }
         timers.removeAll { $0.id == t.id }
         save()
     }
@@ -271,7 +297,7 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
             let late = now.timeIntervalSince(timers[i].fireAt) > 120
             timers[i].firedAt = late ? timers[i].fireAt : now
             changed = true
-            if late { dlog("timer went off while closed: \(timers[i].label)") } else { fire(timers[i]) }
+            if late { dlog("timer went off while closed: \(timers[i].label)"); runEvent(timers[i].id, .missed) } else { fire(timers[i]) }
         }
         if changed { save() }
         if !timers.contains(where: \.running) { tick?.invalidate(); tick = nil }
@@ -279,6 +305,7 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
 
     private func fire(_ t: SBTimer) {
         startRinging(t)
+        runEvent(t.id, .ringing)
         dlog("timer fired: \(t.label)")
         notify(t)
         checkNotifications()
@@ -323,6 +350,31 @@ private struct TimersList: View {
     @State private var color: String? = "blue"
     @State private var picking = false
     @FocusState private var focused: Bool
+    @ObservedObject private var runs = Runs.shared
+    /// Where the next timer runs: this Mac, or the phone. Starts on this Mac each time the tab opens.
+    @State private var device = Runs.me
+
+    private func start(_ label: String, _ color: String, _ fireAt: Date, template: String? = nil) {
+        runs.start(label: label, color: color, fireAt: fireAt, on: device, template: template)
+    }
+
+    /// "Run on: This Mac" or "Phone": one choice for the next timer, its chips and templates.
+    private var runOnMenu: some View {
+        let phone = device == Runs.other
+        return Menu {
+            Button { device = Runs.me } label: { Label("This Mac", systemImage: phone ? "desktopcomputer" : "checkmark") }
+            Button { device = Runs.other } label: { Label("Phone", systemImage: phone ? "checkmark" : "iphone") }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: phone ? "iphone" : "desktopcomputer").font(.sbIcon(9.5))
+                Text("Run on: " + (phone ? "Phone" : "This Mac")).font(.sb(10.5))
+            }
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(Capsule().strokeBorder(Color.primary.opacity(0.2)))
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .help("Which device runs the next timer; a phone timer waits until the phone picks it up")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: PT.gap) {
@@ -339,7 +391,7 @@ private struct TimersList: View {
                         // "25m tea" starts straight away; a plain name opens the picker
                         .onSubmit {
                             if let (sec, name) = TimerShorthand.parse(label) {
-                                timers.add(label: name, color: color ?? "blue", fireAt: Date().addingTimeInterval(sec)); label = ""
+                                start(name, color ?? "blue", Date().addingTimeInterval(sec)); label = ""
                             } else { picking = true }
                         }
                         .onExitCommand { focused = false }
@@ -348,7 +400,7 @@ private struct TimersList: View {
                         // ↑ from the first timer hands the label the keyboard again
                         .onChange(of: nav.focus) { f in if f == .field, !focused { focused = true } }
                     WhenButton(title: "Start a timer for", presets: WhenPreset.timer,
-                               onPick: { d, _ in timers.add(label: label, color: color ?? "blue", fireAt: d); label = "" },
+                               onPick: { d, _ in start(label, color ?? "blue", d); label = "" },
                                isOpen: $picking) {
                         Label("Start", systemImage: "timer").font(.sb(11.5, weight: .medium))
                             .padding(.horizontal, 10).padding(.vertical, 5)
@@ -356,21 +408,40 @@ private struct TimersList: View {
                     }
                     .help("Pick how long; the timer starts at once (Enter in the label opens this)")
                 }
-                if !timers.recent.isEmpty {
-                    // the last few timers, to start again in one click
-                    FlowLayout(spacing: 5) {
-                        ForEach(timers.recent, id: \.self) { r in
-                            Button { timers.add(label: r.label, color: r.color, fireAt: Date().addingTimeInterval(r.seconds)) } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "arrow.clockwise").font(.sbIcon(9.5))
-                                    Text("\(clock(r.seconds)) \(r.label)").font(.sb(10.5))
-                                }
-                                .padding(.horizontal, 7).padding(.vertical, 3)
-                                .background(Capsule().fill(timerColor(r.color).opacity(0.2)))
+                // the run-on choice, the templates every device shares, then the last few timers, to start again in one click
+                FlowLayout(spacing: 5) {
+                    runOnMenu
+                    ForEach(runs.templates) { t in
+                        Button { start(t.label, t.color.isEmpty ? "blue" : t.color, Date().addingTimeInterval(Double(t.minutes) * 60), template: t.id) } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "bookmark").font(.sbIcon(9.5))
+                                Text("\(clock(Double(t.minutes) * 60)) \(t.label)").font(.sb(10.5))
                             }
-                            .buttonStyle(.plain).help("Start \(r.label) again for \(clock(r.seconds))")
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(Capsule().fill(timerColor(t.color.isEmpty ? "blue" : t.color).opacity(0.2)))
+                        }
+                        .buttonStyle(.plain).help("Start \(t.label) for \(clock(Double(t.minutes) * 60)) on \(device == Runs.other ? "the phone" : "this Mac")")
+                        .contextMenu { Button { runs.removeTemplate(t.id) } label: { Label("Remove template", systemImage: "trash") } }
+                    }
+                    ForEach(timers.recent, id: \.self) { r in
+                        Button { start(r.label, r.color, Date().addingTimeInterval(r.seconds)) } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.clockwise").font(.sbIcon(9.5))
+                                Text("\(clock(r.seconds)) \(r.label)").font(.sb(10.5))
+                            }
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(Capsule().fill(timerColor(r.color).opacity(0.2)))
+                        }
+                        .buttonStyle(.plain).help("Start \(r.label) again for \(clock(r.seconds))")
+                        .contextMenu {
+                            Button { runs.saveTemplate(label: r.label, minutes: max(1, Int((r.seconds / 60).rounded())), color: r.color) } label: {
+                                Label("Save as template", systemImage: "bookmark")
+                            }
                         }
                     }
+                }
+                if let n = runs.notice {
+                    Label(n, systemImage: "info.circle").font(PT.caption).foregroundStyle(.secondary)
                 }
             }
             .padding(.horizontal, 4)
@@ -404,8 +475,10 @@ private struct TimersList: View {
                     }
                 }
             }
+            PhoneRunsSection(runs: runs)
         }
         .padding(PT.gap)
+        .onAppear { runs.reload() }
     }
 }
 
@@ -461,6 +534,9 @@ struct TimerRow: View {
                     .frame(height: 4)
                 } else if let f = timer.firedAt {
                     Text("went off " + age(f)).font(PT.caption).foregroundStyle(.secondary)
+                }
+                if Runs.shared.records.first(where: { $0.id == timer.id })?.from == Runs.other {
+                    Label("Started on the phone", systemImage: "iphone").font(PT.caption).foregroundStyle(.tertiary).lineLimit(1)
                 }
             }
             Button { timers.extend(timer, by: 60) } label: { Image(systemName: "plus.circle").font(.sbIcon(11)) }

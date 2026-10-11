@@ -46,8 +46,26 @@ final class NotePalette: ObservableObject {
 
     // ── Looking up ──
 
+    /// Custom dots stay on this Mac until the phone and the Pi can show them: a custom
+    /// key written into a note file would reach them as a name they cannot colour.
+    static let customKey = "switchboard.notes.customDots"
+    static var customOn: Bool {
+        get { NotesStore.defaults.bool(forKey: customKey) }
+        set { NotesStore.defaults.set(newValue, forKey: customKey) }
+    }
+    /// The dots a picker may offer: the shared eight (renamed or recoloured), plus custom ones when allowed.
+    var offered: [NoteDot] {
+        let shared = Set(Self.eight.map(\.key))
+        return Self.customOn ? dots : dots.filter { shared.contains($0.key) }
+    }
+    /// The colour name a note file may be given now, or nil: a custom name is refused while custom dots are off.
+    func writable(_ name: String) -> String? {
+        guard let n = noteColorName(name) else { return nil }
+        return Self.customOn || Self.eight.contains(where: { $0.key == n }) ? n : nil
+    }
+
     /// The dots as the pickers and filters draw them: key and colour.
-    var colors: [(String, Color)] { dots.map { ($0.key, Self.color(of: $0)) } }
+    var colors: [(String, Color)] { offered.map { ($0.key, Self.color(of: $0)) } }
     func dot(_ key: String) -> NoteDot? { dots.first { $0.key == key } }
     func color(_ key: String) -> Color? { dot(key).map(Self.color(of:)) }
     func label(_ key: String) -> String { dot(key)?.label ?? key }
@@ -140,6 +158,7 @@ struct NoteDotsEditor: View {
     @State private var newLabel = ""
     @State private var newColor = Color(nsColor: .systemIndigo)
     @State private var pendingRemove: NoteDot?
+    @State private var customOn = NotePalette.customOn
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -152,7 +171,9 @@ struct NoteDotsEditor: View {
                     row(d)
                 }
                 Divider().padding(.leading, PT.rowH)
-                addRow
+                if customOn { addRow } else { customOffRow }
+                Divider().padding(.leading, PT.rowH)
+                customSwitchRow
             }
         }
         .task { if !notes.loaded { notes.load() } }
@@ -191,6 +212,29 @@ struct NoteDotsEditor: View {
             Button(action: add) { Label("Add", systemImage: "plus").lineLimit(1).fixedSize() }
                 .sbControlSize(.small).disabled(newLabel.trimmingCharacters(in: .whitespaces).isEmpty || palette.dots.count >= NotePalette.maxDots)
                 .help("Add a dot with this name and colour")
+            Button { palette.reset() } label: { Label("Reset", systemImage: "arrow.counterclockwise").lineLimit(1).fixedSize() }
+                .sbControlSize(.small).disabled(palette.dots == NotePalette.eight).help("Back to the shared eight")
+        }
+        .padding(.horizontal, PT.rowH).padding(.vertical, PT.rowV + 2)
+    }
+
+    private var customSwitchRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "desktopcomputer").foregroundStyle(.secondary).frame(width: 22)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Add custom colours").font(PT.label)
+                Text("Mac only for now. The phone and the Pi know just the shared eight, so a custom colour is never written into a note.")
+                    .font(PT.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 4)
+            Toggle("", isOn: Binding(get: { customOn }, set: { customOn = $0; NotePalette.customOn = $0; palette.objectWillChange.send() })).toggleStyle(.switch).sbControlSize(.small).labelsHidden()
+        }
+        .padding(.horizontal, PT.rowH).padding(.vertical, PT.rowV + 2)
+    }
+
+    private var customOffRow: some View {
+        HStack(spacing: 8) {
+            Spacer(minLength: 4)
             Button { palette.reset() } label: { Label("Reset", systemImage: "arrow.counterclockwise").lineLimit(1).fixedSize() }
                 .sbControlSize(.small).disabled(palette.dots == NotePalette.eight).help("Back to the shared eight")
         }

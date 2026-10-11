@@ -82,9 +82,52 @@ func probeReorder() -> [String] {
     let down = reordered(["a", "b", "c", "d"], moving: "a", to: "c")
     let up = reordered(["a", "b", "c", "d"], moving: "d", to: "b")
     let saved = applyOrder([I(id: "x"), I(id: "b"), I(id: "a")], ["a", "b"]).map(\.id)
-    return [line("dragging down lands on the target's place", down == ["b", "c", "a", "d"], down.joined()),
-            line("dragging up lands on the target's place", up == ["a", "d", "b", "c"], up.joined()),
-            line("a saved order applies; new items go last", saved == ["a", "b", "x"], saved.joined())]
+    var out = [line("dragging down lands on the target's place", down == ["b", "c", "a", "d"], down.joined()),
+               line("dragging up lands on the target's place", up == ["a", "d", "b", "c"], up.joined()),
+               line("a saved order applies; new items go last", saved == ["a", "b", "x"], saved.joined())]
+
+    // The shared order: the seven vectors every port of between() must pass (specs/order.md).
+    let vectors: [(String, String?, String)] = [("", nil, "i"), ("i", nil, "r"), ("", "i", "9"), ("a", "b", "ai"),
+                                                ("a", "ai", "a9"), ("az", "b", "azi"), ("1", "2", "1i")]
+    for (a, b, want) in vectors {
+        let got = NotePos.between(a, b)
+        out.append(line("between(\"\(a)\", \(b.map { "\"\($0)\"" } ?? "none")) is \(want)", got == want, got))
+    }
+    var hi = "b", keys: [String] = []
+    for _ in 0..<20 { let k = NotePos.between("a", hi); keys.append(k); hi = k }   // each lands in the gap just above "a"
+    out.append(line("twenty inserts into one gap stay in order and never end in 0",
+                    zip(keys, keys.dropFirst()).allSatisfy { $0 > $1 } && keys.allSatisfy { $0.last != "0" && $0 > "a" }, keys.suffix(2).joined(separator: " ")))
+    let sp = NotePos.spread(5)
+    out.append(line("spread(5) is five ascending three-character-or-less keys", sp.count == 5 && sp == sp.sorted() && Set(sp).count == 5 && sp.allSatisfy { $0.count <= 3 && $0.last != "0" }, sp.joined(separator: ",")))
+    let fresh = NotePos.fresh(4, below: "3")
+    out.append(line("fresh keys all sit above the first arranged note", fresh.count == 4 && fresh == fresh.sorted() && fresh.allSatisfy { $0 < "3" }, fresh.joined(separator: ",")))
+    out.append(line("only 0-9a-z, not ending in 0, is a usable bound",
+                    NotePos.usable("i") && NotePos.usable("a9") && NotePos.usable("null") && !NotePos.usable("no_") && !NotePos.usable("a0")
+                    && !NotePos.usable("Z") && !NotePos.usable("") && !NotePos.usable(nil), ""))
+
+    // The one comparator: pinned first, never-arranged above arranged (newest first), then pos in byte order, then id.
+    func note(_ id: String, day: Int, pos: String? = nil, pinned: Bool = false) -> Note {
+        var n = Note(id: id, title: id, body: "", tags: [], created: Date(timeIntervalSince1970: Double(day) * 86400))
+        n.pos = pos; n.pinned = pinned
+        return n
+    }
+    let set = [note("arr-b", day: 9, pos: "r"), note("arr-a", day: 1, pos: "9"), note("new-old", day: 2), note("new-new", day: 8),
+               note("pin-b", day: 1, pos: "r", pinned: true), note("pin-new", day: 5, pinned: true), note("tie-b", day: 3, pos: "m"), note("tie-a", day: 3, pos: "m")]
+    let sorted = NoteOrder.sorted(set).map(\.id)
+    out.append(line("the comparator puts pinned first, unarranged newest first, then pos, then id",
+                    sorted == ["pin-new", "pin-b", "new-new", "new-old", "arr-a", "tie-a", "tie-b", "arr-b"], sorted.joined(separator: ",")))
+    out.append(line("pos 'Z' sorts by bytes, after '9' and before 'a'", NoteOrder.sorted([note("x", day: 1, pos: "a"), note("y", day: 1, pos: "Z"), note("z", day: 1, pos: "9")]).map(\.id) == ["z", "y", "x"], ""))
+
+    // `pos` is read as the exact text, whatever it looks like to YAML.
+    for raw in ["no", "1e5", "null", "i", "a9"] {
+        let n = NotesStore.parse(id: "p", "---\ntitle: \"P\"\npos: \(raw)\n---\nbody\n")
+        let back = n.map(NotesStore.render) ?? ""
+        out.append(line("pos: \(raw) reads back as exactly that text and is written bare", n?.pos == raw && back.contains("\npos: \(raw)\n"), "\(n?.pos ?? "nil")"))
+    }
+    let after = NotesStore.parse(id: "q", "---\ntitle: \"Q\"\nurl: \"https://x.y\"\npos: i\nmood: calm\n---\nb\n").map(NotesStore.render) ?? ""
+    out.append(line("pos is written after url and before unknown keys", after.contains("url: \"https://x.y\"\npos: i\nmood: calm\n"), after))
+    out.append(line("a note without pos writes no pos line", !(NotesStore.parse(id: "r", "---\ntitle: \"R\"\n---\nb\n").map(NotesStore.render) ?? "").contains("pos:"), ""))
+    return out
 }
 
 /// Sorts items by a saved id order; ones not in it keep their order at the end.

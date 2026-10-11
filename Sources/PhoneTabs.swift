@@ -12,9 +12,35 @@ let phoneReaders: [String: () -> [SystemGroup]] = catalogReaders.merging([
     "usage": PhoneTabs.usage,
     "bulbs": PhoneTabs.bulbs,
     "agents": PhoneTabs.agents,
+    "approvals": PhoneTabs.approvals,
 ]) { a, _ in a }
 
 enum PhoneTabs {
+    // ── Approvals ──
+
+    /// What waits on the owner, as the Approvals tab groups it. A row's key is its hold file, and its
+    /// Approve, Cancel (Deny for a Claude prompt) buttons are the ones --act presses.
+    /// SWITCHBOARD_NEEDS_ROOT points it at a scratch folder, so a walk never touches a real hold.
+    static func approvals() -> [SystemGroup] {
+        if let scratch = ProcessInfo.processInfo.environment["SWITCHBOARD_NEEDS_ROOT"], !scratch.isEmpty {
+            NeedsYou.rootOverride = scratch
+            NeedsYou.probing = true
+        }
+        let items = NeedsYou.items()
+        let byID = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let kinds: [NeedItem.Kind: String] = [.push: "push", .ask: "ask", .prompt: "prompt", .armedApproval: "armed", .unreadable: "unreadable"]
+        return NeedsYou.groups(items, refresh: {}).map { g in
+            SystemGroup(title: g.title, rows: g.rows.map { r in
+                var r = r
+                if let k = r.key, let i = byID[k] {
+                    r.phone = ["kind": kinds[i.kind] ?? "", "session": i.sessionID, "approved": i.approved,
+                               "live": i.sessionDir != nil, "held_at": i.since.map { Int($0.timeIntervalSince1970) } ?? 0]
+                }
+                return r
+            }, status: g.status)
+        }
+    }
+
     // ── Usage ──
 
     static func usage() -> [SystemGroup] {

@@ -47,14 +47,27 @@ final class NotesSync: ObservableObject {
     func ensureRepo() -> Bool {
         let fm = FileManager.default
         guard fm.fileExists(atPath: dir) else { return false }
-        if fm.fileExists(atPath: dir + "/.git") { return true }
+        if fm.fileExists(atPath: dir + "/.git") { ignoreMigratedOrder(); return true }
         let r = git(["init", "-q", "-b", Self.branch])
         guard r.code == 0 else { problem = "git init failed: \(r.err)"; return false }
         _ = git(["config", "user.name", "Switchboard"])
         _ = git(["config", "user.email", "switchboard@local"])
         // .trash/ is bfb's local undo for deletes; the delete itself is what syncs.
-        try? "order.json\n.DS_Store\n.import/\n.trash/\n".write(toFile: dir + "/.gitignore", atomically: true, encoding: .utf8)
+        try? "order.json\norder.json.migrated*\n.DS_Store\n.import/\n.trash/\n".write(toFile: dir + "/.gitignore", atomically: true, encoding: .utf8)
         return true
+    }
+
+    /// A repository made before the order moved into `pos` lines keeps the set-aside order file out of history too.
+    private func ignoreMigratedOrder() {
+        let p = dir + "/.gitignore"
+        guard let t = try? String(contentsOfFile: p, encoding: .utf8), !t.contains("order.json.migrated") else { return }
+        try? (t.hasSuffix("\n") ? t : t + "\n").appending("order.json.migrated*\n").write(toFile: p, atomically: true, encoding: .utf8)
+    }
+
+    /// Sync now rather than at the next tick: a run aimed at the phone should not wait half a minute to leave.
+    func syncSoon() {
+        commitWork?.cancel()
+        sync()
     }
 
     /// Commit what changed, a moment after the last save, so a burst of typing is one commit.
@@ -106,7 +119,13 @@ final class NotesSync: ObservableObject {
         let url = remote.trimmingCharacters(in: .whitespaces)
         guard !syncing else { return }
         // with no Pi to talk to, the timer still turns what other tools wrote (bfb, a hand edit) into versions
-        if url.isEmpty { queue.async { [weak self] in self?.commitNow("save") }; return }
+        if url.isEmpty {
+            queue.async { [weak self] in
+                self?.commitNow("save")
+                DispatchQueue.main.async { if !NotesStore.probing { Runs.shared.reload() } }
+            }
+            return
+        }
         syncing = true
         queue.async { [weak self] in
             guard let self else { return }
@@ -121,6 +140,8 @@ final class NotesSync: ObservableObject {
                     if failure == nil { self.lastSync = Date() }
                     self.conflicts = Self.countConflicts(in: self.dir)
                     NotesStore.shared.loadInBackground()
+                    // what the other device wrote, read now that the sync landed
+                    if !NotesStore.probing { Runs.shared.reload() }
                 }
             }
             if self.git(["remote", "get-url", Self.remoteName]).out.trimmingCharacters(in: .whitespacesAndNewlines) != url {
@@ -132,7 +153,8 @@ final class NotesSync: ObservableObject {
             // the Pi's folder starts with its own first commit (the import), so the first merge joins two histories
             let merge = self.git(["merge", "-q", "--no-edit", "--allow-unrelated-histories", "\(Self.remoteName)/\(Self.branch)"])
             if merge.code != 0 {
-                // both sides stay in the file, marked; the row shows it
+                // a clash over order or the run folder takes this Mac's side; any other keeps both, marked, and the row shows it
+                Self.settleClashes(in: self.dir, git: { self.git($0) })
                 _ = self.git(["add", "-A"])
                 _ = self.git(["commit", "-q", "-m", "merge: both sides kept"])
             }
@@ -185,6 +207,34 @@ final class NotesSync: ObservableObject {
         // an unclosed block keeps everything it held, so nothing is lost
         if part != .outside { out += mine + theirs }
         return out.joined(separator: "\n")
+    }
+
+    /// True when every clash in the text is only a `pos:` line (the same note moved on two devices).
+    static func posOnlyClash(_ text: String) -> Bool {
+        var blocks = 0, part = 0   // 0 outside, 1 first side, 2 second side
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            switch part {
+            case 0 where line.hasPrefix("<<<<<<< ") || line == "<<<<<<<": part = 1; blocks += 1
+            case 0: break
+            case 1 where line == "=======": part = 2
+            case 2 where line.hasPrefix(">>>>>>> ") || line == ">>>>>>>": part = 0
+            default: if !line.hasPrefix("pos:") { return false }
+            }
+        }
+        return blocks > 0 && part == 0
+    }
+
+    /// After a merge that stopped on clashes: the notes' `pos` clashes and anything under `.reminders/` keep
+    /// this Mac's side (a lost move or run request is cheap), everything else is left for both-sides-kept.
+    static func settleClashes(in dir: String, git: ([String]) -> (code: Int32, out: String, err: String)) {
+        let unmerged = git(["diff", "--name-only", "--diff-filter=U"]).out.split(separator: "\n").map(String.init)
+        for path in unmerged {
+            if path.hasPrefix(".reminders/") {
+                if git(["checkout", "--ours", "--", path]).code != 0 { _ = git(["rm", "-q", "-f", "--", path]) }
+            } else if path.hasSuffix(".md"), let text = try? String(contentsOfFile: dir + "/" + path, encoding: .utf8), posOnlyClash(text) {
+                try? resolve(text, keep: .mine).write(toFile: dir + "/" + path, atomically: true, encoding: .utf8)
+            }
+        }
     }
 
     static func countConflicts(in dir: String) -> Int {
@@ -256,5 +306,5 @@ func probeNotesSync() -> [String] {
     let r = sync.git(["ls-remote", "nobody@203.0.113.1:Notes.git"])
     check("a remote that does not answer fails fast with words, never a prompt", r.code != 0 && !r.err.isEmpty)
     UserDefaults.standard.removeObject(forKey: NotesSync.remoteKey)
-    return lines
+    return lines + probeRuns()
 }
