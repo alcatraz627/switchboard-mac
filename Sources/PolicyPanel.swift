@@ -1946,7 +1946,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     func updateDot(problems: [Problem]) {
         lastProblems = problems.contains { $0.level == .error }
         problemList = problems
-        let levels = Problem.levels(problems)
+        let levels = Problem.tabMarks(problems)
         if store.problemLevels != levels { store.problemLevels = levels }
         renderDot(waiting: store.needsWaiting, items: store.hoverItems)
     }

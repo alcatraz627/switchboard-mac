@@ -189,6 +189,14 @@ func probeQuickCycle() -> String {
     check("hiding the last page turns to the one before it", QuickCard.hidePlan(pages: [.home, .limits], current: .limits)?.next == .home)
     check("the only page cannot be hidden", QuickCard.hidePlan(pages: [.home], current: .home) == nil)
 
+    // The dot beside a tab.
+    let standing = Problem.hooks(unwired: 8, missing: 1) + [Problem(text: "1 gate is off", tab: "rules", level: .warn)]
+    check("hook and gate warnings put no dot on their tab", Problem.tabMarks(standing).isEmpty)
+    check("a failing job does, in red, even beside warnings",
+          Problem.tabMarks(standing + [Problem(text: "nightly failed", tab: "runtime", level: .error)]) == ["runtime": .error])
+    check("an error on the same tab as a warning shows as the error",
+          Problem.tabMarks(standing + [Problem(text: "hook crashed", tab: "rules", level: .error)]) == ["rules": .error])
+
     // Number keys.
     let order: [QuickPage] = [.home, .limits, .approvals, .bulbs, .notes]
     check("2 opens the second page", QuickCycle.page(forKey: "2", in: order, typing: false) == .limits)
@@ -244,6 +252,14 @@ func probeQuickCycle() -> String {
     check("thirty chips are cut to what two rows hold", fit > 2 && fit < 12, "\(fit)")
     check("a few short chips all fit", ChipFlow.fitting(["a", "b", "c"], rows: 2) == 3)
     return lines.joined(separator: "\n")
+}
+
+extension Problem {
+    /// The dots beside tab and space names: errors only. A warning such as "8 hook scripts have no event"
+    /// is a standing condition that never clears by itself, so a dot for it is furniture; the Now page badge still names it.
+    static func tabMarks(_ ps: [Problem]) -> [String: ProblemLevel] {
+        levels(ps.filter { $0.level == .error })
+    }
 }
 
 /// What the card shows and which page it is on; the view follows it.
