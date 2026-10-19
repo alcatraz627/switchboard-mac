@@ -247,6 +247,23 @@ enum Catalog {
         return sentence
     }
 
+    /// The mute file a hook documents in its header ("Mute: touch ~/.claude/x"),
+    /// when that file is present now. A hook can be wired to an event and still
+    /// do nothing, and its row has to say so, not just name the event.
+    static func muteSentinel(_ path: String, root: String) -> String? {
+        guard let h = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? h.close() }
+        let head = String(decoding: h.readData(ofLength: 6144), as: UTF8.self)
+        guard let re = try? NSRegularExpression(pattern: #"touch\s+~/\.claude/([\w./-]+)"#) else { return nil }
+        for m in re.matches(in: head, range: NSRange(head.startIndex..., in: head)) {
+            guard let r = Range(m.range(at: 1), in: head) else { continue }
+            var name = String(head[r])
+            while let c = name.last, ".`'\")".contains(c) { name.removeLast() }  // sentence punctuation after the path
+            if FileManager.default.fileExists(atPath: root + "/" + name) { return name }
+        }
+        return nil
+    }
+
     /// The .md files directly in a folder, or a CatalogError saying the
     /// folder is missing.
     static func markdownFiles(in dir: String) throws -> [String] {
@@ -293,6 +310,13 @@ func probeCatalog() -> String {
     let banner = dir + "/banner.sh"
     fm.createFile(atPath: banner, contents: Data("#!/bin/bash\n# ==========\n# ARCHIVED, do not run.\n# ==========\n".utf8))
     check("a banner line is skipped", Catalog.scriptSummary(banner) == "ARCHIVED, do not run.", Catalog.scriptSummary(banner))
+
+    let gated = dir + "/gate.sh"
+    fm.createFile(atPath: gated, contents: Data("#!/bin/bash\n# gate.sh blocks a thing.\n# Mute: touch ~/.claude/.no-thing-gate.\n".utf8))
+    check("a hook whose mute file is absent is not muted", Catalog.muteSentinel(gated, root: dir) == nil)
+    fm.createFile(atPath: dir + "/.no-thing-gate", contents: Data())
+    check("a hook whose mute file is present names it",
+          Catalog.muteSentinel(gated, root: dir) == ".no-thing-gate", Catalog.muteSentinel(gated, root: dir) ?? "nil")
 
     let failed = Catalog.section("Broken") { throw CatalogError("the folder is gone") }
     check("a source that fails shows why, not an empty section", failed.status == .failed("the folder is gone") && failed.rows.isEmpty)

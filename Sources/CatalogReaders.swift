@@ -88,8 +88,10 @@ enum RulesCatalog {
             let w = wiring[path] ?? Wiring()
             let exists = FileManager.default.fileExists(atPath: path)
             let events = Array(Set(w.events)).sorted()
+            let sentinel = exists ? Catalog.muteSentinel(path, root: gcc) : nil
             let tag: String
             if !exists { tag = "missing file" }
+            else if let s = sentinel { tag = "muted by " + s }
             else if !events.isEmpty { tag = events.joined(separator: ", ") }
             else if !w.muted.isEmpty { tag = "muted in " + w.muted.joined(separator: ", ") }
             else if let first = w.usedBy.first { tag = "run by " + first + (w.usedBy.count > 1 ? " +\(w.usedBy.count - 1)" : "") }
@@ -100,6 +102,7 @@ enum RulesCatalog {
                                                            : "The file is gone, but a hook still names it."))
             details.append(("Runs on", events.isEmpty ? "no event" : events.joined(separator: ", ")))
             if !w.muted.isEmpty { details.append(("Muted", "commented out with # DISABLED in " + w.muted.joined(separator: ", "))) }
+            if let s = sentinel { details.append(("Muted", "switched off machine-wide while ~/.claude/\(s) exists; remove that file to re-arm it")) }
             if !w.usedBy.isEmpty { details.append(("Called by", w.usedBy.joined(separator: ", "))) }
             let broken = !exists || tag == "not wired"
             let name: String = path.hasPrefix(hookDir + "/") ? (path as NSString).lastPathComponent
