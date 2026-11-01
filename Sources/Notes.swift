@@ -818,7 +818,7 @@ final class NotesStore: ObservableObject {
         try fm.createDirectory(atPath: Self.trashDir, withIntermediateDirectories: true)
         var name = n.id + ".md"
         while fm.fileExists(atPath: Self.trashDir + "/" + name) { name = n.id + "-" + String(Int(Date().timeIntervalSince1970)) + String(Int.random(in: 0..<100)) + ".md" }
-        try fm.moveItem(atPath: n.path, toPath: Self.trashDir + "/" + name)
+        try NotesSync.shared.locked { try fm.moveItem(atPath: n.path, toPath: Self.trashDir + "/" + name) }
     }
 
     /// Reads `.trash`, newest deletion first; a folder that is not there is an empty list.
@@ -842,7 +842,7 @@ final class NotesStore: ObservableObject {
         let fm = FileManager.default
         var id = t.note.id
         while fm.fileExists(atPath: Self.dir + "/" + id + ".md") { id += "x" }
-        do { try fm.moveItem(atPath: Self.trashDir + "/" + t.file, toPath: Self.dir + "/" + id + ".md") } catch {
+        do { try NotesSync.shared.locked { try fm.moveItem(atPath: Self.trashDir + "/" + t.file, toPath: Self.dir + "/" + id + ".md") } } catch {
             self.error = "\(t.note.heading) could not be brought back: \(error.localizedDescription)"; return nil
         }
         load()
@@ -869,7 +869,8 @@ final class NotesStore: ObservableObject {
     private func write(_ n: Note) -> Bool {
         if let gone = Self.missingFolder { error = gone; return false }
         do {
-            try Self.render(n).write(toFile: n.path, atomically: true, encoding: .utf8)
+            let text = Self.render(n)
+            try NotesSync.shared.locked { try text.write(toFile: n.path, atomically: true, encoding: .utf8) }
             error = nil
             NotesSync.shared.commit("save")
             return true
@@ -889,6 +890,8 @@ final class NotesStore: ObservableObject {
             (try? JSONSerialization.data(withJSONObject: [s], options: [.withoutEscapingSlashes]))
                 .flatMap { String(data: $0, encoding: .utf8) }.map { String($0.dropFirst().dropLast()) } ?? "\"\""
         }
+        // a note holding a clash is the whole file as read; writing a header above it would bury the markers
+        if NotesSync.conflicted(n.body) { return n.body + "\n" }
         var lines = ["---", "title: " + q(n.title)]
         // a hand-written note with no created line stays without one (the Pi leaves it absent too)
         if n.created != Date.distantPast { lines.append("created: " + iso.string(from: n.created)) }
@@ -920,6 +923,11 @@ final class NotesStore: ObservableObject {
         let known: Set<String> = ["title", "created", "tags", "expires", "remind_at", "remind_repeat", "remind_on", "reminder_id",
                                   "pinned", "color", "agent", "source", "url", "pos"]
         var body = text
+        // a file holding a clash is not parsed for a header: the whole file is its body and its name is its title,
+        // which covers a clash inside the header and one that straddles the closing fence
+        if NotesSync.conflicted(text) {
+            return Note(id: id, title: id, body: text.trimmingCharacters(in: .whitespacesAndNewlines), tags: [], created: Date.distantPast)
+        }
         // from offset 3, so an empty block ("---" then "---") closes too
         if text.hasPrefix("---\n"), let end = text.range(of: "\n---\n", range: text.index(text.startIndex, offsetBy: 3)..<text.endIndex) {
             let start = text.index(text.startIndex, offsetBy: 4)

@@ -120,9 +120,11 @@ final class Runs: ObservableObject {
     /// Atomic, so a reader sees the old file or the new one, never half of it.
     private func writeJSON(_ p: String, _ o: [String: Any]) {
         guard writes, folderReady else { return }
-        try? FileManager.default.createDirectory(atPath: (p as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         guard let d = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]) else { return }
-        try? d.write(to: URL(fileURLWithPath: p), options: .atomic)
+        NotesSync.shared.locked {
+            try? FileManager.default.createDirectory(atPath: (p as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try? d.write(to: URL(fileURLWithPath: p), options: .atomic)
+        }
     }
 
     private func names(_ sub: String) -> [String] {
@@ -302,8 +304,10 @@ final class Runs: ObservableObject {
     func requestStop(_ id: String) {
         guard writes, folderReady, let r = records.first(where: { $0.id == id }), !r.finished, !r.stopRequested else { return }
         // an empty file, as the Pi writes it
-        try? FileManager.default.createDirectory(atPath: Self.root + "/runs", withIntermediateDirectories: true)
-        try? Data().write(to: URL(fileURLWithPath: path("runs", id + ".stop")), options: .atomic)
+        NotesSync.shared.locked {
+            try? FileManager.default.createDirectory(atPath: Self.root + "/runs", withIntermediateDirectories: true)
+            try? Data().write(to: URL(fileURLWithPath: path("runs", id + ".stop")), options: .atomic)
+        }
         NotesSync.shared.commit("run: stop requested")
         NotesSync.shared.syncSoon()
         publish()
@@ -325,7 +329,7 @@ final class Runs: ObservableObject {
         guard writes, folderReady else { return }
         let p = path("templates", id + ".json")
         guard FileManager.default.fileExists(atPath: p) else { return }
-        try? FileManager.default.removeItem(atPath: p)
+        NotesSync.shared.locked { try? FileManager.default.removeItem(atPath: p) }
         NotesSync.shared.commit("template: remove")
         publish()
     }
@@ -376,7 +380,7 @@ final class Runs: ObservableObject {
             guard let r = records.first(where: { $0.id == rid }) else {
                 // a state or stop file whose request is not here; leave a fresh one, its request may be syncing
                 let age = ((try? fm.attributesOfItem(atPath: p))?[.modificationDate] as? Date).map { Date().timeIntervalSince($0) } ?? 0
-                if f != rid + ".json", age > 600 { try? fm.removeItem(atPath: p); removed += 1 }
+                if f != rid + ".json", age > 600 { NotesSync.shared.locked { try? fm.removeItem(atPath: p) }; removed += 1 }
                 continue
             }
             guard f == rid + ".json" else { continue }
@@ -384,7 +388,7 @@ final class Runs: ObservableObject {
             let unanswered = r.status == nil && r.from == Self.me && now - r.createdAt > Self.unansweredKeepMs
             guard doneLongAgo || unanswered else { continue }
             for suffix in [".json", ".state.json", ".stop"] where fm.fileExists(atPath: path("runs", rid + suffix)) {
-                try? fm.removeItem(atPath: path("runs", rid + suffix)); removed += 1
+                NotesSync.shared.locked { try? fm.removeItem(atPath: path("runs", rid + suffix)) }; removed += 1
             }
         }
         if removed > 0 { NotesSync.shared.commit("runs: cleanup"); publish() }
