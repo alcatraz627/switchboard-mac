@@ -28,7 +28,7 @@ the header, and Approvals appears only while something waits on you.
 
 - Claude: Agents (what your agents may do as you), Usage, Claude MCP, Hooks and Library.
 - Records: the Ledger of recurring mistakes, proposals and checkpoints, and the Queue of what is lined up to happen later.
-- Desk: Notes (one markdown file each, with reminders) and Timers.
+- Desk: Notes (one markdown file each; reminders that ring until dismissed; an inbox for what arrives from the phone or an agent), Saved (links, files and folders) and Timers. ⌥⇧N opens a new note from any app and ⌥⇧L the note you edited last; Esc goes back.
 - Mac: Machine (Keep Awake, drives, repos), Runtime (services, dev servers, databases, local models, schedules) and Controls (sound, screen, Wi-Fi, Bluetooth).
 - Around: Home (WiZ bulbs) and Remote (your other machines, through csync).
 

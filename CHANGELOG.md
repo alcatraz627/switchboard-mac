@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Notes follow the shared spec.** Reading and writing go through one reader that passes every fixture in the mnt-sync notes spec, including `remind_persist` and `device`, titles taken from a first line, and tags written as a list.
+- **Capture from anywhere.** ⌥⇧N opens a new note with the cursor in it, ⌥⇧L the note you edited last, and Esc returns you to the app you came from. Both can be switched off in Settings, Desk.
+- **An inbox.** A note or save that arrives from the phone or another device shows in an inbox above the Notes list with a macOS notification. Keep, Done and Later take it out. A note an agent wrote waits in its own lane. Nothing here wakes an agent.
+- **A Saved tab.** Links, files and folders from `.saved/`, with add, tag, open, copy and remove. Older notes that carry a link or the `pin` tag move there once, in one commit.
+- **Reminders ring.** A reminder for this Mac plays a sound with a Dismiss button until you dismiss it, even with the panel closed. `remind_persist` keeps it ringing; one you missed stays marked as missed. Dismissing clears a one-off or moves a repeating reminder on, and that edit syncs.
+- New note ids use the spec's form, `YYYYMMDD-HHMMSS-xxxx`, and hidden files are never read as notes.
+
 ## 0.4.0 (2026-10-02)
 
 - **A hover card you can move around**: rest the pointer on the menu-bar icon

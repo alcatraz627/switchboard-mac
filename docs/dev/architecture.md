@@ -58,7 +58,9 @@ each of these reads.
 | The app | `~/Applications/Switchboard.app` after `scripts/build.sh --install` |
 | Python helpers | inside the bundle, `Contents/Resources/lib` |
 | Saved devices, bulb names | `~/Library/Application Support/Switchboard/` |
-| Notes | `~/Library/Application Support/Switchboard/notes/`, one `.md` each, or the folder chosen in Settings |
+| Notes | `~/Notes`, one `.md` each, or the folder chosen in Settings. The format is the mnt-sync spec, `specs/notes.md` |
+| Saved | `.saved/` inside the notes folder, one file per link, named by the hash of the link |
+| Inbox | `notes-inbox.json` in the state folder: what a merge brought in, this Mac's seen state only |
 | Preferences (thresholds, last tab, timers, hidden tabs) | macOS defaults, `io.github.alcatraz627.switchboard` |
 | Log | `~/Library/Logs/Switchboard/switchboard.log` (1 MB, one backup) |
 | Start at login | `~/Library/LaunchAgents/io.github.alcatraz627.switchboard.plist` |
