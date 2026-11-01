@@ -153,7 +153,7 @@ struct SettingsTabView: View {
                       rows: hover.map(hoverRow))
             }
             if (folder || timerSettings || dotSettings) && on("desk") {
-                group("Notes", note: "One markdown file per note, every save kept; GitHub carries the folder to the phone.", rows: [notesFolderRow, notesRemoteRow])
+                group("Notes", note: "One markdown file per note, every save kept; GitHub carries the folder to the phone.", rows: [notesFolderRow, notesRemoteRow, notesCaptureRow])
                 NoteDotsEditor()
                 VStack(alignment: .leading, spacing: 5) {
                     GroupHeader(name: "Timers")
@@ -187,6 +187,7 @@ struct SettingsTabView: View {
     /// The keys, one per line, grouped; replaces a paragraph nobody could read.
     static let keyGroups: [(title: String, keys: [(String, String)])] = [
         ("Anywhere", [("⌥Space  ⌘⌘", "Open; again for letters; again to close"),
+                      ("⌥⇧N", "A new note, cursor in it; Esc goes back"), ("⌥⇧L", "The note you edited last"),
                       ("⇧⌘P", "Find any action or place"), ("⌘J", "Go to a tab, note or timer")]),
         ("Panel", [("⌘1 – ⌘5", "Pick a space"), ("⌘⌥←  ⌘⌥→", "Tab before or after"),
                    ("⌃Tab", "Next tab anywhere"), ("Tab", "Spaces, tabs, search, rows"),
@@ -497,6 +498,23 @@ struct SettingsTabView: View {
                                        help: "Pull other devices' edits and push yours now", icon: "arrow.clockwise"))
         }
         for i in r.buttons.indices { r.buttons[i].words = true }
+        return r
+    }
+
+    @State private var captureOn = HotKeys.captureOn
+
+    /// The two capture chords, on or off.
+    private var notesCaptureRow: SystemRow {
+        var r = SystemRow(label: "⌥⇧N new note, ⌥⇧L last note", state: captureOn ? .on(menuGreen) : .off,
+                          note: captureOn ? "on: from any app, Esc goes back" : "off",
+                          tip: "⌥⇧N opens a new note with the cursor in it, ⌥⇧L opens the note you edited last, from any app. Esc returns you to the app you were in.",
+                          action: {
+                              AppDefaults.store.set(!captureOn, forKey: HotKeys.captureKey)
+                              captureOn = HotKeys.captureOn
+                              HotKeys.shared.reloadChords()
+                          })
+        r.icon = "square.and.pencil"
+        r.key = "settings-notes-capture"
         return r
     }
 

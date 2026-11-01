@@ -1653,7 +1653,10 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             return out
         }
         HotKeys.shared.onDoubleCommand = { [weak self] in self?.frontDoor(tab: nil) }
-        HotKeys.shared.onChord = { [weak self] tab in self?.frontDoor(tab: tab == "leader" ? nil : tab) }
+        HotKeys.shared.onChord = { [weak self] tab in
+            if tab.hasPrefix("capture:") { self?.capture(last: tab == "capture:last") }
+            else { self?.frontDoor(tab: tab == "leader" ? nil : tab) }
+        }
         HotKeys.shared.start()
 
         // Desk panels draw from the same stores as the hover card and the panel.
@@ -1726,6 +1729,35 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         if let tab { switchTab(tab); return }
         if PanelKeys.shared.jumping { PanelKeys.shared.jumping = false; popover.performClose(nil) }
         else { PanelKeys.shared.jumping = true }
+    }
+
+    /// Set while the panel was opened by a capture chord: Escape then goes straight back to the app the owner was in.
+    private var capturing = false
+
+    /// The capture chords: the Notes tab with the cursor in a new note, or in the note edited last.
+    /// Escape returns to the app the owner came from, in one press.
+    func capture(last: Bool) {
+        let nav = NotesNav.forSpace(ScrollTargets.space)
+        if !popover.isShown {
+            cameFrom = NSWorkspace.shared.frontmostApplication
+            NSApp.activate(ignoringOtherApps: true)
+            show(tab: "notes")
+        } else {
+            switchTab("notes")
+        }
+        capturing = true
+        nav.picker = nil
+        let target = Self.captureTarget(last: last, notes: NotesStore.shared.notes)
+        if case .open(let id, _, _) = target, let n = NotesStore.shared.notes.first(where: { $0.id == id }) { nav.caret = n.body.count }
+        else { nav.composeField = .title }
+        nav.focus = target
+    }
+
+    /// Where a capture chord puts the keyboard: the new-note box, or the body of the note edited last
+    /// (the new-note box again when there are no notes).
+    static func captureTarget(last: Bool, notes: [Note]) -> NoteFocus {
+        guard last, let n = notes.max(by: { ($0.modified ?? .distantPast) < ($1.modified ?? .distantPast) }) else { return .compose }
+        return .open(n.id, .body, typing: true)
     }
 
     private var currentTab: String { AppDefaults.store.string(forKey: PolicyPanel.tabKey) ?? "agents" }
@@ -1846,6 +1878,15 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
 
     private func handleKey(_ e: NSEvent) -> Bool {
         let reg = ActionRegistry.shared
+        // opened by a capture chord, one Escape saves nothing away and goes back, even from inside the note
+        if capturing, Int(e.keyCode) == kVK_Escape, e.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty,
+           NotesNav.forSpace(ScrollTargets.space).picker == nil {
+            capturing = false
+            popover.performClose(nil)
+            if let app = cameFrom, app.processIdentifier != ProcessInfo.processInfo.processIdentifier { app.activate() }
+            cameFrom = nil
+            return true
+        }
         if reg.handle(e) { return true }
         if zoneKey(e) { return true }
         let o = tabOrder
@@ -1975,6 +2016,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
         ticker?.invalidate()
         ticker = nil
+        capturing = false
     }
 }
 

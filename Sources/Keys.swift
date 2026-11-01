@@ -700,7 +700,15 @@ final class HotKeys {
     /// "4 keys my fingers can't reach normally"). Nothing else on this Mac binds it.
     static let chords: [(key: Int, mods: UInt32, tab: String, label: String)] = [
         (kVK_Space, UInt32(optionKey), "leader", "⌥Space"),
+        // Capture: a new note with the cursor in it, and the last note. Shift marks "a note", and neither
+        // letter is used by another chord; ⌥⇧ keeps them off the keys ⌥ types accents with.
+        (kVK_ANSI_N, UInt32(optionKey | shiftKey), "capture:new", "⌥⇧N"),
+        (kVK_ANSI_L, UInt32(optionKey | shiftKey), "capture:last", "⌥⇧L"),
     ]
+
+    /// Whether the two capture chords are on (Settings > Notes); on unless switched off.
+    static let captureKey = "switchboard.notes.captureKeys"
+    static var captureOn: Bool { AppDefaults.store.object(forKey: captureKey) as? Bool ?? true }
 
     private var refs: [EventHotKeyRef?] = []
     private var monitors: [Any] = []
@@ -708,8 +716,16 @@ final class HotKeys {
     private let hold = CommandHold()
 
     func start() {
+        installHandler()
         registerChords()
         watchCommand()
+    }
+
+    /// Takes the capture chords up or lets them go, after Settings switches them.
+    func reloadChords() {
+        for r in refs { if let r { UnregisterEventHotKey(r) } }
+        refs = []
+        registerChords()
     }
 
     /// Whether ⌘⌘ can be heard while another app is in front.
@@ -720,7 +736,7 @@ final class HotKeys {
         _ = AXIsProcessTrustedWithOptions([opt: true] as CFDictionary)
     }
 
-    private func registerChords() {
+    private func installHandler() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
             var id = EventHotKeyID()
@@ -733,7 +749,11 @@ final class HotKeys {
             }
             return noErr
         }, 1, &spec, nil, nil)
+    }
+
+    private func registerChords() {
         for (i, c) in Self.chords.enumerated() {
+            if c.tab.hasPrefix("capture:"), !Self.captureOn { continue }
             var ref: EventHotKeyRef?
             let id = EventHotKeyID(signature: OSType(0x53574244), id: UInt32(i))   // "SWBD"
             let r = RegisterEventHotKey(UInt32(c.key), c.mods, id, GetApplicationEventTarget(), 0, &ref)
