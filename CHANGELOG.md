@@ -10,6 +10,9 @@
 - **A better editor.** Option-Up and Option-Down move the lines you have selected, and Option-Shift with them copies the lines, as in VS Code. Reading a note draws tables, and a link into `attachments/` opens the file whatever it is called. Settings, Desk has a tag colours page: pick a colour for each tag, saved in the notes folder so the phone shows it too, and rename a tag everywhere.
 - **Recently deleted reads git.** A note deleted on another device is listed too. Deleting a note removes an attachment only when no other note or save links to it, and restoring brings it back.
 - **Now shows what waits on you from Notes**: reminders that rang with nobody there, the inbox, and notes from agents. Reminders.app gets no copy of a reminder while Switchboard is running and ringing it itself, so it no longer notifies twice.
+- **Comments on notes**, shared with bfb: a Comment chip on an open note opens its threads, with reply, Done and a new comment on words from the note. They are kept beside the note by `bfb-docs`, as the owner. A closed row shows how many threads are open.
+- Tags on a note row are small chips in their colour from the tag colours page, and in the inbox the keyboard works: I steps in, K keeps, D puts away, L brings it back tomorrow morning, Return opens.
+- A reminder now rings the first time the app can however late it is, a repeating one rings at each of its times, and Reminders.app keeps a fallback item with its alarm two minutes after the due time that goes when you dismiss.
 - New note ids use the spec's form, `YYYYMMDD-HHMMSS-xxxx`, and hidden files are never read as notes.
 
 ## 0.4.0 (2026-10-02)
