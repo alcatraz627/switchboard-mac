@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- A sync with nothing new to save no longer reports a failure when the notes clone holds another tool's untracked file.
 - **Notes follow the shared spec.** Reading and writing go through one reader that passes every fixture in the mnt-sync notes spec, including `remind_persist` and `device`, titles taken from a first line, and tags written as a list.
 - **Capture from anywhere.** ⌥⇧N opens a new note with the cursor in it, ⌥⇧L the note you edited last, and Esc returns you to the app you came from. Both can be switched off in Settings, Desk.
 - **An inbox.** A note or save that arrives from the phone or another device shows in an inbox above the Notes list with a macOS notification. Keep, Done and Later take it out. A note an agent wrote waits in its own lane. Nothing here wakes an agent.

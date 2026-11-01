@@ -201,13 +201,11 @@ final class NotesSync: ObservableObject {
         let failure: String? = withLock(busy: Self.busyText) {
             let add = git(["add", "-A", "--", "."])
             if add.code != 0 { return "could not stage the notes: \(add.err.isEmpty ? add.out : add.err)" }
+            // Having nothing new to save is not a problem. Asking git directly avoids reading its message, whose
+            // wording changes when the clone holds an untracked file outside the notes folder.
+            if git(["diff", "--cached", "--quiet", "--", "."]).code == 0 { return nil }
             let r = git(["commit", "-q", "-m", reason, "--", "."])
-            // nothing to commit is not a problem
-            if r.code != 0, !r.err.contains("nothing to commit"), !r.out.contains("nothing to commit"),
-               !r.out.contains("no changes added") {
-                return "commit failed: \(r.err.isEmpty ? r.out : r.err)"
-            }
-            return nil
+            return r.code == 0 ? nil : "commit failed: \(r.err.isEmpty ? r.out : r.err)"
         }
         if let f = failure { setProblem(f) }
         readEditTimes()

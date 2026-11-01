@@ -104,6 +104,12 @@ private func probeGitHubSync() -> [String] {
     check("another folder's staged change stays staged and uncommitted", g(mac, "diff", "--cached", "--name-only").out.contains("other/staged.txt"))
     g(mac, "reset", "-q", "other/staged.txt"); try? fm.removeItem(atPath: mac + "/other/staged.txt"); g(mac, "checkout", "-q", "--", "other/keep.txt")
 
+    // Git words "nothing to save" differently when the clone holds an untracked file, which once read as a failure.
+    put(mac, "stray.txt", "another tool's file\n")
+    let idle = sync.commitNow("save")
+    check("a save with no changes is fine beside another tool's untracked file", idle == nil, idle ?? "")
+    try? fm.removeItem(atPath: mac + "/stray.txt")
+
     // 3. ids are relative to the notes folder, versions read in the subfolder
     check("edit times are keyed by plain note ids", sync.editTime("n1") != nil && sync.editTime("seed") != nil && !sync.editTimes.keys.contains { $0.contains("/") },
           sync.editTimes.keys.sorted().joined(separator: ","))
