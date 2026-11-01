@@ -488,6 +488,7 @@ struct NoteRow: View {
     @State private var refused = false
     @State private var focus: NoteSheet.Field?
     @FocusState private var tagsFocused: Bool
+    @ObservedObject private var ringer = ReminderRinger.shared
     /// The note's saved versions, read when it opens and again when the list is asked for.
     @State private var versions: [NoteVersion] = []
     /// Snapshots open the first note's editor so its look can be checked.
@@ -838,7 +839,7 @@ struct NoteRow: View {
         if firstLink == nil, let first = bodyLines.dropFirst(note.title.isEmpty ? 1 : 0).first { parts.append(first) }
         if !note.tags.isEmpty { parts.append(note.tags.map { "#" + $0 }.joined(separator: " ")) }
         if let r = note.remindAt {
-            parts.append("reminds " + f.string(from: r) + (note.remindRepeat == .never ? "" : ", " + note.remindRepeat.rawValue) + (note.remindOn == "phone" ? ", on the phone" : ""))
+            parts.append((r <= Date() && note.remindOn != "phone" ? (ringer.ringing.contains(note.id) ? "ringing since " : "missed ") : "reminds ") + f.string(from: r) + (note.remindRepeat == .never ? "" : ", " + note.remindRepeat.rawValue) + (note.remindOn == "phone" ? ", on the phone" : ""))
         }
         if let e = note.expires { parts.append((note.expired ? "expired " : "expires ") + f.string(from: e)) }
         return parts.joined(separator: " · ")
@@ -1179,7 +1180,18 @@ struct NoteRow: View {
         .keyRing(ringed(.reminder), radius: 11)
         if d.wrappedValue.remindAt != nil {
             remindOnMenu(d)
-            clearButton("Remove the reminder") { d.wrappedValue.remindAt = nil; d.wrappedValue.remindOn = nil; expireWithReminder = false }
+            if let at = d.wrappedValue.remindAt, at <= Date(), d.wrappedValue.remindOn != "phone" {
+                // due and not dismissed: it rings now, or it was missed and stays here until dismissed
+                Button {
+                    ReminderRinger.shared.dismiss(note.id)
+                    if let fresh = notes.notes.first(where: { $0.id == note.id }) {
+                        d.wrappedValue.remindAt = fresh.remindAt; d.wrappedValue.remindRepeat = fresh.remindRepeat
+                        d.wrappedValue.remindOn = fresh.remindOn; d.wrappedValue.remindPersist = fresh.remindPersist
+                    }
+                } label: { chip(icon: "bell.slash", ringer.ringing.contains(note.id) ? "Dismiss" : "Missed: dismiss", set: true) }
+                .buttonStyle(.plain).help("Dismiss the reminder. A repeating one moves to its next time; the change syncs, so it clears on the other device too.")
+            }
+            clearButton("Remove the reminder") { d.wrappedValue.remindAt = nil; d.wrappedValue.remindOn = nil; d.wrappedValue.remindPersist = false; expireWithReminder = false }
         }
     }
 
@@ -1189,11 +1201,15 @@ struct NoteRow: View {
         return Menu {
             Button { d.wrappedValue.remindOn = nil } label: { Label("Remind on this Mac", systemImage: phone ? "desktopcomputer" : "checkmark") }
             Button { d.wrappedValue.remindOn = "phone" } label: { Label("Remind on the phone", systemImage: phone ? "checkmark" : "iphone") }
+            Divider()
+            Button { d.wrappedValue.remindPersist.toggle() } label: {
+                Label("Keep ringing until dismissed", systemImage: d.wrappedValue.remindPersist ? "checkmark" : "bell.badge")
+            }
         } label: {
-            chip(icon: phone ? "iphone" : "desktopcomputer", phone ? "Phone" : "Mac", set: true)
+            chip(icon: phone ? "iphone" : "desktopcomputer", (phone ? "Phone" : "Mac") + (d.wrappedValue.remindPersist ? ", until dismissed" : ""), set: true)
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-        .help(phone ? "The phone rings this reminder; macOS Reminders gets no copy" : "macOS Reminders rings this one; choose the phone to ring it there instead")
+        .help(phone ? "The phone rings this reminder; macOS Reminders gets no copy" : "This Mac rings it, with a sound until you dismiss it; choose the phone to ring it there instead")
     }
 
     private var saveState: some View {

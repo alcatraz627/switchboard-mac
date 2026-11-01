@@ -171,9 +171,9 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
         let stop = UNNotificationAction(identifier: "stop", title: "Stop", options: [], icon: UNNotificationActionIcon(systemImageName: "bell.slash"))
         let one = UNNotificationAction(identifier: "plus1", title: "+1 min", options: [], icon: UNNotificationActionIcon(systemImageName: "plus"))
         let five = UNNotificationAction(identifier: "plus5", title: "+5 min", options: [], icon: UNNotificationActionIcon(systemImageName: "plus"))
-        UNUserNotificationCenter.current().setNotificationCategories([
+        UNUserNotificationCenter.current().setNotificationCategories(ReminderRinger.registerCategory(into: [
             UNNotificationCategory(identifier: Self.category, actions: [stop, one, five], intentIdentifiers: [], options: [.customDismissAction]),
-        ])
+        ]))
     }
 
     /// Any answer to the notification stops the ring; the +1 and +5 buttons also restart the timer.
@@ -181,6 +181,12 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
                                 withCompletionHandler done: @escaping () -> Void) {
         let id = response.notification.request.identifier
         let action = response.actionIdentifier
+        // a reminder's notification: any answer dismisses it, which edits the note
+        if response.notification.request.content.categoryIdentifier == ReminderRinger.category,
+           let note = response.notification.request.content.userInfo["note"] as? String {
+            DispatchQueue.main.async { ReminderRinger.shared.dismiss(note); done() }
+            return
+        }
         DispatchQueue.main.async {
             self.silence()
             if let t = self.timers.first(where: { $0.id == id }) {

@@ -1609,6 +1609,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         NotesSync.shared.commit("start")   // whatever arrived while the app was closed becomes a version too
         NotesSync.shared.start()
         NotesSync.shared.sync()
+        ReminderRinger.shared.start()   // a reminder rings with every panel closed
         // The palette and the hint strip read this; the probe and the docs read the same table.
         let reg = ActionRegistry.shared
         reg.currentTab = { [weak self] in self?.currentTab ?? "agents" }
