@@ -188,10 +188,10 @@ final class NotesSync: ObservableObject {
             w.cancel()
             commitWork = nil
             pendingReason = nil
-            queue.sync { commitNow(r) }
+            queue.sync { _ = commitNow(r) }
         }
         locked { write() }
-        queue.sync { commitNow(reason) }
+        queue.sync { _ = commitNow(reason) }
     }
 
     /// Stages and commits only the notes folder, never anything else in the clone. Returns why it failed, or nil.
@@ -417,6 +417,17 @@ final class NotesSync: ObservableObject {
             NotificationCenter.default.post(name: Self.changed, object: nil)
         }
         return state
+    }
+
+    /// For a picture of the failure line (`--snapshot --demo-sync-failure`, scratch state folder only): a real
+    /// round against an origin that refuses connections, so the words come from the same code the app runs.
+    func demoFailure() {
+        guard ProcessInfo.processInfo.environment["SWITCHBOARD_STATE"] != nil, ensureRepo() else { return }
+        _ = git(["remote", "add", Self.remoteName, "https://127.0.0.1:9/demo/notes.git"])
+        try? "---\ntitle: \"Saved while offline\"\n---\nthis one is waiting to go up\n".write(toFile: dir + "/offline-demo.md", atomically: true, encoding: .utf8)
+        let state = syncNow(force: true)
+        problem = state.problem
+        ahead = state.ahead
     }
 
     // ── Plain words for what git said ───────────────────────────────────────
