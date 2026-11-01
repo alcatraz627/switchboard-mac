@@ -1760,7 +1760,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         capturing = true
         nav.picker = nil
         let target = Self.captureTarget(last: last, notes: NotesStore.shared.notes)
-        if case .open(let id, _, _) = target, let n = NotesStore.shared.notes.first(where: { $0.id == id }) { nav.caret = n.body.count }
+        if case .open(let id, _, _) = target, let n = NotesStore.shared.notes.first(where: { $0.id == id }) { nav.caret = n.body.utf16.count }
         else { nav.composeField = .title }
         nav.focus = target
     }

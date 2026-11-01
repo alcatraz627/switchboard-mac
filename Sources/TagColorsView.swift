@@ -5,6 +5,56 @@
 
 import SwiftUI
 
+/// A row of tags as small chips, each with its colour from `.meta/tags.json` as a dot; one line, cut at the edge.
+/// Lays its children out left to right on one line and leaves out the ones that do not fit, so a long list of tags never
+/// widens the row it sits in.
+struct OneLine: Layout {
+    var spacing: CGFloat = 4
+
+    private func fitted(_ proposal: ProposedViewSize, _ subviews: Subviews) -> (width: CGFloat, height: CGFloat, count: Int) {
+        let limit = proposal.width ?? .infinity
+        var x: CGFloat = 0, h: CGFloat = 0, n = 0
+        for s in subviews {
+            let sz = s.sizeThatFits(.unspecified)
+            let next = x + (n > 0 ? spacing : 0) + sz.width
+            if next > limit { break }
+            x = next; h = max(h, sz.height); n += 1
+        }
+        return (x, h, n)
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let f = fitted(proposal, subviews)
+        return CGSize(width: f.width, height: f.height)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let f = fitted(proposal, subviews)
+        var x = bounds.minX
+        for (i, s) in subviews.enumerated() {
+            let sz = s.sizeThatFits(.unspecified)
+            if i < f.count { s.place(at: CGPoint(x: x, y: bounds.minY), proposal: .unspecified); x += sz.width + spacing }
+            else { s.place(at: CGPoint(x: bounds.minX - 10_000, y: bounds.minY), proposal: .unspecified) }
+        }
+    }
+}
+
+struct TagChips: View {
+    let tags: [String]
+    var body: some View {
+        OneLine(spacing: 4) {
+            ForEach(tags, id: \.self) { t in
+                HStack(spacing: 3) {
+                    if let c = TagColors.forTag(t) { Circle().fill(c).frame(width: 6, height: 6) }
+                    Text("#" + t).font(.sb(10)).lineLimit(1).fixedSize()
+                }
+                .padding(.horizontal, 6).padding(.vertical, 1).background(Capsule().fill(Color.primary.opacity(0.07)))
+                .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading).clipped()
+        .help(tags.map { "#" + $0 }.joined(separator: " "))
+    }
+}
+
 enum TagRename {
     /// Renames `old` to `new` on every note and save, and carries its colour over. Returns how many files changed.
     @discardableResult
@@ -12,13 +62,15 @@ enum TagRename {
         let new = rawNew.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "")
         guard !new.isEmpty, new != old else { return 0 }
         var changed = 0
+        func swapped(_ tags: [String]) -> [String] { tags.map { $0 == old ? new : $0 }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } } }
+        // saves are read from the folder first, whether or not the Saved tab was ever opened this run, and each file is
+        // changed as it is on disk now, only in its tags
+        saved.load()
         for n in notes.notes where n.tags.contains(old) {
-            var u = n
-            u.tags = n.tags.map { $0 == old ? new : $0 }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
-            notes.update(u); changed += 1
+            if notes.patch(n.id, reason: "tag renamed", { $0.tags = swapped($0.tags) }) { changed += 1 }
         }
         for s in saved.items where s.tags.contains(old) {
-            saved.setTags(s.id, s.tags.map { $0 == old ? new : $0 }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }); changed += 1
+            if saved.patch(s.id, { $0.tags = swapped($0.tags) }) { changed += 1 }
         }
         if let c = TagColors.read()[old] { TagColors.set(new, to: TagColors.read()[new] ?? c); TagColors.set(old, to: nil) }
         return changed

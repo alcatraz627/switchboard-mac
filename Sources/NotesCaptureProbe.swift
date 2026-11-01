@@ -20,5 +20,21 @@ func probeCapture() -> [String] {
     check("the last-note chord with no notes also goes to the new-note box", PolicyStatusController.captureTarget(last: true, notes: []) == .compose)
     let t = PolicyStatusController.captureTarget(last: true, notes: [older, newer])
     check("the last-note chord opens a note for typing in its body", { if case .open(_, .body, true) = t { return true } else { return false } }(), "\(t)")
+    check("Settings says so when another app holds a capture chord", HotKeys.captureNote(on: true, failed: ["⌥⇧N"]).contains("another app holds ⌥⇧N")
+          && HotKeys.captureNote(on: true, failed: []) == "on: from any app, Esc goes back" && HotKeys.captureNote(on: false, failed: ["⌥⇧N"]) == "off"
+          && !HotKeys.captureNote(on: true, failed: ["⌥Space"]).contains("not working"))
+    // the inbox by keyboard
+    let c = NotesKeys.Context(ids: ["n1", "n2"], inbox: ["i1", "i2", "i3"])
+    func step(_ f: NoteFocus, _ k: Key) -> (NoteFocus, [NoteEffect], Bool) { NotesKeys.reduce(f, k, c) }
+    check("I steps from a note into the first inbox item", step(.row("n1"), .char("i")).0 == .inbox("i1"))
+    check("I does nothing when the inbox is empty", NotesKeys.reduce(.row("n1"), .char("i"), NotesKeys.Context(ids: ["n1"])).0 == .row("n1"))
+    check("↓ and ↑ walk the inbox, ↑ from the first leaves it, ↓ from the last goes to the list",
+          step(.inbox("i1"), .down).0 == .inbox("i2") && step(.inbox("i2"), .up).0 == .inbox("i1") && step(.inbox("i1"), .up).0 == .none
+          && step(.inbox("i3"), .down).0 == .row("n1"))
+    check("K keeps, D puts away, L sets it for later, Return opens",
+          step(.inbox("i2"), .char("k")).1 == [.inboxKeep("i2")] && step(.inbox("i2"), .char("d")).1 == [.inboxDone("i2")]
+          && step(.inbox("i2"), .char("l")).1 == [.inboxLater("i2")] && step(.inbox("i2"), .enter).1 == [.inboxOpen("i2")])
+    check("Esc leaves the inbox", step(.inbox("i2"), .escape).0 == .none)
+    check("typing in a field never steps into the inbox", NotesKeys.reduce(.compose, .char("i"), NotesKeys.Context(ids: ["n1"], typing: true, inbox: ["i1"])).0 == .compose)
     return lines
 }

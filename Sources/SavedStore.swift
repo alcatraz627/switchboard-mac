@@ -48,7 +48,10 @@ final class SavedStore: ObservableObject {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !url.isEmpty || !t.isEmpty else { return nil }
         let id = url.isEmpty ? NotesStore.shared.newSaveID() : NoteSpec.saveKey(url)
+        // the folder is read first when this store has not read it yet, so a link already saved is never written over
+        if !loaded { load() }
         if let same = items.first(where: { $0.id == id }) { say("Already saved"); return same }
+        if let text = try? String(contentsOfFile: path(id), encoding: .utf8), let on = NotesStore.parse(id: id, text) { say("Already saved"); return on }
         var n = Note(id: id, title: t.isEmpty ? Self.guessTitle(url) : t, body: "", tags: tags, created: NotesStore.now())
         n.url = url.isEmpty ? nil : url
         if url.lowercased().hasPrefix("file://") { n.device = "mac" }
@@ -65,28 +68,41 @@ final class SavedStore: ObservableObject {
         return (u.host ?? url) + path
     }
 
+    /// Changes a few keys of a save's file as it is on disk now, under the lock; the in-memory copy then follows the file.
+    @discardableResult
+    func patch(_ id: String, _ change: (inout NoteSpec.Record) -> Void) -> Bool {
+        guard let text = NotesStore.patchFile(at: path(id), name: id, change), let n = NotesStore.parse(id: id, text) else { return false }
+        if let i = items.firstIndex(where: { $0.id == id }) { items[i] = n } else { items.insert(n, at: 0) }
+        NotesSync.shared.commit("save")
+        return true
+    }
+
+    /// Tags the save carries, from the file as it is now. `change` gets the tags on disk and returns the new ones.
     func setTags(_ id: String, _ tags: [String]) {
-        guard var n = items.first(where: { $0.id == id }) else { return }
-        n.tags = tags.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        guard write(n), let i = items.firstIndex(where: { $0.id == id }) else { return }
-        items[i] = n
+        patch(id) { $0.tags = tags.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
     }
 
     func rename(_ id: String, to title: String) {
-        guard var n = items.first(where: { $0.id == id }) else { return }
-        n.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard write(n), let i = items.firstIndex(where: { $0.id == id }) else { return }
-        items[i] = n
+        patch(id) { $0.title = title.trimmingCharacters(in: .whitespacesAndNewlines) }
     }
 
     /// Removes the save. The file leaves the folder and the next sync commit; its history stays in git.
     func remove(key: String) {
         let p = path(key)
+        let fm = FileManager.default
+        let trash = NotesStore.trashDir + "/.saved"
         do {
-            try NotesSync.shared.locked { try FileManager.default.removeItem(atPath: p) }
+            // set aside in `.trash/.saved` (this Mac's undo, never committed), so Recently deleted can bring it back
+            try NotesSync.shared.locked {
+                try fm.createDirectory(atPath: trash, withIntermediateDirectories: true)
+                var to = trash + "/" + key + ".md"
+                if fm.fileExists(atPath: to) { to = trash + "/" + key + "-" + String(Int(Date().timeIntervalSince1970)) + ".md" }
+                try fm.moveItem(atPath: p, toPath: to)
+            }
             NotesSync.shared.commit("remove save")
         } catch { self.error = "the save could not be removed: \(error.localizedDescription)"; return }
         items.removeAll { $0.id == key }
+        NotesStore.shared.loadTrash()
     }
 
     private func write(_ n: Note) -> Bool {
@@ -200,11 +216,21 @@ final class SavedStore: ObservableObject {
 enum TagColors {
     static var path: String { NotesStore.dir + "/.meta/tags.json" }
 
+    private static var cache: (path: String, mtime: Date?, map: [String: String]) = ("", nil, [:])
+
+    /// The tag colours, re-read only when the file's time changes, since rows ask on every redraw.
     static func read() -> [String: String] {
-        guard let d = FileManager.default.contents(atPath: path),
-              let o = try? JSONSerialization.jsonObject(with: d) as? [String: String] else { return [:] }
+        let p = path
+        let m = (try? FileManager.default.attributesOfItem(atPath: p))?[.modificationDate] as? Date
+        if cache.path == p, cache.mtime == m, m != nil { return cache.map }
+        guard let d = FileManager.default.contents(atPath: p),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: String] else { cache = (p, m, [:]); return [:] }
+        cache = (p, m, o)
         return o
     }
+
+    /// The colour a tag wears, or nil for none.
+    static func forTag(_ tag: String) -> Color? { read()[tag].flatMap { color($0) } }
 
     /// The colour a value names: one of the eight names, or a hex like `#3b82f6`; nil when it is neither.
     static func color(_ value: String) -> Color? {

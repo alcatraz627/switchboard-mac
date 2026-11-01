@@ -67,6 +67,7 @@ enum KeyTable {
         a("notes.list.move", "Move between notes", "Notes", "↑/↓", "notes", "tab"),
         a("notes.list.filter", "Along the colour filter; Space toggles a colour", "Colour filter", "←/→", "notes", "tab"),
         a("notes.list.search", "Search", "Search", "/", "notes", "tab"),
+        a("notes.list.inbox", "Step into the inbox: K keeps, D puts away, L tomorrow morning, Return opens", "Inbox", "I", "notes", "tab"),
         a("notes.row.open", "Open the note to read", "Open", "→ · Return", "notes", "row"),
         a("notes.row.pin", "Pin or unpin", "Pin", "P", "notes", "row"),
         a("notes.row.copy", "Copy title and body", "Copy", "C", "notes", "row"),

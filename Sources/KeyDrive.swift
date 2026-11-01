@@ -209,7 +209,10 @@ final class KeyDrive {
 
         // The same note open in two windows, as the panel and a pinned Notes tab are.
         step("the same note is open for typing in both windows") {
-            let n = self.store.live.first { $0.title == "Alpha more" }!
+            guard let n = self.store.live.first(where: { $0.title == "Alpha more" }) else {
+                self.check(false, "no note titled \"Alpha more\"; the notes are " + self.store.live.map(\.title).joined(separator: " | "))
+                return
+            }
             self.nav.focus = .open(n.id, .body, typing: true)
             self.nav2.focus = .open(n.id, .body, typing: true)
         }
@@ -440,12 +443,14 @@ final class KeyDrive {
     }
 
     private func check(_ ok: Bool, _ got: String = "") {
-        lines.append("\(ok ? "ok  " : "FAIL") \(current)\(ok || got.isEmpty ? "" : " (got: \(got))")")
+        let line = "\(ok ? "ok  " : "FAIL") \(current)\(ok || got.isEmpty ? "" : " (got: \(got))")"
+        lines.append(line)
+        // printed as it happens, so a crash later in the run still leaves every line before it
+        FileHandle.standardOutput.write(Data((line + "\n").utf8))
     }
 
     private func finish() {
         AppDefaults.store.removeObject(forKey: TimerStore.key)
-        print(lines.joined(separator: "\n"))
         exit(lines.contains { $0.hasPrefix("FAIL") } ? 1 : 0)
     }
 

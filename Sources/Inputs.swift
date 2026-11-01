@@ -229,14 +229,23 @@ struct EditorText: NSViewRepresentable {
         // fields acting on a stale wish pass the keyboard between them forever.
         if focused && !has {
             let at = caret
-            DispatchQueue.main.async {
-                guard coord.parent.focused, let w = tv.window, w.firstResponder !== tv else { return }
+            let atStart = caretAtStart, canEdit = editable
+            // The view can still be joining its window when this runs (after ⌘↩ the new note's field is rebuilt);
+            // a wish that finds no window is tried again shortly, up to a second, instead of being dropped.
+            func handOver(_ triesLeft: Int) {
+                guard coord.parent.focused else { return }
+                guard let w = tv.window else {
+                    if triesLeft > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { handOver(triesLeft - 1) } }
+                    return
+                }
+                guard w.firstResponder !== tv else { return }
                 w.makeFirstResponder(tv)
                 let len = (tv.string as NSString).length
                 if let at { tv.setSelectedRange(NSRange(location: min(at, len), length: 0)) }
-                else if caretAtStart { tv.setSelectedRange(NSRange(location: 0, length: 0)) }
-                else if !editable { tv.setSelectedRange(NSRange(location: 0, length: 0)) }
+                else if atStart { tv.setSelectedRange(NSRange(location: 0, length: 0)) }
+                else if !canEdit { tv.setSelectedRange(NSRange(location: 0, length: 0)) }
             }
+            DispatchQueue.main.async { handOver(20) }
         } else if !focused && has {
             DispatchQueue.main.async { if !coord.parent.focused, tv.window?.firstResponder === tv { tv.window?.makeFirstResponder(nil) } }
         }

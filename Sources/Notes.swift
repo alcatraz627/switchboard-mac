@@ -483,6 +483,9 @@ struct Note: Identifiable, Equatable {
     var remindRepeat: Repeat = .never
     /// Which device rings the reminder: "phone", or "mac" and absent for this Mac (so no old note changes).
     var remindOn: String? = nil
+    /// True when the whole file was read as a clash (its text is the body and its name the title). Only such a note is
+    /// written back as it was; pasting merge markers into an ordinary note keeps its header.
+    var clashFile = false
     /// The Reminders item this note owns, so it can be changed or removed.
     var reminderID: String?
     /// Pinned notes are the ones the menu-bar quick page lists.
@@ -603,15 +606,18 @@ final class NotesStore: ObservableObject {
         }
     }
 
-    func load() { apply(Self.readAll()) }
+    func load() { apply(Self.readAll(), waitForHistory: true) }
 
     /// Take a finished read; a problem with the folder shows as the tab's error line.
-    private func apply(_ r: (notes: [Note], problem: String?)) {
+    private func apply(_ r: (notes: [Note], problem: String?), waitForHistory: Bool = false) {
         notes = r.notes
         loaded = true
         migrateOrderIfNeeded()
-        loadTrash()
-        if !Self.probing, r.problem == nil { NotesInbox.shared.prune(dir: Self.dir) }
+        loadTrash(waitForHistory: waitForHistory)
+        if !Self.probing, r.problem == nil {
+            NotesInbox.shared.prune(dir: Self.dir)
+            NotesInbox.shared.observe(notes: r.notes, dir: Self.dir)
+        }
         // A read problem clears itself when the next read is clean (a drive plugged back in).
         if let p = r.problem { readProblem = p; error = p }
         else if let old = readProblem { readProblem = nil; if error == old { error = nil } }
@@ -787,6 +793,12 @@ final class NotesStore: ObservableObject {
         let old = notes.first { $0.id == n.id }
         // an editor holding an older copy must not undo a move that arrived since
         if let old { n.pos = old.pos }
+        // A clash settled by hand, by deleting the markers in the editor: the text is the whole file, so it is read
+        // again as one, and its header comes back as title, tags and reminder instead of lingering as body text.
+        if n.clashFile, !NotesSync.conflicted(n.body), var p = Self.parse(id: n.id, n.body + "\n") {
+            p.pos = n.pos; p.pinned = n.pinned || p.pinned; p.clashFile = false
+            n = p
+        }
         var problem: String?
         if old?.remindAt != n.remindAt || old?.remindRepeat != n.remindRepeat || old?.title != n.title || old?.remindOn != n.remindOn { problem = syncReminder(&n) }
         // pinning or tagging is not editing: keep the file's time, which the hover card reads as "last edited"
@@ -796,6 +808,50 @@ final class NotesStore: ObservableObject {
         if let i = notes.firstIndex(where: { $0.id == n.id }) { notes[i] = n; resort() }
         // After write, which clears the error line on success.
         if let p = problem { error = p }
+    }
+
+    // ── Changing a few keys of the file as it is now ────────────────────────
+
+    /// Reads the file at `path` as it is on disk this moment, under the lock, lets `change` touch only the fields it
+    /// names, and writes it back. Words another app wrote since this app's last read are never overwritten, because
+    /// nothing here starts from the in-memory copy. Returns the new text, or nil when the file is gone, is a clash, or
+    /// could not be written.
+    @discardableResult
+    static func patchFile(at path: String, name: String, _ change: (inout NoteSpec.Record) -> Void) -> String? {
+        var out: String?
+        NotesSync.shared.locked {
+            guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return }
+            var r = NoteSpec.read(text, name: name)
+            guard !r.conflicted else { return }
+            r.color = r.rawColor   // an added dot's name is kept as written
+            let before = r
+            change(&r)
+            if r == before { out = text; return }   // nothing to change: the file is left exactly as it is
+            let new = NoteSpec.render(r)
+            guard (try? new.write(toFile: path, atomically: true, encoding: .utf8)) != nil else { return }
+            out = new
+        }
+        return out
+    }
+
+    /// `patchFile` for the note `id`, then the in-memory copy is replaced by what the file now says and the change commits.
+    @discardableResult
+    func patch(_ id: String, reason: String = "save", _ change: (inout NoteSpec.Record) -> Void) -> Bool {
+        guard let text = Self.patchFile(at: Self.dir + "/" + id + ".md", name: id, change), let n = Self.parse(id: id, text) else { return false }
+        if let i = notes.firstIndex(where: { $0.id == id }) { var m = n; m.pos = n.pos; notes[i] = m; resort() }
+        NotesSync.shared.commit(reason)
+        return true
+    }
+
+    static func isoString(_ d: Date) -> String { iso.string(from: d) }
+
+    /// Makes the Apple Reminders item match the note as the file now says, and writes the item's id back if it changed.
+    func refreshReminderItem(_ id: String) {
+        guard var n = notes.first(where: { $0.id == id }) else { return }
+        let before = n.reminderID
+        _ = syncReminder(&n)
+        guard n.reminderID != before else { return }
+        patch(id, reason: "reminder") { $0.reminderId = n.reminderID }
     }
 
     func delete(_ n: Note) {
@@ -817,8 +873,18 @@ final class NotesStore: ObservableObject {
     // ── Attachments ─────────────────────────────────────────────────────────
 
     /// The `attachments/` paths a text links to, `![name](attachments/x.png)` or `[name](attachments/x.pdf)`, percent-decoded.
+    /// Any `attachments/<name>` in the text counts, in whatever form it is written: `./attachments/x`, `<attachments/x>`,
+    /// with a title after it, a reference link, an `<img src>`, or percent-encoded.
     static func attachmentPaths(in text: String) -> [String] {
-        text.matches(of: #/\]\((attachments/[^)\s][^)]*)\)/#).map { String($0.1).removingPercentEncoding ?? String($0.1) }
+        text.matches(of: #/attachments\/[^\s)>"'<\]]+/#).map { String($0.0).removingPercentEncoding ?? String($0.0) }
+    }
+
+    /// Whether `body` links to the attachment `rel`, raw or percent-encoded, in any link form. Deliberately generous:
+    /// a file kept by mistake costs nothing, and one removed by mistake takes a picture from another note.
+    static func body(_ body: String, links rel: String) -> Bool {
+        if body.contains(rel) { return true }
+        if let enc = rel.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed), body.contains(enc) { return true }
+        return (body.removingPercentEncoding ?? body).contains(rel)
     }
 
     /// A note owns nothing by file name. Deleting one takes an attachment away only when no other note or save links to it;
@@ -828,8 +894,7 @@ final class NotesStore: ObservableObject {
         guard !mine.isEmpty else { return }
         let fm = FileManager.default
         let others = notes.filter { $0.id != n.id }.map(\.body) + SavedStore.readAll().map(\.body)
-        let stillLinked = Set(others.flatMap { Self.attachmentPaths(in: $0) })
-        for rel in Set(mine) where !stillLinked.contains(rel) {
+        for rel in Set(mine) where !others.contains(where: { Self.body($0, links: rel) }) {
             let from = Self.dir + "/" + rel, to = Self.trashDir + "/" + rel
             guard fm.fileExists(atPath: from) else { continue }
             try? fm.createDirectory(atPath: (to as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
@@ -857,6 +922,10 @@ final class NotesStore: ObservableObject {
         let deleted: Date
         /// For a note found in git history rather than in `.trash`: the text it had when it was deleted.
         var historyText: String? = nil
+        /// The commit that deleted it, for a history entry, so a picture it linked to can be fetched back.
+        var historySha: String? = nil
+        /// A save (`.saved/<key>.md`), not a note: it goes back into `.saved`.
+        var isSave = false
         var id: String { file }
     }
     /// Ids of history entries the owner removed from the list; they stay in git.
@@ -872,31 +941,73 @@ final class NotesStore: ObservableObject {
         try NotesSync.shared.locked { try fm.moveItem(atPath: n.path, toPath: Self.trashDir + "/" + name) }
     }
 
-    /// Reads `.trash`, newest deletion first; a folder that is not there is an empty list.
-    func loadTrash() {
+    /// Reads `.trash` (notes, and saves under `.trash/.saved`), newest deletion first, and adds what git history knows.
+    /// The history read costs one `git log` and a `git show` per entry, so it never runs on the caller's thread unless
+    /// `waitForHistory` says so (a probe, or a button the owner just pressed): the list shows the last answer at once,
+    /// and a read off the main thread replaces it only when HEAD has moved.
+    func loadTrash(waitForHistory: Bool = false) {
+        trashedLocal = Self.localTrash()
+        publishTrash()
+        if waitForHistory {
+            let (head, list) = Self.readHistory()
+            historyHead = head; historyCache = list
+            publishTrash()
+        } else if !historyBusy {
+            historyBusy = true
+            DispatchQueue.global(qos: .utility).async {
+                let head = NotesSync.shared.git(["rev-parse", "-q", "--verify", "HEAD"]).out.trimmingCharacters(in: .whitespacesAndNewlines)
+                let fresh = head != self.historyHead ? Self.readHistory() : nil
+                DispatchQueue.main.async {
+                    self.historyBusy = false
+                    if let (h, list) = fresh { self.historyHead = h; self.historyCache = list; self.publishTrash() }
+                }
+            }
+        }
+    }
+    private var trashedLocal: [Trashed] = []
+    private var historyCache: [Trashed] = []
+    private var historyHead: String?
+    private var historyBusy = false
+
+    /// Local trash plus history, history entries left out when the note is in the folder or the local trash or was removed for good.
+    private func publishTrash() {
+        let hidden = Set(Self.defaults.stringArray(forKey: Self.historyHiddenKey) ?? [])
+        func key(_ t: Trashed) -> String { (t.isSave ? ".saved/" : "") + t.note.id }
+        let have = Set(trashedLocal.map(key) + notes.map(\.id))
         let fm = FileManager.default
-        let names = ((try? fm.contentsOfDirectory(atPath: Self.trashDir)) ?? []).filter { $0.hasSuffix(".md") }
-        trashed = names.compactMap { f -> Trashed? in
-            let path = Self.trashDir + "/" + f
-            guard let text = try? String(contentsOfFile: path, encoding: .utf8), let n = Self.parse(id: String(f.dropLast(3)), text) else { return nil }
-            let url = URL(fileURLWithPath: path)
-            let when = (try? url.resourceValues(forKeys: [.addedToDirectoryDateKey]))?.addedToDirectoryDate
-                ?? (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date ?? Date()
-            return Trashed(file: f, note: n, deleted: when)
-        }.sorted { $0.deleted > $1.deleted }
-        // every app offers Recently deleted from git history: notes deleted on any device show here too
-        let have = Set(trashed.map { $0.note.id } + notes.map(\.id))
-        trashed = (trashed + Self.deletedInHistory(excluding: have)).sorted { $0.deleted > $1.deleted }
+        let more = historyCache.filter { t in
+            !have.contains(key(t)) && !hidden.contains(key(t))
+                && !(t.isSave && fm.fileExists(atPath: SavedStore.dir + "/" + t.note.id + ".md"))
+        }
+        trashed = (trashedLocal + more).sorted { $0.deleted > $1.deleted }
     }
 
-    /// Notes whose file was deleted in the last 300 commits and is not in the folder now, with their last text.
-    static func deletedInHistory(excluding: Set<String>, limit: Int = 300) -> [Trashed] {
+    private static func localTrash() -> [Trashed] {
+        let fm = FileManager.default
+        func read(_ dir: String, prefix: String, isSave: Bool) -> [Trashed] {
+            ((try? fm.contentsOfDirectory(atPath: dir)) ?? []).filter { $0.hasSuffix(".md") && !$0.hasPrefix(".") }.compactMap { f -> Trashed? in
+                let path = dir + "/" + f
+                guard let text = try? String(contentsOfFile: path, encoding: .utf8), let n = parse(id: String(f.dropLast(3)), text) else { return nil }
+                let when = (try? URL(fileURLWithPath: path).resourceValues(forKeys: [.addedToDirectoryDateKey]))?.addedToDirectoryDate
+                    ?? (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date ?? Date()
+                return Trashed(file: prefix + f, note: n, deleted: when, isSave: isSave)
+            }
+        }
+        return (read(trashDir, prefix: "", isSave: false) + read(trashDir + "/.saved", prefix: ".saved/", isSave: true)).sorted { $0.deleted > $1.deleted }
+    }
+
+    private static func readHistory() -> (head: String, list: [Trashed]) {
+        let head = NotesSync.shared.git(["rev-parse", "-q", "--verify", "HEAD"]).out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (head, deletedInHistory())
+    }
+
+    /// Notes and saves whose file was deleted in the last 300 commits, with their last text and the commit that deleted them.
+    static func deletedInHistory(limit: Int = 300) -> [Trashed] {
         guard Self.missingFolder == nil, NotesSync.shared.repo() != nil else { return [] }
         let sync = NotesSync.shared
-        let hidden = Set(defaults.stringArray(forKey: historyHiddenKey) ?? [])
         let log = sync.git(["log", "--diff-filter=D", "--relative", "--name-only", "--format=@%H\t%ct", "-n", "\(limit)", "--", "."]).out
         var out: [Trashed] = []
-        var seen = excluding
+        var seen = Set<String>()
         var sha = "", when = Date()
         for raw in log.split(separator: "\n", omittingEmptySubsequences: true) {
             let line = String(raw)
@@ -905,16 +1016,24 @@ final class NotesStore: ObservableObject {
                 sha = String(p.first ?? ""); when = Date(timeIntervalSince1970: Double(p.dropFirst().first ?? "0") ?? 0)
                 continue
             }
-            guard line.hasSuffix(".md"), !line.contains("/"), !line.hasPrefix("."), !sha.isEmpty else { continue }
-            let id = String(line.dropLast(3))
-            guard !seen.contains(id), !hidden.contains(id) else { continue }
-            seen.insert(id)
+            let isSave = line.hasPrefix(".saved/") && !line.dropFirst(7).contains("/")
+            guard line.hasSuffix(".md"), isSave || (!line.contains("/") && !line.hasPrefix(".")), !sha.isEmpty else { continue }
+            let id = String(line.dropLast(3).dropFirst(isSave ? 7 : 0))
+            guard seen.insert((isSave ? ".saved/" : "") + id).inserted else { continue }
             let shown = sync.git(["show", "\(sha)^:./\(line)"])
             guard shown.code == 0, let n = parse(id: id, shown.out) else { continue }
-            let text = shown.out
-            out.append(Trashed(file: "history-" + id + ".md", note: n, deleted: when, historyText: text))
+            out.append(Trashed(file: "history-" + (isSave ? ".saved/" : "") + id + ".md", note: n, deleted: when,
+                               historyText: shown.out, historySha: sha, isSave: isSave))
         }
         return out
+    }
+
+    /// Fetches the pictures and files a note linked to from the commit before it was deleted, when they are gone now.
+    private func restoreAttachmentsFromHistory(text: String, sha: String) {
+        let fm = FileManager.default
+        for rel in Set(Self.attachmentPaths(in: text)) where !fm.fileExists(atPath: Self.dir + "/" + rel) {
+            _ = NotesSync.shared.git(["restore", "--source=\(sha)^", "--", "./" + rel])
+        }
     }
 
     /// Puts a deleted note back in the list, under a new name if its own is taken. Its reminder
@@ -922,6 +1041,22 @@ final class NotesStore: ObservableObject {
     @discardableResult
     func restore(_ t: Trashed) -> Note? {
         let fm = FileManager.default
+        Self.unhide(t)
+        if t.isSave {
+            let to = SavedStore.dir + "/" + t.note.id + ".md"
+            do {
+                try NotesSync.shared.locked {
+                    try fm.createDirectory(atPath: SavedStore.dir, withIntermediateDirectories: true)
+                    guard !fm.fileExists(atPath: to) else { return }
+                    if let text = t.historyText { try text.write(toFile: to, atomically: true, encoding: .utf8) }
+                    else { try fm.moveItem(atPath: Self.trashDir + "/" + t.file, toPath: to) }
+                }
+            } catch { self.error = "\(t.note.heading) could not be brought back: \(error.localizedDescription)"; return nil }
+            SavedStore.shared.load()
+            NotesSync.shared.commit("restore save")
+            loadTrash(waitForHistory: true)
+            return nil
+        }
         var id = t.note.id
         while fm.fileExists(atPath: Self.dir + "/" + id + ".md") { id += "x" }
         do {
@@ -935,6 +1070,7 @@ final class NotesStore: ObservableObject {
         load()
         guard var n = notes.first(where: { $0.id == id }) else { return nil }
         restoreAttachments(of: n)
+        if let sha = t.historySha, let text = t.historyText { restoreAttachmentsFromHistory(text: text, sha: sha) }
         if n.remindAt != nil || n.reminderID != nil {
             n.remindAt = nil; n.reminderID = nil
             update(n)
@@ -944,16 +1080,22 @@ final class NotesStore: ObservableObject {
         return notes.first { $0.id == id }
     }
 
+    private static func hideKey(_ t: Trashed) -> String { (t.isSave ? ".saved/" : "") + t.note.id }
+    static func hide(_ t: Trashed) {
+        var hidden = defaults.stringArray(forKey: historyHiddenKey) ?? []
+        if !hidden.contains(hideKey(t)) { hidden.append(hideKey(t)) }
+        defaults.set(hidden, forKey: historyHiddenKey)
+    }
+    static func unhide(_ t: Trashed) {
+        defaults.set((defaults.stringArray(forKey: historyHiddenKey) ?? []).filter { $0 != hideKey(t) }, forKey: historyHiddenKey)
+    }
+
     /// Removes one deleted note for good, into the macOS Trash so even that can be undone.
     func purge(_ t: Trashed) {
+        // removed for good stays removed: the deletion is in git history too, so the id is also hidden from that list
+        Self.hide(t)
         // a note found only in git history cannot leave it; it just stops being listed
-        if t.historyText != nil {
-            var hidden = Self.defaults.stringArray(forKey: Self.historyHiddenKey) ?? []
-            hidden.append(t.note.id)
-            Self.defaults.set(hidden, forKey: Self.historyHiddenKey)
-            loadTrash()
-            return
-        }
+        if t.historyText != nil { loadTrash(); return }
         let url = URL(fileURLWithPath: Self.trashDir + "/" + t.file)
         // a probe never fills the owner's macOS Trash
         do { if Self.probing { try FileManager.default.removeItem(at: url) } else { try FileManager.default.trashItem(at: url, resultingItemURL: nil) } } catch {
@@ -983,7 +1125,7 @@ final class NotesStore: ObservableObject {
     /// Strings are written JSON-quoted, so a colon or quote in a title survives.
     static func render(_ n: Note) -> String {
         // a note holding a clash is the whole file as read; writing a header above it would bury the markers
-        if NotesSync.conflicted(n.body) { return n.body + "\n" }
+        if n.clashFile && NotesSync.conflicted(n.body) { return n.body + "\n" }
         var r = NoteSpec.Record()
         r.title = n.title
         // a hand-written note with no created line stays without one
@@ -1003,22 +1145,41 @@ final class NotesStore: ObservableObject {
         return NoteSpec.render(r)
     }
 
+    /// Blank lines at either end go and a final space stays, so a last `- [ ] ` is still an empty checkbox after a save;
+    /// a body of nothing but white space is empty.
+    static func trimBody(_ s: String) -> String {
+        s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : s.trimmingCharacters(in: .newlines)
+    }
+
+    /// A time as other writers give it: to the second (`2026-11-01T09:00:00Z`), with fractions (`...00.123Z`), or a bare date.
+    static func parseDate(_ s: String) -> Date? {
+        if let d = iso.date(from: s) { return d }
+        let frac = ISO8601DateFormatter(); frac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = frac.date(from: s) { return d }
+        let day = ISO8601DateFormatter(); day.formatOptions = [.withFullDate]
+        return day.date(from: s)
+    }
+
     static func parse(id: String, _ raw: String) -> Note? {
         // the file's fields come from the spec reader (NoteSpec); this maps them onto a note the editor can hold
         let r = NoteSpec.read(raw, name: id)
         if r.conflicted {
-            return Note(id: id, title: id, body: r.body.trimmingCharacters(in: .whitespacesAndNewlines), tags: [], created: Date.distantPast)
+            var c = Note(id: id, title: id, body: trimBody(r.body), tags: [], created: Date.distantPast)
+            c.clashFile = true
+            return c
         }
-        var body = r.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        var body = trimBody(r.body)
         // A title taken from the first line stays in the file's body; the editor holds title and body apart,
         // so that line leaves its body field here and the next save writes a title key.
         if r.titleFromBody {
-            body = body.components(separatedBy: "\n").dropFirst().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            var lines = body.components(separatedBy: "\n")
+            if let first = lines.firstIndex(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) { lines.removeSubrange(0...first) }
+            body = trimBody(lines.joined(separator: "\n"))
         }
         return Note(id: id, title: r.title, body: body, tags: r.tags,
-                    created: r.created.flatMap(iso.date) ?? Date.distantPast,
-                    expires: r.expires.flatMap(iso.date),
-                    remindAt: r.remindAt.flatMap(iso.date),
+                    created: r.created.flatMap(parseDate) ?? Date.distantPast,
+                    expires: r.expires.flatMap(parseDate),
+                    remindAt: r.remindAt.flatMap(parseDate),
                     remindRepeat: r.remindRepeat.flatMap(Note.Repeat.init) ?? .never,
                     remindOn: r.remindOn,
                     reminderID: r.reminderId,
@@ -1043,8 +1204,9 @@ final class NotesStore: ObservableObject {
     private func syncReminder(_ n: inout Note) -> String? {
         guard !Self.remindersOff else { return nil }
         // a reminder the phone rings has no Apple Reminders item here; an old one is removed like a cleared reminder
-        // while Switchboard itself is running and can ring, it rings the reminder; a second item in Reminders would notify twice
-        guard n.remindAt != nil, n.remindOn != "phone", !ReminderRinger.shared.canRing else {
+        // Reminders.app keeps an item as the fallback for when Switchboard is quit; its alarm is set a little after the due
+        // time and the item goes when the reminder is dismissed, so a running app that rings it does not notify twice
+        guard n.remindAt != nil, n.remindOn != "phone" else {
             guard let id = n.reminderID else { return nil }
             // Keep the id when removal fails, so the reminder can still be found later.
             if let why = reminders.remove(id) { return "the reminder could not be removed: \(why)" }
@@ -1090,6 +1252,11 @@ struct ReminderBackend {
     /// Removes a reminder; returns why it could not, or nil (a reminder already gone counts as removed).
     var remove: (String) -> String?
 
+    /// How long after the due time the Reminders.app alarm goes off: long enough for a running Switchboard to ring,
+    /// and for the owner to dismiss it there, which removes the item before its alarm.
+    static let alarmDelay: TimeInterval = 120
+    static func alarmDate(forDue at: Date) -> Date { at.addingTimeInterval(alarmDelay) }
+
     static func system(_ events: EKEventStore) -> ReminderBackend {
         func existing(_ id: String?) -> EKReminder? { id.flatMap { events.calendarItem(withIdentifier: $0) as? EKReminder } }
         return ReminderBackend(
@@ -1103,7 +1270,7 @@ struct ReminderBackend {
                 let at = n.remindAt ?? Date()
                 r.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: at)
                 r.alarms?.forEach { r.removeAlarm($0) }
-                r.addAlarm(EKAlarm(absoluteDate: at))
+                r.addAlarm(EKAlarm(absoluteDate: Self.alarmDate(forDue: at)))
                 r.recurrenceRules?.forEach { r.removeRecurrenceRule($0) }
                 let freq: EKRecurrenceFrequency? = [.daily: .daily, .weekly: .weekly, .monthly: .monthly][n.remindRepeat]
                 if let f = freq { r.addRecurrenceRule(EKRecurrenceRule(recurrenceWith: f, interval: 1, end: nil)) }

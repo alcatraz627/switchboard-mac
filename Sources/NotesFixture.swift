@@ -66,5 +66,6 @@ enum NotesFixture {
             ![missing picture](attachments/none.png)
             A closing line with _italic_ and a very long word: Donaudampfschifffahrtsgesellschaftskapitän.
             """, color: "green", tags: ["home", "pi"], remind: 86400)
+        TagColors.set("pi", to: "teal"); TagColors.set("home", to: "#f97316"); TagColors.set("reading", to: "purple")
     }
 }

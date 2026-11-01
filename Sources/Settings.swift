@@ -506,8 +506,10 @@ struct SettingsTabView: View {
 
     /// The two capture chords, on or off.
     private var notesCaptureRow: SystemRow {
-        var r = SystemRow(label: "⌥⇧N new note, ⌥⇧L last note", state: captureOn ? .on(menuGreen) : .off,
-                          note: captureOn ? "on: from any app, Esc goes back" : "off",
+        // a chord macOS refused (another app holds it) is said here, not only in a log
+        let held = HotKeys.shared.failed.filter { $0 == "⌥⇧N" || $0 == "⌥⇧L" }
+        var r = SystemRow(label: "⌥⇧N new note, ⌥⇧L last note", state: captureOn && held.isEmpty ? .on(menuGreen) : .off,
+                          note: HotKeys.captureNote(on: captureOn, failed: HotKeys.shared.failed),
                           tip: "⌥⇧N opens a new note with the cursor in it, ⌥⇧L opens the note you edited last, from any app. Esc returns you to the app you were in.",
                           action: {
                               AppDefaults.store.set(!captureOn, forKey: HotKeys.captureKey)

@@ -489,6 +489,7 @@ struct NoteRow: View {
     @State private var focus: NoteSheet.Field?
     @FocusState private var tagsFocused: Bool
     @ObservedObject private var ringer = ReminderRinger.shared
+    @State private var showComments = false
     /// The note's saved versions, read when it opens and again when the list is asked for.
     @State private var versions: [NoteVersion] = []
     /// Snapshots open the first note's editor so its look can be checked.
@@ -765,6 +766,9 @@ struct NoteRow: View {
                         }
                         .buttonStyle(.link).help("Open \(url.absoluteString)")
                     }
+                    if !note.tags.isEmpty || NoteComments.openCount(of: note.path) > 0 {
+                        HStack(spacing: 6) { if !note.tags.isEmpty { TagChips(tags: note.tags) }; CommentsBadge(path: note.path) }
+                    }
                     if !summary.isEmpty {
                         // one line too: the first words and the reminder at the end stay, the middle gives way; the tooltip has all of it
                         Text(summary).font(PT.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).help(summary)
@@ -837,7 +841,6 @@ struct NoteRow: View {
         // with no title the body's first line is already the heading; show the next one
         let bodyLines = note.body.components(separatedBy: "\n").filter { !$0.isEmpty }
         if firstLink == nil, let first = bodyLines.dropFirst(note.title.isEmpty ? 1 : 0).first { parts.append(first) }
-        if !note.tags.isEmpty { parts.append(note.tags.map { "#" + $0 }.joined(separator: " ")) }
         if let r = note.remindAt {
             parts.append((r <= Date() && note.remindOn != "phone" ? (ringer.ringing.contains(note.id) ? "ringing since " : "missed ") : "reminds ") + f.string(from: r) + (note.remindRepeat == .never ? "" : ", " + note.remindRepeat.rawValue) + (note.remindOn == "phone" ? ", on the phone" : ""))
         }
@@ -857,6 +860,12 @@ struct NoteRow: View {
     private func adopt(_ n: Note) {
         guard draft != nil else { return }
         if draft == base || draft == n { draft = n }
+        else if let b = base, b.remindAt != n.remindAt || b.remindRepeat != n.remindRepeat || b.remindOn != n.remindOn || b.remindPersist != n.remindPersist {
+            // words typed here and not saved yet stay, but a reminder changed elsewhere (dismissed from its notification,
+            // or on the phone) must not come back with this note's next save
+            draft?.remindAt = n.remindAt; draft?.remindRepeat = n.remindRepeat; draft?.remindOn = n.remindOn
+            draft?.remindPersist = n.remindPersist; draft?.reminderID = n.reminderID
+        }
         base = n
     }
 
@@ -1120,6 +1129,7 @@ struct NoteRow: View {
 
     private func tagChip(_ t: String, _ d: Binding<Note>) -> some View {
         HStack(spacing: 3) {
+            if let c = TagColors.forTag(t) { Circle().fill(c).frame(width: 6, height: 6) }
             Text("#" + t).font(.sb(10.5)).lineLimit(1).fixedSize()
             Button { d.wrappedValue.tags.removeAll { $0 == t } } label: { Image(systemName: "xmark").font(.sbIcon(7, weight: .semibold)) }
                 .buttonStyle(.plain).foregroundStyle(.tertiary).help("Remove #\(t)")
@@ -1193,6 +1203,11 @@ struct NoteRow: View {
             }
             clearButton("Remove the reminder") { d.wrappedValue.remindAt = nil; d.wrappedValue.remindOn = nil; d.wrappedValue.remindPersist = false; expireWithReminder = false }
         }
+        // comments, kept beside the note the way bfb keeps them for any markdown file
+        let open = NoteComments.openCount(of: note.path)
+        Button { showComments.toggle() } label: { chip(icon: "bubble.left", open > 0 ? "\(open) comment\(open == 1 ? "" : "s")" : "Comment", set: open > 0) }
+            .buttonStyle(.plain).help("Comments on this note, shared with bfb")
+            .popover(isPresented: $showComments, arrowEdge: .bottom) { CommentsPanel(note: d.wrappedValue) }
     }
 
     /// Which device rings the reminder. The phone's choice stops macOS Reminders from getting a copy.

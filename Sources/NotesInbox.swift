@@ -118,6 +118,8 @@ final class NotesInbox: ObservableObject {
         }
         guard !added.isEmpty else { return [] }
         change { $0 += added }
+        // an arrival is a note this Mac has now seen, so a later read does not take it for a new local one
+        lock.lock(); if var s = seen { s.formUnion(added.filter { !$0.isSave }.map(\.id)); seen = s; persistSeen(s) }; lock.unlock()
         // an agent's note is told apart quietly; the owner is told about their own
         let mine = added.filter { $0.agent == nil }
         if !mine.isEmpty {
@@ -130,6 +132,39 @@ final class NotesInbox: ObservableObject {
         return added
     }
 
+    // ── Notes that appeared without a merge ─────────────────────────────────
+
+    static var seenPath: String { AppPaths.stateDir + "/notes-seen.json" }
+    private var seen: Set<String>?
+
+    /// Called after every read of the folder. A note this Mac has not seen before that an agent wrote (an `agent:` key)
+    /// goes to the agents lane even though no merge brought it, since agents on this Mac write straight into the folder
+    /// with `note`. The first run only learns which notes exist, so the folder's older agent notes are not dumped in the lane.
+    func observe(notes: [Note], dir: String) {
+        lock.lock()
+        var known: Set<String>
+        if let s = seen { known = s }
+        else if let d = FileManager.default.contents(atPath: Self.seenPath), let a = try? JSONSerialization.jsonObject(with: d) as? [String] { known = Set(a) }
+        else { known = Set(notes.map(\.id)); seen = known; lock.unlock(); persistSeen(known); return }
+        let have = Set(backing.map(\.id))
+        lock.unlock()
+        let fresh = notes.filter { !known.contains($0.id) }
+        guard !fresh.isEmpty else { seen = known; return }
+        let agentIDs = fresh.filter { $0.agent != nil && !have.contains($0.id) }.map(\.id)
+        if !agentIDs.isEmpty { ingest(ids: agentIDs, dir: dir, author: { _ in nil }) }
+        known.formUnion(fresh.map(\.id))
+        lock.lock(); seen = known; lock.unlock()
+        persistSeen(known)
+    }
+
+    private func persistSeen(_ s: Set<String>) {
+        try? FileManager.default.createDirectory(atPath: AppPaths.stateDir, withIntermediateDirectories: true)
+        if let d = try? JSONSerialization.data(withJSONObject: s.sorted()) { try? d.write(to: URL(fileURLWithPath: Self.seenPath), options: .atomic) }
+    }
+
+    /// Forgets what this run knew of the seen list, for a probe that moves the state folder.
+    func resetSeen() { lock.lock(); seen = nil; lock.unlock() }
+
     // ── Leaving the inbox ───────────────────────────────────────────────────
 
     /// Keep: it stays where it is, as a note or a save, and leaves the inbox.
@@ -139,7 +174,11 @@ final class NotesInbox: ObservableObject {
     /// a save is removed, and its history stays in git.
     func done(_ id: String, notes: NotesStore = .shared, saved: SavedStore = .shared) {
         if id.hasPrefix(".saved/") { saved.remove(key: String(id.dropFirst(7))) }
-        else if var n = notes.notes.first(where: { $0.id == id }), n.expires == nil { n.expires = Date(); notes.update(n) }
+        else {
+            // on the file as it is now, changing only `expires`, so words another app wrote a moment ago are kept
+            let stamp = NotesStore.isoString(Date())
+            notes.patch(id, reason: "inbox: done") { if $0.expires == nil { $0.expires = stamp } }
+        }
         drop(id)
     }
 

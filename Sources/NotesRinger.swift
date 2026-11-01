@@ -10,15 +10,27 @@ import AppKit
 import UserNotifications
 
 final class ReminderRinger: ObservableObject {
-    static let shared = ReminderRinger()
+    static let shared = ReminderRinger(persist: true)
     static let category = "switchboard.reminder"
-    /// A reminder that came due while the app was closed rings at launch only if it is this recent, or persistent.
-    static let lateAfter: TimeInterval = 120
+    static let handledKey = "switchboard.notes.ringHandled"
+
+    /// Only the app's own ringer remembers across launches; a probe's ringer starts clean.
+    private let persist: Bool
+    init(persist: Bool = false) {
+        self.persist = persist
+        if persist { handled = Set(AppDefaults.store.stringArray(forKey: Self.handledKey) ?? []) }
+    }
 
     /// Notes ringing now; each shows a Dismiss on its row and in its notification.
     @Published private(set) var ringing: Set<String> = []
-    /// `id@time` of every reminder that has already rung or been ruled missed, so one time rings once.
-    private var handled: Set<String> = []
+    /// `id@time` of every reminder time that has rung, so one time rings once, even across a relaunch.
+    private var handled: Set<String> = [] {
+        didSet {
+            guard persist else { return }
+            // kept short: a time older than the last 300 is long past any chance of ringing again
+            AppDefaults.store.set(Array(handled.sorted().suffix(300)), forKey: Self.handledKey)
+        }
+    }
     private var tick: Timer?
     private var beat: Timer?
     private var started: [String: Date] = [:]
@@ -44,6 +56,18 @@ final class ReminderRinger: ObservableObject {
     func missed(_ n: Note, now: Date = Date()) -> Bool {
         guard let at = n.remindAt, at <= now else { return false }
         return !ringing.contains(n.id)
+    }
+
+    /// The latest time a repeating reminder fell on or before `now`, stepping from `from` by its own rhythm.
+    static func latest(onOrBefore now: Date, from: Date, every r: Note.Repeat, calendar: Calendar = .current) -> Date {
+        var t = from
+        var steps = 0
+        while steps < 5000 {
+            let n = next(after: t, from: t, every: r, calendar: calendar)
+            if n > now || n <= t { break }
+            t = n; steps += 1
+        }
+        return t
     }
 
     /// The next time a repeating reminder falls after `now`, stepping from `from` by its own rhythm.
@@ -77,11 +101,12 @@ final class ReminderRinger: ObservableObject {
         for id in ringing where !(notes.first { $0.id == id }.map { Self.dueHere($0, now: now) } ?? false) { stopRing(id) }
         for n in notes where Self.dueHere(n, now: now) {
             guard let at = n.remindAt else { continue }
-            let key = n.id + "@" + String(Int(at.timeIntervalSince1970))
+            // a repeating reminder nobody dismissed rings at each of its times, not only the first
+            let slot = n.remindRepeat == .never ? at : Self.latest(onOrBefore: now, from: at, every: n.remindRepeat)
+            let key = n.id + "@" + String(Int(slot.timeIntervalSince1970))
             guard !handled.contains(key) else { continue }
             handled.insert(key)
-            let late = now.timeIntervalSince(at) > Self.lateAfter
-            if late && !n.remindPersist { dlog("reminder came due while closed: \(n.title)"); continue }   // stays visible as missed
+            // however late: a due reminder announces and rings once the first time the app can, then stays as missed
             startRing(n, now: now)
         }
         // a non-persistent ring ends after the chosen length; the reminder then stays missed
@@ -127,15 +152,21 @@ final class ReminderRinger: ObservableObject {
 
     /// Dismiss: the ring stops and the note is edited. A one-off loses its reminder keys; a repeating reminder moves to
     /// its next time. The edit syncs, which clears the reminder on the other device.
-    func dismiss(_ id: String, notes: NotesStore = .shared, now: Date = Date()) {
+    /// The edit is made on the file as it is on disk now, so words another app wrote a moment ago are kept, and only
+    /// when the reminder is due: an answer to an old notification after the reminder was moved changes nothing.
+    /// `expectedAt` is the time the notification was about; a different time on the file means it is stale.
+    func dismiss(_ id: String, notes: NotesStore = .shared, now: Date = Date(), expectedAt: Date? = nil) {
         stopRing(id)
-        guard var n = notes.notes.first(where: { $0.id == id }), let at = n.remindAt else { return }
-        if n.remindRepeat == .never {
-            n.remindAt = nil; n.remindOn = nil; n.remindPersist = false
-        } else {
-            n.remindAt = Self.next(after: now, from: at, every: n.remindRepeat)
+        let changed = notes.patch(id, reason: "reminder dismissed") { r in
+            guard let at = r.remindAt.flatMap(NotesStore.parseDate), at <= now else { return }
+            if let e = expectedAt, abs(at.timeIntervalSince(e)) > 1 { return }
+            if let rep = r.remindRepeat.flatMap(Note.Repeat.init(rawValue:)), rep != .never {
+                r.remindAt = NotesStore.isoString(Self.next(after: now, from: at, every: rep))
+            } else {
+                r.remindAt = nil; r.remindRepeat = nil; r.remindOn = nil; r.remindPersist = false
+            }
         }
-        notes.update(n)
+        if changed { notes.refreshReminderItem(id) }
     }
 
     // ── The notification ────────────────────────────────────────────────────
@@ -146,7 +177,7 @@ final class ReminderRinger: ObservableObject {
         c.title = n.heading
         c.body = "Reminder" + (n.remindPersist ? ", rings until you dismiss it" : "")
         c.categoryIdentifier = category
-        c.userInfo = ["note": n.id]
+        c.userInfo = ["note": n.id, "at": n.remindAt?.timeIntervalSince1970 ?? 0]
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "reminder-" + n.id, content: c, trigger: nil)) { err in
             if let err { dwarn("reminder notification not added: \(fmtErr(err))") }
         }

@@ -184,7 +184,10 @@ final class TimerStore: NSObject, ObservableObject, UNUserNotificationCenterDele
         // a reminder's notification: any answer dismisses it, which edits the note
         if response.notification.request.content.categoryIdentifier == ReminderRinger.category,
            let note = response.notification.request.content.userInfo["note"] as? String {
-            DispatchQueue.main.async { ReminderRinger.shared.dismiss(note); done() }
+            // sweeping the banner away is not an answer: the ring goes on. Dismiss and a click dismiss, if the time still matches.
+            let at = (response.notification.request.content.userInfo["at"] as? Double).flatMap { $0 > 0 ? Date(timeIntervalSince1970: $0) : nil }
+            let swiped = response.actionIdentifier == UNNotificationDismissActionIdentifier
+            DispatchQueue.main.async { if !swiped { ReminderRinger.shared.dismiss(note, expectedAt: at) }; done() }
             return
         }
         DispatchQueue.main.async {

@@ -19,9 +19,9 @@ enum InboxLater {
 struct InboxSection: View {
     @ObservedObject var inbox = NotesInbox.shared
     @ObservedObject var nav: NotesNav
-    @State private var showLane = false
     /// Snapshots draw the lane open.
     static var startLaneOpen = false
+    private var showLane: Bool { nav.laneOpen || Self.startLaneOpen }
 
     var body: some View {
         let mine = inbox.waiting(), agents = inbox.lane()
@@ -42,9 +42,9 @@ struct InboxSection: View {
                     }
                 }
                 if !agents.isEmpty {
-                    Button { withAnimation(Motion.slow) { showLane.toggle() } } label: {
+                    Button { withAnimation(Motion.slow) { nav.laneOpen.toggle() } } label: {
                         HStack(spacing: 5) {
-                            Image(systemName: "chevron.right").font(.sbIcon(8, weight: .semibold)).rotationEffect(.degrees(showLane || Self.startLaneOpen ? 90 : 0))
+                            Image(systemName: "chevron.right").font(.sbIcon(8, weight: .semibold)).rotationEffect(.degrees(showLane ? 90 : 0))
                             Image(systemName: "cpu").font(.sbIcon(9.5))
                             Text("From agents \(agents.count)").font(PT.section)
                         }
@@ -52,7 +52,7 @@ struct InboxSection: View {
                     }
                     .buttonStyle(.plain).padding(.leading, 4)
                     .help("Notes agents wrote. They stay out of your own list until you keep one.")
-                    if showLane || Self.startLaneOpen {
+                    if showLane {
                         Card {
                             ForEach(Array(agents.enumerated()), id: \.element.id) { i, item in
                                 if i > 0 { Divider().padding(.leading, PT.rowH) }
@@ -96,6 +96,9 @@ private struct InboxRow: View {
                 .help("Later: it comes back in the inbox at the time you pick")
         }
         .padding(.horizontal, PT.rowH - 4).padding(.vertical, 6)
+        .keyRing(nav.focus == .inbox(item.id))
+        .id("inbox-" + item.id)
+        .help("I enters the inbox from the list. K keeps, D puts away, L brings it back tomorrow morning, Return opens.")
     }
 
     private var subtitle: String {

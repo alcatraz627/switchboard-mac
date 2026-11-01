@@ -84,6 +84,8 @@ enum NoteFocus: Equatable {
     case filter(Int)
     /// A note in the list, closed.
     case row(String)
+    /// An item in the inbox above the list: K keeps it, D puts it away, L brings it back tomorrow morning, Return opens it.
+    case inbox(String)
     /// A note open on one of its parts. `typing` false is reading (select and
     /// copy, nothing changes); true is editing a text part. A part of nil means
     /// nothing is chosen yet (a click opened it).
@@ -99,6 +101,7 @@ enum NoteFocus: Equatable {
 
 /// What a key asks for beyond moving the keyboard.
 enum NoteEffect: Equatable {
+    case inboxKeep(String), inboxDone(String), inboxLater(String), inboxOpen(String)
     case saveCompose
     case saveNote(String)
     case copy(String, NotePart)
@@ -122,6 +125,8 @@ enum NotesKeys {
         var typing = false
         /// Something is typed in the search box.
         var searching = false
+        /// The inbox items on screen, top to bottom.
+        var inbox: [String] = []
     }
 
     /// The part `by` steps away, and whether the keyboard types there.
@@ -136,7 +141,26 @@ enum NotesKeys {
         let first = c.ids.first.map(NoteFocus.row) ?? .filter(0)
         // a field the rules did not hand the keyboard to keeps every key
         if c.typing, !f.isTyping { return (f, [], false) }
+        // I steps into the inbox from anywhere the keyboard is not typing
+        if case .char("i") = k, !c.typing, let top = c.inbox.first {
+            switch f {
+            case .none, .filter, .row: return (.inbox(top), [], true)
+            default: break
+            }
+        }
         switch f {
+        case .inbox(let id):
+            let at = c.inbox.firstIndex(of: id)
+            switch k {
+            case .up: return (at.flatMap { $0 > 0 ? .inbox(c.inbox[$0 - 1]) : nil } ?? .none, [], true)
+            case .down: return (at.flatMap { $0 + 1 < c.inbox.count ? .inbox(c.inbox[$0 + 1]) : nil } ?? first, [], true)
+            case .char("k"): return (f, [.inboxKeep(id)], true)
+            case .char("d"): return (f, [.inboxDone(id)], true)
+            case .char("l"): return (f, [.inboxLater(id)], true)
+            case .enter, .right: return (f, [.inboxOpen(id)], true)
+            case .escape, .char("i"): return (.none, [], true)
+            default: return (f, [], false)
+            }
         case .none:
             switch k {
             case .down: return (.compose, [], true)
@@ -281,6 +305,8 @@ final class NotesNav: ObservableObject {
     }
 
     @Published var focus: NoteFocus = .none
+    /// The agents lane under the inbox is unfolded, so the keyboard walks its items too.
+    @Published var laneOpen = false
     @Published var filter: Set<String> = []
     /// Tags chosen on the filter row; a note must carry every one.
     @Published var tagFilter: Set<String> = []
@@ -600,10 +626,25 @@ enum KeyRouter {
         let store = NotesStore.shared
         let tv = window?.firstResponder as? NSTextView
         let typing = tv?.isEditable == true
-        let ctx = NotesKeys.Context(ids: nav.visible(store.live).map(\.id), typing: typing, searching: !nav.query.isEmpty)
+        let inboxIDs = NotesInbox.shared.waiting().map(\.id) + (nav.laneOpen ? NotesInbox.shared.lane().map(\.id) : [])
+        let ctx = NotesKeys.Context(ids: nav.visible(store.live).map(\.id), typing: typing, searching: !nav.query.isEmpty, inbox: inboxIDs)
         let (to, effects, used) = NotesKeys.reduce(nav.focus, k, ctx)
         for fx in effects {
             switch fx {
+            case .inboxKeep(let id), .inboxDone(let id), .inboxLater(let id), .inboxOpen(let id):
+                // the keyboard moves to the neighbour first, so the ring does not vanish with the row
+                let next = inboxIDs.firstIndex(of: id).flatMap { i in inboxIDs.indices.contains(i + 1) ? inboxIDs[i + 1] : (i > 0 ? inboxIDs[i - 1] : nil) }
+                let inbox = NotesInbox.shared
+                if case .inboxOpen = fx {
+                    if id.hasPrefix(".saved/") { if let n = SavedStore.readAll().first(where: { $0.id == String(id.dropFirst(7)) }) { SavedStore.shared.open(n) } }
+                    else { nav.focus = .open(id, nil, typing: false) }
+                    break
+                }
+                if case .inboxKeep = fx { inbox.keep(id) }
+                else if case .inboxDone = fx { inbox.done(id) }
+                else if let tomorrow = InboxLater.choices().first(where: { $0.title.hasPrefix("Tomorrow") }) { inbox.later(id, until: tomorrow.date) }
+                nav.focus = next.map(NoteFocus.inbox) ?? .none
+
             case .saveCompose: nav.saveCompose(store, caret: tv?.selectedRange().location)
             case .saveNote: nav.saveTick += 1
             case .copy(let id, let part):
@@ -632,7 +673,9 @@ enum KeyRouter {
             }
         }
         // a save that moved the keyboard into the new note wins over the rules' answer
-        if !effects.contains(.saveCompose), to != nav.focus { nav.focus = to }
+        let movedByInbox = effects.contains { if case .inboxKeep = $0 { return true }; if case .inboxDone = $0 { return true }
+                                              if case .inboxLater = $0 { return true }; if case .inboxOpen = $0 { return true }; return false }
+        if !effects.contains(.saveCompose), !movedByInbox, to != nav.focus { nav.focus = to }
         if let id = nav.focus.noteID { FocusScroll.shared.show("note-" + id) }
         // a picker belongs to its part: moving off the part closes it
         if let p = nav.picker, nav.focus != .open(nav.focus.noteID ?? "", p, typing: false) { nav.picker = nil }
@@ -725,6 +768,7 @@ final class HotKeys {
     func reloadChords() {
         for r in refs { if let r { UnregisterEventHotKey(r) } }
         refs = []
+        failed = []
         registerChords()
     }
 
@@ -757,10 +801,23 @@ final class HotKeys {
             var ref: EventHotKeyRef?
             let id = EventHotKeyID(signature: OSType(0x53574244), id: UInt32(i))   // "SWBD"
             let r = RegisterEventHotKey(UInt32(c.key), c.mods, id, GetApplicationEventTarget(), 0, &ref)
-            if r != noErr { dlog("hotkey \(c.label) not registered (\(r)); another app may hold it") }
+            if r != noErr {
+                dlog("hotkey \(c.label) not registered (\(r)); another app may hold it")
+                failed.append(c.label)
+            }
             refs.append(ref)
         }
     }
+
+    /// What Settings says under the capture chords: on, off, or that another app holds one so it does not work.
+    static func captureNote(on: Bool, failed: [String]) -> String {
+        let held = failed.filter { $0 == "⌥⇧N" || $0 == "⌥⇧L" }
+        if on, !held.isEmpty { return "not working: another app holds " + held.joined(separator: " and ") }
+        return on ? "on: from any app, Esc goes back" : "off"
+    }
+
+    /// Chords macOS refused at the last registration, by label, so Settings can say another app holds them.
+    private(set) var failed: [String] = []
 
     private func watchCommand() {
         let feed: (NSEvent) -> Void = { [weak self] e in
