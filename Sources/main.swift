@@ -88,7 +88,7 @@ if args.contains("--probe-notes") {
         exit(2)
     }
     let report = probeNotes()
-    let sync = probeSpecFixtures() + probeCapture() + probeNotesSync() + probeMarkdown() + probeFormat()
+    let sync = probeSpecFixtures() + probeCapture() + probeSaved() + probeNotesSync() + probeMarkdown() + probeFormat()
     print(report)
     print(sync.joined(separator: "\n"))
     exit(report.hasSuffix("all passed") && !sync.contains { $0.hasPrefix("FAIL") } ? 0 : 1)

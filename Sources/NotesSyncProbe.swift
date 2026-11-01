@@ -136,6 +136,46 @@ private func probeGitHubSync() -> [String] {
     check("a change from a second clone merges in", fm.fileExists(atPath: mac + "/notes/o1.md") && r2.ok, "\(r2)")
     check("an empty tick after that is quiet and still ok", sync.syncNow(force: false).ok)
 
+    // 6b. what a merge brings in shows in the inbox, with a notification; nothing written here does
+    let inbox = NotesInbox.shared
+    inbox.reload()
+    for i in inbox.items { inbox.keep(i.id) }
+    var sent: [(String, String)] = []
+    let oldDeliver = NotesInbox.deliver
+    NotesInbox.deliver = { t, b, _ in sent.append((t, b)) }
+    defer { NotesInbox.deliver = oldDeliver }
+    g(other, "pull", "-q", "--no-rebase")
+    put(other, "notes/20261101-120000-ab12.md", note("Link from the phone", body: "read this"))
+    put(other, "notes/.saved/8849d9f8cb0c.md", "---\ntitle: \"A saved page\"\nurl: \"https://example.com/a?b=1\"\n---\n")
+    put(other, "notes/20261101-120100-cd34.md", "---\ntitle: \"Agent finding\"\nagent: \"claude-1\"\n---\nfound it\n")
+    put(other, "notes/n1.md", note("One", pos: "i", body: "mac words\nan edit from the phone"))
+    otherSaves("phone: add")
+    put(mac, "notes/mine.md", note("Written here", body: "this Mac wrote it")); sync.commitNow("save")
+    sync.syncNow(force: true)
+    let waiting = inbox.waiting().map(\.id).sorted(), lane = inbox.lane().map(\.id)
+    check("a note and a save the merge brought in are in the inbox", waiting == [".saved/8849d9f8cb0c", "20261101-120000-ab12"], "\(waiting)")
+    check("a note written on this Mac is not", !inbox.items.contains { $0.id == "mine" })
+    check("an edit to a note that was already here is not an arrival", !inbox.items.contains { $0.id == "n1" })
+    check("an agent's note goes to its lane, not the owner's list", lane == ["20261101-120100-cd34"] && !waiting.contains("20261101-120100-cd34"), "\(lane)")
+    check("a notification was raised for the owner's arrivals and not for the agent's", sent.count == 1 && sent[0].1.contains("saved page") && !sent.contains { $0.1.contains("Agent finding") }, "\(sent)")
+    check("the seen state is kept in this Mac's state folder, with no new key in any note", FileManager.default.fileExists(atPath: NotesInbox.path)
+          && !read(mac, "notes/20261101-120000-ab12.md").contains("inbox") && !read(mac, "notes/20261101-120000-ab12.md").contains("seen"))
+    sync.syncNow(force: true)
+    check("another round does not list them again or notify again", inbox.items.count == 3 && sent.count == 1)
+    inbox.later(".saved/8849d9f8cb0c", until: Date().addingTimeInterval(3600))
+    check("later hides it until its time", !inbox.waiting().contains { $0.id == ".saved/8849d9f8cb0c" }
+          && inbox.waiting(now: Date().addingTimeInterval(7200)).contains { $0.id == ".saved/8849d9f8cb0c" })
+    inbox.keep("20261101-120000-ab12")
+    check("keep takes it out of the inbox and leaves the note", !inbox.items.contains { $0.id == "20261101-120000-ab12" } && fm.fileExists(atPath: mac + "/notes/20261101-120000-ab12.md"))
+    NotesStore.shared.load()
+    inbox.done("20261101-120100-cd34")
+    check("done puts a note away under Expired and takes it out of the inbox", !inbox.items.contains { $0.id == "20261101-120100-cd34" }
+          && read(mac, "notes/20261101-120100-cd34.md").contains("expires:"))
+    inbox.done(".saved/8849d9f8cb0c")
+    check("done removes a save and takes it out of the inbox", !inbox.items.contains { $0.id == ".saved/8849d9f8cb0c" }
+          && !fm.fileExists(atPath: mac + "/notes/.saved/8849d9f8cb0c.md"))
+    NotesInbox.deliver = oldDeliver
+
     // 7. body clash keeps both sides, and sync does not stop
     put(mac, "notes/n1.md", note("One", pos: "i", body: "mac words"))
     g(other, "pull", "-q", "--no-rebase"); put(other, "notes/n1.md", note("One", pos: "i", body: "other words")); otherSaves("other: edit")

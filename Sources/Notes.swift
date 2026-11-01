@@ -611,6 +611,7 @@ final class NotesStore: ObservableObject {
         loaded = true
         migrateOrderIfNeeded()
         loadTrash()
+        if !Self.probing, r.problem == nil { NotesInbox.shared.prune(dir: Self.dir) }
         // A read problem clears itself when the next read is clean (a drive plugged back in).
         if let p = r.problem { readProblem = p; error = p }
         else if let old = readProblem { readProblem = nil; if error == old { error = nil } }
@@ -625,7 +626,8 @@ final class NotesStore: ObservableObject {
         do { names = try fm.contentsOfDirectory(atPath: Self.dir) } catch {
             return ([], readProblemTag + "the folder could not be listed (\(error.localizedDescription)).")
         }
-        let files = names.filter { $0.hasSuffix(".md") }
+        // a hidden file is never a note, whatever it is called
+        let files = names.filter { $0.hasSuffix(".md") && !$0.hasPrefix(".") }
         var skipped = 0
         let read = files.compactMap { f -> Note? in
             guard let text = try? String(contentsOfFile: Self.dir + "/" + f, encoding: .utf8) else { skipped += 1; return nil }
@@ -750,12 +752,18 @@ final class NotesStore: ObservableObject {
     /// Now in whole seconds: the file keeps no more, and a note must sort the same before and after a reload.
     static func now() -> Date { Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down)) }
 
-    private func newID() -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
-        var id = f.string(from: Date())
-        while notes.contains(where: { $0.id == id }) { id += "x" }
+    /// `YYYYMMDD-HHMMSS-xxxx`: the time in UTC, then four random hex characters, as the notes spec says.
+    static func freshID(taken: (String) -> Bool = { _ in false }) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"; f.timeZone = TimeZone(identifier: "UTC"); f.locale = Locale(identifier: "en_US_POSIX")
+        var id: String
+        repeat { id = f.string(from: Date()) + "-" + String(format: "%04x", Int.random(in: 0...0xFFFF)) } while taken(id)
         return id
     }
+    private func newID() -> String {
+        Self.freshID { id in notes.contains { $0.id == id } || FileManager.default.fileExists(atPath: Self.dir + "/" + id + ".md") }
+    }
+    /// An id for a save that has no link to hash.
+    func newSaveID() -> String { Self.freshID { FileManager.default.fileExists(atPath: SavedStore.dir + "/" + $0 + ".md") } }
 
     /// A second note with the same words, tags, colour and link, placed under the first.
     /// It is never pinned and carries no reminder or expiry, so nothing fires twice.

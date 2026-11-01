@@ -177,6 +177,7 @@ private struct SyncLine: View {
 private struct NotesList: View {
     @ObservedObject var notes: NotesStore
     @ObservedObject var nav: NotesNav
+    @ObservedObject private var inbox = NotesInbox.shared
     @State private var showExpired = false
 
     /// The open note, when one is: the tab then shows only that note, at full size.
@@ -199,13 +200,17 @@ private struct NotesList: View {
     }
 
     private var list: some View {
-        let shown = nav.visible(notes.live)
+        // an agent's note waits in its lane above until it is kept, and is not part of the owner's own list
+        let lane = inbox.agentLaneIDs
+        let mine = lane.isEmpty ? notes.live : notes.live.filter { !lane.contains($0.id) }
+        let shown = nav.visible(mine)
         return VStack(alignment: .leading, spacing: PT.gap) {
             if let e = notes.error {
                 ReadingStatus(state: .failed(e)).padding(.horizontal, 4)
             }
             SyncLine()
             NoticeLine(notes: notes)
+            InboxSection(nav: nav)
             if !notes.loaded {
                 ReadingStatus(state: .loading).padding(.horizontal, 4)
             } else if notes.live.isEmpty && notes.expired.isEmpty && notes.error == nil {
@@ -213,7 +218,7 @@ private struct NotesList: View {
                     .padding(.horizontal, 4)
             }
             if !notes.live.isEmpty {
-                NoteFilterBar(nav: nav, hidden: notes.live.count - shown.count, tags: notes.live.tagCounts)
+                NoteFilterBar(nav: nav, hidden: mine.count - shown.count, tags: notes.live.tagCounts)
             }
             if !shown.isEmpty {
                 Card {

@@ -6,6 +6,29 @@
 import Foundation
 
 enum NotesFixture {
+    /// Saves of every shape: a short link, a very long one, a Mac folder, a file, a thought with no link, and tags with colours.
+    static func seedSaved(_ s: SavedStore) {
+        guard s.items.isEmpty else { return }
+        s.add(url: "https://news.ycombinator.com/item?id=41", title: "Unix pipeline explainer", tags: ["read-later", "unix"])
+        s.add(url: "https://example.com/a-very-long-article-title-about-nothing-in-particular/with/a/long/path?and=a&long=query#heading", title: "", tags: ["read-later"])
+        s.add(url: "file:///Users/alcatraz627/Code/", title: "Code", tags: ["work"])
+        s.add(url: "file:///Users/alcatraz627/Notes/feedback.md", title: "", tags: ["work", "notes"])
+        s.add(url: "", title: "Ask about the csync deploy", tags: [])
+        s.add(url: "https://github.com/alcatraz627/mnt-sync", title: "A repository title long enough to need cutting in the middle of the row, which is what the owner asked for", tags: [])
+        TagColors.set("read-later", to: "teal"); TagColors.set("work", to: "#f97316"); TagColors.set("unix", to: "purple")
+        s.load()
+    }
+
+    /// What arrived from elsewhere: a note and a save from the phone, and one note an agent wrote, with no notification.
+    static func seedInbox(_ s: NotesStore) {
+        NotesInbox.deliver = { _, _, _ in }
+        guard let phone = s.add(title: "Pick up the parcel on the way home", body: "from the phone, in the queue"),
+              var agent = s.add(title: "Agent finding: the deploy log is clean", body: "nothing to do") else { return }
+        agent.agent = "claude-1"; s.update(agent)
+        let link = SavedStore.shared.add(url: "https://example.com/shared-from-the-phone", title: "A page shared from the phone")
+        NotesInbox.shared.ingest(ids: [phone.id, ".saved/" + (link?.id ?? ""), agent.id], dir: NotesStore.dir, author: { _ in "the phone" })
+    }
+
     /// The markdown-heavy note goes in last, so it is the newest and the one a snapshot opens.
     static func seed(_ s: NotesStore) {
         func put(_ title: String, _ body: String, color: String? = nil, tags: [String] = [], pinned: Bool = false,

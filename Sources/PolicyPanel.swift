@@ -145,6 +145,12 @@ enum SwitchboardConcerns {
                                content: AnyView(NotesTabView(notes: NotesStore.shared)),
                                refresh: { NotesStore.shared.loadInBackground() },
                                pinned: AnyView(NotesTop())),
+            SwitchboardConcern(id: "saved", title: "Saved", subtitle: "Links · files", icon: Icons.tab["saved"]!,
+                               footer: "One file each in .saved. Point at a row to tag, copy or remove it.",
+                               footerIcon: "bookmark",
+                               content: AnyView(SavedTabView(saved: SavedStore.shared)),
+                               refresh: { SavedStore.shared.loadInBackground() },
+                               pinned: AnyView(SavedTop())),
             catalogTab(policy, id: "rules", title: "Hooks", subtitle: "Rules · hooks", icon: Icons.tab["rules"]!,
                        footer: "Problems sort first: a hook with no event, or one whose file is gone.",
                        search: "Search rules, gates and hooks", read: RulesCatalog.groups),
@@ -1599,6 +1605,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         // Notes: the folder moves to ~/Notes once, becomes a repository, and syncs with the Pi on a timer.
         NotesStore.migrateIfNeeded()
         NotesSync.shared.ensureRepo()
+        SavedStore.shared.migrateOldPinsIfNeeded()   // older notes with a link become saves, once
         NotesSync.shared.commit("start")   // whatever arrived while the app was closed becomes a version too
         NotesSync.shared.start()
         NotesSync.shared.sync()
@@ -2061,10 +2068,15 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
         TimerStore.shared.add(label: "Tea", color: "green", fireAt: Date().addingTimeInterval(245))
         TimerStore.shared.add(label: "Stand-up", color: "purple", fireAt: Date().addingTimeInterval(1800))
     }
+    if tab == "saved" {
+        SavedStore.shared.load()
+        if CommandLine.arguments.contains("--demo-notes") { NotesFixture.seedSaved(SavedStore.shared) }
+    }
     if tab == "notes" {
         NotesStore.remindersOff = true
         NotesStore.shared.load()
         if CommandLine.arguments.contains("--demo-notes") { NotesFixture.seed(NotesStore.shared) }
+        if CommandLine.arguments.contains("--demo-inbox") { NotesFixture.seedInbox(NotesStore.shared); InboxSection.startLaneOpen = true }
         NoteRow.startOpen = CommandLine.arguments.contains("--expand")
         NoteCompose.startExpanded = NoteRow.startOpen
     }

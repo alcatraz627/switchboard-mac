@@ -216,6 +216,7 @@ enum Icons {
         "ledger": "list.bullet.clipboard",
         "queue": "tray.full",
         "notes": "note.text",
+        "saved": "bookmark",
         "timers": "timer",
         "system": "desktopcomputer",
         "runtime": "bolt.horizontal",
@@ -313,7 +314,7 @@ enum Visibility {
     /// your desk, this Mac, the things around it, then Settings and Approvals.
     static let defaultTabOrder = ["agents", "usage", "plugins", "rules", "library",
                                   "ledger", "queue",
-                                  "notes", "timers",
+                                  "notes", "saved", "timers",
                                   "system", "runtime", "controls",
                                   "home", "remote",
                                   "settings", "approvals"]
@@ -323,7 +324,7 @@ enum Visibility {
     static let spaces: [(id: String, title: String, icon: String, tabs: [String])] = [
         ("claude", "Claude", ["agents", "usage", "plugins", "rules", "library"]),
         ("records", "Records", ["ledger", "queue"]),
-        ("desk", "Desk", ["notes", "timers"]),
+        ("desk", "Desk", ["notes", "saved", "timers"]),
         ("mac", "Mac", ["system", "runtime", "controls"]),
         ("around", "Around", ["home", "remote"]),
     ].map { ($0.0, $0.1, Icons.space[$0.0] ?? "square", $0.2) }

@@ -319,13 +319,18 @@ final class NotesSync: ObservableObject {
         if behind > 0 {
             var refusal: String?
             func merge() -> [String] {
+                let before = git(["rev-parse", "-q", "--verify", "HEAD"]).out.trimmingCharacters(in: .whitespacesAndNewlines)
                 let m = git(["merge", "-q", "--no-edit", remoteRef])
-                guard m.code != 0 else { return [] }
-                guard FileManager.default.fileExists(atPath: repo.gitDir + "/MERGE_HEAD") else {
-                    refusal = Self.plainMergeRefusal(m.err + m.out)
-                    return []
+                var came: [String] = []
+                if m.code != 0 {
+                    guard FileManager.default.fileExists(atPath: repo.gitDir + "/MERGE_HEAD") else {
+                        refusal = Self.plainMergeRefusal(m.err + m.out)
+                        return []
+                    }
+                    came = settleAndCommitMerge(repo)
                 }
-                return settleAndCommitMerge(repo)
+                if !before.isEmpty { recordArrivals(since: before) }
+                return came
             }
             let busy: () -> [String] = { refusal = Self.busyText; return [] }
             out = withLock(busy: busy(), merge)
@@ -350,6 +355,28 @@ final class NotesSync: ObservableObject {
         }
         refusedRounds = 0
         return (nil, touched)
+    }
+
+    /// The notes and saves a merge added (not written on this Mac), handed to the inbox with a notification.
+    /// `before` is where HEAD stood before the merge, so only what the other side brought is listed.
+    func recordArrivals(since before: String) {
+        let added = git(["diff", "--name-only", "--diff-filter=A", "--relative", before, "HEAD", "--", "."]).out
+            .split(separator: "\n").map(String.init)
+        let ids = NotesInbox.arrivalIDs(fromNames: added)
+        guard !ids.isEmpty else { return }
+        NotesInbox.shared.ingest(ids: ids, dir: dir, author: { id in
+            let r = self.git(["log", "--diff-filter=A", "--format=%an", "-1", "\(before)..HEAD", "--", "./\(id).md"])
+            let name = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? nil : Self.deviceWord(name)
+        })
+    }
+
+    /// A commit author as a short word for where it came from: "the phone", or the name as given.
+    static func deviceWord(_ author: String) -> String {
+        let a = author.lowercased()
+        if a.contains("phone") || a.contains("android") || a.contains("csync") { return "the phone" }
+        if a.contains("github") { return "another device" }
+        return author
     }
 
     /// After a merge that stopped on clashes: settle what the rules settle, keep both sides of the rest, and commit.
