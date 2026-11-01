@@ -74,6 +74,12 @@ if args.contains("--probe-timers-tab") {
     print(report)
     exit(report.hasSuffix("all passed") ? 0 : 1)
 }
+if args.contains("--probe-spec") {
+    // the notes spec's fixtures against the reader and writer; reads fixtures only, writes nothing
+    let lines = probeSpecFixtures()
+    print((lines + [lines.contains { $0.hasPrefix("FAIL") } ? "some failed" : "all passed"]).joined(separator: "\n"))
+    exit(lines.contains { $0.hasPrefix("FAIL") } ? 1 : 0)
+}
 if args.contains("--probe-notes") {
     // The probe adds, reorders and deletes notes; run against the owner's own folder it once left
     // test notes in ~/Notes and reset their order. It runs only inside a scratch state folder.
@@ -82,7 +88,7 @@ if args.contains("--probe-notes") {
         exit(2)
     }
     let report = probeNotes()
-    let sync = probeNotesSync() + probeMarkdown() + probeFormat()
+    let sync = probeSpecFixtures() + probeNotesSync() + probeMarkdown() + probeFormat()
     print(report)
     print(sync.joined(separator: "\n"))
     exit(report.hasSuffix("all passed") && !sync.contains { $0.hasPrefix("FAIL") } ? 0 : 1)

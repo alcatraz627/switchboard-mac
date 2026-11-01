@@ -50,6 +50,7 @@ if /usr/bin/swiftc -O "${SRCS[@]}" -o "$BIN" > "$WORK/compile.log" 2>&1; then
   check "a transcript window says when the hub is down" "$BIN" --probe-transcript
   check "a section hidden in Settings is neither drawn nor read" "$BIN" --probe-visibility
   check "the Settings tab renders" "$BIN" --snapshot "$WORK/settings.png" --tab settings
+  check "every notes-spec fixture passes: reading, writing, settling, order, pos, ids, save keys" "$BIN" --probe-spec
   check "notes save, read back, expire, reorder and delete (scratch folder)" env SWITCHBOARD_STATE="$WORK/notes-state" "$BIN" --probe-notes
   if env SWITCHBOARD_STATE="$WORK/drive-state" "$BIN" --drive-notes "$WORK/drive" > "$WORK/drive.log" 2>&1; then
     ok "Notes and Timers work by keyboard alone: write, save, read, select, filter, edit, rename, extend, clear (scratch folder)"

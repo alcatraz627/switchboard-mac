@@ -495,6 +495,10 @@ struct Note: Identifiable, Equatable {
     var source: String? = nil
     /// A pin is a note with a link: title, body and url are each optional, one is needed.
     var url: String? = nil
+    /// Keep ringing until dismissed (`remind_persist: true`).
+    var remindPersist = false
+    /// The only device a `file://` link opens on ("mac"); nil for a link that opens anywhere.
+    var device: String? = nil
     /// Where the note sits in the shared order, written bare; nil until it is first arranged. See NotePos.
     var pos: String? = nil
     /// Header lines Switchboard has no field for, written back as they were, so a key
@@ -886,90 +890,51 @@ final class NotesStore: ObservableObject {
 
     /// Strings are written JSON-quoted, so a colon or quote in a title survives.
     static func render(_ n: Note) -> String {
-        func q(_ s: String) -> String {
-            (try? JSONSerialization.data(withJSONObject: [s], options: [.withoutEscapingSlashes]))
-                .flatMap { String(data: $0, encoding: .utf8) }.map { String($0.dropFirst().dropLast()) } ?? "\"\""
-        }
         // a note holding a clash is the whole file as read; writing a header above it would bury the markers
         if NotesSync.conflicted(n.body) { return n.body + "\n" }
-        var lines = ["---", "title: " + q(n.title)]
-        // a hand-written note with no created line stays without one (the Pi leaves it absent too)
-        if n.created != Date.distantPast { lines.append("created: " + iso.string(from: n.created)) }
-        if !n.tags.isEmpty { lines.append("tags: " + q(n.tags.joined(separator: ", "))) }
-        if let e = n.expires { lines.append("expires: " + iso.string(from: e)) }
-        if let r = n.remindAt {
-            lines.append("remind_at: " + iso.string(from: r))
-            if n.remindRepeat != .never { lines.append("remind_repeat: " + n.remindRepeat.rawValue) }
-            if let o = n.remindOn, !o.isEmpty { lines.append("remind_on: " + o) }
+        var r = NoteSpec.Record()
+        r.title = n.title
+        // a hand-written note with no created line stays without one
+        if n.created != Date.distantPast { r.created = iso.string(from: n.created) }
+        r.tags = n.tags
+        r.expires = n.expires.map(iso.string(from:))
+        if let at = n.remindAt {
+            r.remindAt = iso.string(from: at)
+            r.remindRepeat = n.remindRepeat == .never ? nil : n.remindRepeat.rawValue
+            r.remindOn = n.remindOn
+            r.remindPersist = n.remindPersist
         }
-        if let id = n.reminderID, !id.isEmpty { lines.append("reminder_id: " + q(id)) }
-        if n.pinned { lines.append("pinned: true") }
-        if let c = n.color { lines.append("color: " + c) }
-        if let a = n.agent { lines.append("agent: " + q(a)) }
-        if let s = n.source { lines.append("source: " + q(s)) }
-        if let u = n.url { lines.append("url: " + q(u)) }
-        // bare, so a reader that sees `no` or `1e5` still gets the exact text back
-        if let p = n.pos, !p.isEmpty { lines.append("pos: " + p) }
-        lines += n.extra
-        lines.append("---")
-        return lines.joined(separator: "\n") + "\n" + n.body + (n.body.isEmpty ? "" : "\n")
+        r.reminderId = n.reminderID
+        r.pinned = n.pinned; r.color = n.color; r.agent = n.agent; r.source = n.source; r.url = n.url; r.device = n.device
+        r.pos = n.pos; r.extraLines = n.extra
+        r.body = n.body + (n.body.isEmpty ? "" : "\n")
+        return NoteSpec.render(r)
     }
 
     static func parse(id: String, _ raw: String) -> Note? {
-        // a file saved on Windows or by some editors ends lines with \r\n; the Pi and bfb read it as \n
-        let text = raw.replacingOccurrences(of: "\r\n", with: "\n")
-        var fields: [String: String] = [:]
-        var extra: [String] = []
-        let known: Set<String> = ["title", "created", "tags", "expires", "remind_at", "remind_repeat", "remind_on", "reminder_id",
-                                  "pinned", "color", "agent", "source", "url", "pos"]
-        var body = text
-        // a file holding a clash is not parsed for a header: the whole file is its body and its name is its title,
-        // which covers a clash inside the header and one that straddles the closing fence
-        if NotesSync.conflicted(text) {
-            return Note(id: id, title: id, body: text.trimmingCharacters(in: .whitespacesAndNewlines), tags: [], created: Date.distantPast)
+        // the file's fields come from the spec reader (NoteSpec); this maps them onto a note the editor can hold
+        let r = NoteSpec.read(raw, name: id)
+        if r.conflicted {
+            return Note(id: id, title: id, body: r.body.trimmingCharacters(in: .whitespacesAndNewlines), tags: [], created: Date.distantPast)
         }
-        // from offset 3, so an empty block ("---" then "---") closes too
-        if text.hasPrefix("---\n"), let end = text.range(of: "\n---\n", range: text.index(text.startIndex, offsetBy: 3)..<text.endIndex) {
-            let start = text.index(text.startIndex, offsetBy: 4)
-            for line in (start < end.lowerBound ? text[start..<end.lowerBound] : "").components(separatedBy: "\n") {
-                guard let c = line.firstIndex(of: ":") else {
-                    // a non-blank line with no colon (a YAML list item from another editor) is kept in place
-                    if !line.trimmingCharacters(in: .whitespaces).isEmpty { extra.append(line) }
-                    continue
-                }
-                if !known.contains(String(line[..<c]).trimmingCharacters(in: .whitespaces)) { extra.append(line); continue }
-                var v = String(line[line.index(after: c)...]).trimmingCharacters(in: .whitespaces)
-                if v.hasPrefix("\""), let d = try? JSONSerialization.jsonObject(with: Data("[\(v)]".utf8)) as? [String], let s = d.first { v = s }
-                // YAML single quotes, as other editors write them: '' is a literal quote
-                else if v.count >= 2, v.hasPrefix("'"), v.hasSuffix("'") { v = String(v.dropFirst().dropLast()).replacingOccurrences(of: "''", with: "'") }
-                fields[String(line[..<c]).trimmingCharacters(in: .whitespaces)] = v
-            }
-            body = String(text[end.upperBound...])
+        var body = r.body.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A title taken from the first line stays in the file's body; the editor holds title and body apart,
+        // so that line leaves its body field here and the next save writes a title key.
+        if r.titleFromBody {
+            body = body.components(separatedBy: "\n").dropFirst().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        if let t = fields["title"] { fields["title"] = t.trimmingCharacters(in: .whitespaces).isEmpty ? nil : t.trimmingCharacters(in: .whitespaces) }
-        body = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        // A file written by hand has no title field: its first line is the
-        // title (a markdown heading loses its #) and the rest stays the body.
-        var title = fields["title"] ?? id
-        if fields["title"] == nil, !body.isEmpty {
-            let lines = body.components(separatedBy: "\n")
-            title = lines[0].drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)
-            body = lines.dropFirst().joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return Note(id: id, title: title, body: body,
-                    tags: (fields["tags"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty },
-                    created: fields["created"].flatMap(iso.date) ?? Date.distantPast,
-                    expires: fields["expires"].flatMap(iso.date),
-                    remindAt: fields["remind_at"].flatMap(iso.date),
-                    remindRepeat: fields["remind_repeat"].flatMap(Note.Repeat.init) ?? .never,
-                    remindOn: fields["remind_on"].flatMap { $0.isEmpty ? nil : $0 },
-                    reminderID: fields["reminder_id"],
-                    pinned: fields["pinned"] == "true",
-                    color: fields["color"].flatMap(noteColorName),
-                    agent: fields["agent"].flatMap { $0.isEmpty ? nil : $0 },
-                    source: fields["source"].flatMap { $0.isEmpty ? nil : $0 },
-                    url: fields["url"].flatMap { $0.isEmpty ? nil : $0 },
-                    pos: fields["pos"].flatMap { $0.isEmpty ? nil : $0 }, extra: extra)
+        return Note(id: id, title: r.title, body: body, tags: r.tags,
+                    created: r.created.flatMap(iso.date) ?? Date.distantPast,
+                    expires: r.expires.flatMap(iso.date),
+                    remindAt: r.remindAt.flatMap(iso.date),
+                    remindRepeat: r.remindRepeat.flatMap(Note.Repeat.init) ?? .never,
+                    remindOn: r.remindOn,
+                    reminderID: r.reminderId,
+                    pinned: r.pinned,
+                    color: r.rawColor.flatMap(noteColorName),
+                    agent: r.agent, source: r.source, url: r.url,
+                    remindPersist: r.remindPersist, device: r.device,
+                    pos: r.pos, extra: r.extraLines)
     }
 
     // ── Reminders ───────────────────────────────────────────────────────────
