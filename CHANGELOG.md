@@ -7,6 +7,9 @@
 - **An inbox.** A note or save that arrives from the phone or another device shows in an inbox above the Notes list with a macOS notification. Keep, Done and Later take it out. A note an agent wrote waits in its own lane. Nothing here wakes an agent.
 - **A Saved tab.** Links, files and folders from `.saved/`, with add, tag, open, copy and remove. Older notes that carry a link or the `pin` tag move there once, in one commit.
 - **Reminders ring.** A reminder for this Mac plays a sound with a Dismiss button until you dismiss it, even with the panel closed. `remind_persist` keeps it ringing; one you missed stays marked as missed. Dismissing clears a one-off or moves a repeating reminder on, and that edit syncs.
+- **A better editor.** Option-Up and Option-Down move the lines you have selected, and Option-Shift with them copies the lines, as in VS Code. Reading a note draws tables, and a link into `attachments/` opens the file whatever it is called. Settings, Desk has a tag colours page: pick a colour for each tag, saved in the notes folder so the phone shows it too, and rename a tag everywhere.
+- **Recently deleted reads git.** A note deleted on another device is listed too. Deleting a note removes an attachment only when no other note or save links to it, and restoring brings it back.
+- **Now shows what waits on you from Notes**: reminders that rang with nobody there, the inbox, and notes from agents. Reminders.app gets no copy of a reminder while Switchboard is running and ringing it itself, so it no longer notifies twice.
 - New note ids use the spec's form, `YYYYMMDD-HHMMSS-xxxx`, and hidden files are never read as notes.
 
 ## 0.4.0 (2026-10-02)
