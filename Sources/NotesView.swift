@@ -162,6 +162,17 @@ private struct NoticeLine: View {
     }
 }
 
+/// Says when the notes are not reaching GitHub, in plain words with how old the copy is; nothing when all is well.
+private struct SyncLine: View {
+    @ObservedObject var sync = NotesSync.shared
+    var body: some View {
+        if let p = sync.problem {
+            Label(p, systemImage: "exclamationmark.triangle").font(PT.caption).foregroundStyle(Color.orange)
+                .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 4)
+        }
+    }
+}
+
 /// The notes under the colour filter, each row knowing whether it has the keyboard.
 private struct NotesList: View {
     @ObservedObject var notes: NotesStore
@@ -193,6 +204,7 @@ private struct NotesList: View {
             if let e = notes.error {
                 ReadingStatus(state: .failed(e)).padding(.horizontal, 4)
             }
+            SyncLine()
             NoticeLine(notes: notes)
             if !notes.loaded {
                 ReadingStatus(state: .loading).padding(.horizontal, 4)
@@ -895,7 +907,12 @@ struct NoteRow: View {
                     ForEach([("This Mac", "desktopcomputer", NotesSync.Keep.mine, "Keep this Mac's side of every clash"),
                              ("Other", "iphone", NotesSync.Keep.theirs, "Keep the other device's side of every clash"),
                              ("Both", "square.on.square", NotesSync.Keep.both, "Keep both sides, this Mac's first")], id: \.0) { title, icon, keep, help in
-                        Button { d.wrappedValue.body = NotesSync.resolve(d.wrappedValue.body, keep: keep); save() } label: {
+                        Button {
+                            // the clash was the whole file, header included: the settled text is read again as a note
+                            let settled = NotesSync.resolve(d.wrappedValue.body, keep: keep)
+                            d.wrappedValue = NotesStore.parse(id: note.id, settled) ?? { var n = d.wrappedValue; n.body = settled; return n }()
+                            save()
+                        } label: {
                             Label(title, systemImage: icon).lineLimit(1).fixedSize()
                         }
                         .sbControlSize(.small).help(help)

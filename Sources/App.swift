@@ -52,6 +52,11 @@ final class SwitchboardApp: NSObject, NSApplicationDelegate {
             store.cancelSystemTimer = { [weak self] k in self?.cancelSystemTimer(k) }
             store.endSystemTimerNow = { [weak self] k in self?.endSystemTimerNow(k) }
         }
+        // a notes sync that fails (or mends) reaches the menu-bar dot at once, not at the next machine snapshot
+        NotificationCenter.default.addObserver(forName: NotesSync.changed, object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.policyController?.updateDot(problems: self.problems())
+        }
         systemTimerTick = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             self?.fireDueSystemTimers()
         }
@@ -1838,6 +1843,11 @@ extension SwitchboardApp {
                 let title = groups.first { $0.rows.contains { $0.label == label } }?.title
                 out.append(Problem(text: "\(label): \(why)", tab: title.flatMap { Visibility.groupTab[$0] } ?? "system", level: .error))
             }
+        }
+        // notes that stopped reaching GitHub: a warning for the first few minutes (a dropped connection mends itself), an error after
+        if let why = NotesSync.shared.problem {
+            let recent = NotesSync.shared.lastSync.map { Date().timeIntervalSince($0) < 600 } ?? false
+            out.append(Problem(text: "Notes: " + why, tab: "notes", level: recent ? .warn : .error))
         }
         let off = s.gates.filter { if case .on = $0.kind { return false }; return true }.count
         if off > 0 { out.append(Problem(text: off == 1 ? "1 gate is off" : "\(off) gates are off", tab: "rules", level: .warn, query: "gates")) }

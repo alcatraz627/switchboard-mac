@@ -16,7 +16,8 @@ enum PiLink {
 
     /// The Pi's host: the one the notes remote syncs with, else the known Tailscale address.
     static func host(remote: String) -> String {
-        guard let at = remote.firstIndex(of: "@") else { return defaultHost }
+        // notes sync through GitHub now: a web address says nothing about where the Pi is
+        guard !remote.contains("://"), let at = remote.firstIndex(of: "@") else { return defaultHost }
         let rest = remote[remote.index(after: at)...]
         let h = rest.prefix { $0 != ":" && $0 != "/" }
         return h.isEmpty ? defaultHost : String(h)

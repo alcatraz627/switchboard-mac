@@ -153,7 +153,7 @@ struct SettingsTabView: View {
                       rows: hover.map(hoverRow))
             }
             if (folder || timerSettings || dotSettings) && on("desk") {
-                group("Notes", note: "One markdown file per note, every save kept; the Pi and the phone share the folder.", rows: [notesFolderRow, notesRemoteRow])
+                group("Notes", note: "One markdown file per note, every save kept; GitHub carries the folder to the phone.", rows: [notesFolderRow, notesRemoteRow])
                 NoteDotsEditor()
                 VStack(alignment: .leading, spacing: 5) {
                     GroupHeader(name: "Timers")
@@ -475,26 +475,26 @@ struct SettingsTabView: View {
 
     @ObservedObject private var sync = NotesSync.shared
 
-    /// The Pi's repository the notes folder syncs with; empty keeps history local only.
+    /// The GitHub repository the notes folder syncs with; empty uses the clone's own origin, and with neither history stays local.
     private var notesRemoteRow: SystemRow {
         let remote = sync.remote
         let when = sync.lastSync.map { "synced " + age($0) } ?? "not synced yet"
         var r = SystemRow(label: remote.isEmpty ? "No sync remote" : remote,
                           state: sync.problem == nil && !remote.isEmpty ? .ok : .off,
-                          note: remote.isEmpty ? "every save is still kept as a version here" : (sync.problem ?? when)
+                          note: remote.isEmpty ? (sync.problem ?? "every save is still kept as a version here") : (sync.problem ?? when)
                               + (sync.conflicts > 0 ? " · \(sync.conflicts) note\(sync.conflicts == 1 ? "" : "s") with both sides" : ""),
-                          tip: "A git remote on the Pi, user@host:Notes.git. Saves commit here; the Pi's edits come in on a timer.")
+                          tip: "The GitHub repository for the notes, https://github.com/user/repo.git. Saves commit here; other devices' edits come in about once a minute.")
         r.key = "settings-notes-remote"
         r.showsBadge = false
         r.labelIsName = true
-        r.buttons = [RowButton(label: "Set remote", kind: .ask(placeholder: "user@host:Notes", { line in
+        r.buttons = [RowButton(label: "Set remote", kind: .ask(placeholder: "https://github.com/user/repo.git", { line in
             AppDefaults.store.set(line.trimmingCharacters(in: .whitespaces), forKey: NotesSync.remoteKey)
             DispatchQueue.main.async { NotesSync.shared.sync(); store.objectWillChange.send() }
             return nil
         }), help: "Set the remote and sync now", icon: "arrow.triangle.2.circlepath")]
         if !remote.isEmpty {
             r.buttons.append(RowButton(label: "Sync", kind: .run({ DispatchQueue.main.async { NotesSync.shared.sync() }; return nil }),
-                                       help: "Pull the Pi's edits and push yours now", icon: "arrow.clockwise"))
+                                       help: "Pull other devices' edits and push yours now", icon: "arrow.clockwise"))
         }
         for i in r.buttons.indices { r.buttons[i].words = true }
         return r
