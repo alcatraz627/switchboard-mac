@@ -88,7 +88,7 @@ if args.contains("--probe-notes") {
         exit(2)
     }
     let report = probeNotes()
-    let sync = probeSpecFixtures() + probeCapture() + probeReminders() + probeSaved() + probeNotesSync() + probeMarkdown() + probeFormat()
+    let sync = probeSpecFixtures() + probeCapture() + probeLineEdit() + probeReminders() + probeSaved() + probeNotesMore() + probeNotesSync() + probeMarkdown() + probeFormat()
     print(report)
     print(sync.joined(separator: "\n"))
     exit(report.hasSuffix("all passed") && !sync.contains { $0.hasPrefix("FAIL") } ? 0 : 1)
@@ -196,6 +196,12 @@ if let out = argAfter("--snapshot-quick") {
         + problems.enumerated().map { StatusBadge(problem: $1, index: $0) }
         + [StatusBadge(id: "down", icon: "bolt.slash.fill", text: "Down: kanban, session hub", kind: .error, help: "", tab: "runtime"),
            StatusBadge(id: "timer", icon: Icons.tab["timers"] ?? "timer", text: "Tea", kind: .info, help: "", tab: "timers", until: Date().addingTimeInterval(245))]
+    // --demo-inbox plants what arrived and what was missed, so the notes badges on Now can be drawn
+    if args.contains("--demo-inbox"), ProcessInfo.processInfo.environment["SWITCHBOARD_STATE"] != nil {
+        NotesStore.remindersOff = true
+        NotesFixture.seedInbox(NotesStore.shared)
+        state.badges += NotesWaiting.badges(inbox: NotesInbox.shared, notes: NotesStore.shared.notes, ringer: ReminderRinger.shared)
+    }
     // Pages that read on appear are filled first, so the card is measured at its real size.
     let controls = ControlsStore()
     if page == .controls { controls.load(devices: false) }

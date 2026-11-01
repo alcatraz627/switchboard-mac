@@ -1495,6 +1495,10 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
             out.append(StatusBadge(id: "approvals", icon: "hand.raised.fill", text: "\(n) waiting", kind: .waiting,
                                    help: "\(n) push\(n == 1 ? "" : "es") or ask\(n == 1 ? "" : "s") wait on you", opens: .approvals))
         }
+        // the notes side of what needs you: arrivals nobody has looked at, reminders that rang with nobody there, agents' notes
+        if chosen.contains(.approvals) {
+            out += NotesWaiting.badges(inbox: NotesInbox.shared, notes: NotesStore.shared.notes, ringer: ReminderRinger.shared)
+        }
         if chosen.contains(.problems) {
             out += problemList.enumerated().map { StatusBadge(problem: $1, index: $0) }
         }
@@ -2068,6 +2072,12 @@ func snapshotPolicyPanel(to path: String, dark: Bool, scopeDir: String?,
     if tab == "timers", CommandLine.arguments.contains("--demo-states"), TimerStore.shared.timers.isEmpty {
         TimerStore.shared.add(label: "Tea", color: "green", fireAt: Date().addingTimeInterval(245))
         TimerStore.shared.add(label: "Stand-up", color: "purple", fireAt: Date().addingTimeInterval(1800))
+    }
+    if tab == "settings", CommandLine.arguments.contains("--demo-notes") {
+        NotesStore.remindersOff = true
+        NotesStore.shared.load()
+        NotesFixture.seed(NotesStore.shared)
+        SavedStore.shared.load(); NotesFixture.seedSaved(SavedStore.shared)
     }
     if tab == "saved" {
         SavedStore.shared.load()

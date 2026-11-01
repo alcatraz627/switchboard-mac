@@ -102,8 +102,18 @@ final class EditorTextView: NSTextView {
     override func performKeyEquivalent(with e: NSEvent) -> Bool {
         formatKey(e) || super.performKeyEquivalent(with: e)
     }
+    /// ⌥↑ ⌥↓ move the lines the selection touches; ⌥⇧↑ ⌥⇧↓ copy them above or below, as in VS Code.
+    private func lineKey(_ e: NSEvent) -> Bool {
+        guard isEditable, e.keyCode == 126 || e.keyCode == 125 else { return false }
+        let mods = e.modifierFlags.intersection([.command, .shift, .option, .control])
+        guard mods == .option || mods == [.option, .shift] else { return false }
+        let up = e.keyCode == 126
+        guard let edit = mods == .option ? LineEdit.move(string, selectedRange(), up: up) : LineEdit.duplicate(string, selectedRange(), up: up) else { return true }
+        LineEdit.apply(edit, to: self)
+        return true
+    }
     override func keyDown(with e: NSEvent) {
-        if formatKey(e) { return }
+        if formatKey(e) || lineKey(e) { return }
         super.keyDown(with: e)
     }
     // A picture file dropped on the text is attached, like a pasted one; other drops insert as before.

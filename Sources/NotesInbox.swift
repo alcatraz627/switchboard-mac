@@ -7,6 +7,34 @@
 import Foundation
 import UserNotifications
 
+/// The notes side of "what needs you", as the badges on the Now page: small, one badge per kind, each opening Notes.
+enum NotesWaiting {
+    static func badges(inbox: NotesInbox, notes: [Note], ringer: ReminderRinger, now: Date = Date()) -> [StatusBadge] {
+        var out: [StatusBadge] = []
+        func plural(_ n: Int, _ one: String, _ many: String) -> String { n == 1 ? one : many }
+        let ringingNow = notes.filter { ringer.ringing.contains($0.id) }.count
+        let missed = notes.filter { ReminderRinger.dueHere($0, now: now) && ringer.missed($0, now: now) }.count
+        if ringingNow > 0 {
+            out.append(StatusBadge(id: "notes-ringing", icon: "bell.badge.fill", text: "\(ringingNow) \(plural(ringingNow, "reminder", "reminders")) ringing",
+                                   kind: .waiting, help: "Dismiss it in Notes", tab: "notes"))
+        }
+        if missed > 0 {
+            out.append(StatusBadge(id: "notes-missed", icon: "bell.slash", text: "\(missed) missed \(plural(missed, "reminder", "reminders"))",
+                                   kind: .waiting, help: "A reminder's time passed and nobody dismissed it", tab: "notes"))
+        }
+        let mine = inbox.waiting(now: now).count, agents = inbox.lane(now: now).count
+        if mine > 0 {
+            out.append(StatusBadge(id: "notes-inbox", icon: "tray.and.arrow.down", text: "\(mine) in the inbox",
+                                   kind: .waiting, help: "Notes and saves that arrived from another device", tab: "notes"))
+        }
+        if agents > 0 {
+            out.append(StatusBadge(id: "notes-agents", icon: "cpu", text: "\(agents) from \(plural(agents, "an agent", "agents"))",
+                                   kind: .info, help: "Notes agents wrote, waiting in their own lane", tab: "notes"))
+        }
+        return out
+    }
+}
+
 final class NotesInbox: ObservableObject {
     static let shared = NotesInbox()
 

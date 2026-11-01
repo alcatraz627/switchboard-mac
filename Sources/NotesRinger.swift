@@ -29,6 +29,9 @@ final class ReminderRinger: ObservableObject {
     /// How a ring is announced; a probe replaces it to count notifications.
     var announce: (Note) -> Void = ReminderRinger.postNotification
 
+    /// True once the app is watching reminders, so its own ring covers them and Reminders.app gets no copy.
+    var canRing: Bool { tick != nil }
+
     // ── Which reminders are due ─────────────────────────────────────────────
 
     /// A reminder this Mac rings: it has a time, that time has come, and its device is the Mac (left out means the Mac).
@@ -64,6 +67,9 @@ final class ReminderRinger: ObservableObject {
         tick = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.check(NotesStore.shared.notes) }
         DispatchQueue.main.async { self.check(NotesStore.shared.notes) }
     }
+
+    /// Stops watching; a probe uses it after starting the shared ringer.
+    func stopWatching() { tick?.invalidate(); tick = nil }
 
     /// One look at the notes: ring what has come due and is not handled; stop what was dismissed elsewhere.
     func check(_ notes: [Note], now: Date = Date()) {

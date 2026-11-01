@@ -807,10 +807,45 @@ final class NotesStore: ObservableObject {
             self.error = "\(n.title) could not be removed: \(error.localizedDescription)"; return
         }
         notes.removeAll { $0.id == n.id }
+        removeUnreferencedAttachments(of: n)
         loadTrash()
         NotesSync.shared.commit("delete")
         // The note is gone either way; a reminder left behind would fire for nothing.
         if let p = reminderProblem { self.error = "The note was deleted, but its reminder was not removed: \(p)" }
+    }
+
+    // ── Attachments ─────────────────────────────────────────────────────────
+
+    /// The `attachments/` paths a text links to, `![name](attachments/x.png)` or `[name](attachments/x.pdf)`, percent-decoded.
+    static func attachmentPaths(in text: String) -> [String] {
+        text.matches(of: #/\]\((attachments/[^)\s][^)]*)\)/#).map { String($0.1).removingPercentEncoding ?? String($0.1) }
+    }
+
+    /// A note owns nothing by file name. Deleting one takes an attachment away only when no other note or save links to it;
+    /// the file goes to `.trash/attachments` so restoring the note can bring it back.
+    func removeUnreferencedAttachments(of n: Note) {
+        let mine = Self.attachmentPaths(in: n.body)
+        guard !mine.isEmpty else { return }
+        let fm = FileManager.default
+        let others = notes.filter { $0.id != n.id }.map(\.body) + SavedStore.readAll().map(\.body)
+        let stillLinked = Set(others.flatMap { Self.attachmentPaths(in: $0) })
+        for rel in Set(mine) where !stillLinked.contains(rel) {
+            let from = Self.dir + "/" + rel, to = Self.trashDir + "/" + rel
+            guard fm.fileExists(atPath: from) else { continue }
+            try? fm.createDirectory(atPath: (to as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try? NotesSync.shared.locked { if fm.fileExists(atPath: to) { try fm.removeItem(atPath: to) }; try fm.moveItem(atPath: from, toPath: to) }
+        }
+    }
+
+    /// Brings back the attachments a restored note links to, when they were set aside with it.
+    func restoreAttachments(of n: Note) {
+        let fm = FileManager.default
+        for rel in Self.attachmentPaths(in: n.body) {
+            let from = Self.trashDir + "/" + rel, to = Self.dir + "/" + rel
+            guard fm.fileExists(atPath: from), !fm.fileExists(atPath: to) else { continue }
+            try? fm.createDirectory(atPath: (to as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try? NotesSync.shared.locked { try fm.moveItem(atPath: from, toPath: to) }
+        }
     }
 
     // ── Recently deleted ────────────────────────────────────────────────────
@@ -820,8 +855,12 @@ final class NotesStore: ObservableObject {
         let file: String
         let note: Note
         let deleted: Date
+        /// For a note found in git history rather than in `.trash`: the text it had when it was deleted.
+        var historyText: String? = nil
         var id: String { file }
     }
+    /// Ids of history entries the owner removed from the list; they stay in git.
+    static let historyHiddenKey = "switchboard.notes.historyHidden"
     @Published private(set) var trashed: [Trashed] = []
     static var trashDir: String { dir + "/.trash" }
 
@@ -845,6 +884,37 @@ final class NotesStore: ObservableObject {
                 ?? (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date ?? Date()
             return Trashed(file: f, note: n, deleted: when)
         }.sorted { $0.deleted > $1.deleted }
+        // every app offers Recently deleted from git history: notes deleted on any device show here too
+        let have = Set(trashed.map { $0.note.id } + notes.map(\.id))
+        trashed = (trashed + Self.deletedInHistory(excluding: have)).sorted { $0.deleted > $1.deleted }
+    }
+
+    /// Notes whose file was deleted in the last 300 commits and is not in the folder now, with their last text.
+    static func deletedInHistory(excluding: Set<String>, limit: Int = 300) -> [Trashed] {
+        guard Self.missingFolder == nil, NotesSync.shared.repo() != nil else { return [] }
+        let sync = NotesSync.shared
+        let hidden = Set(defaults.stringArray(forKey: historyHiddenKey) ?? [])
+        let log = sync.git(["log", "--diff-filter=D", "--relative", "--name-only", "--format=@%H\t%ct", "-n", "\(limit)", "--", "."]).out
+        var out: [Trashed] = []
+        var seen = excluding
+        var sha = "", when = Date()
+        for raw in log.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = String(raw)
+            if line.hasPrefix("@") {
+                let p = line.dropFirst().split(separator: "\t")
+                sha = String(p.first ?? ""); when = Date(timeIntervalSince1970: Double(p.dropFirst().first ?? "0") ?? 0)
+                continue
+            }
+            guard line.hasSuffix(".md"), !line.contains("/"), !line.hasPrefix("."), !sha.isEmpty else { continue }
+            let id = String(line.dropLast(3))
+            guard !seen.contains(id), !hidden.contains(id) else { continue }
+            seen.insert(id)
+            let shown = sync.git(["show", "\(sha)^:./\(line)"])
+            guard shown.code == 0, let n = parse(id: id, shown.out) else { continue }
+            let text = shown.out
+            out.append(Trashed(file: "history-" + id + ".md", note: n, deleted: when, historyText: text))
+        }
+        return out
     }
 
     /// Puts a deleted note back in the list, under a new name if its own is taken. Its reminder
@@ -854,11 +924,17 @@ final class NotesStore: ObservableObject {
         let fm = FileManager.default
         var id = t.note.id
         while fm.fileExists(atPath: Self.dir + "/" + id + ".md") { id += "x" }
-        do { try NotesSync.shared.locked { try fm.moveItem(atPath: Self.trashDir + "/" + t.file, toPath: Self.dir + "/" + id + ".md") } } catch {
+        do {
+            try NotesSync.shared.locked {
+                if let text = t.historyText { try text.write(toFile: Self.dir + "/" + id + ".md", atomically: true, encoding: .utf8) }
+                else { try fm.moveItem(atPath: Self.trashDir + "/" + t.file, toPath: Self.dir + "/" + id + ".md") }
+            }
+        } catch {
             self.error = "\(t.note.heading) could not be brought back: \(error.localizedDescription)"; return nil
         }
         load()
         guard var n = notes.first(where: { $0.id == id }) else { return nil }
+        restoreAttachments(of: n)
         if n.remindAt != nil || n.reminderID != nil {
             n.remindAt = nil; n.reminderID = nil
             update(n)
@@ -870,6 +946,14 @@ final class NotesStore: ObservableObject {
 
     /// Removes one deleted note for good, into the macOS Trash so even that can be undone.
     func purge(_ t: Trashed) {
+        // a note found only in git history cannot leave it; it just stops being listed
+        if t.historyText != nil {
+            var hidden = Self.defaults.stringArray(forKey: Self.historyHiddenKey) ?? []
+            hidden.append(t.note.id)
+            Self.defaults.set(hidden, forKey: Self.historyHiddenKey)
+            loadTrash()
+            return
+        }
         let url = URL(fileURLWithPath: Self.trashDir + "/" + t.file)
         // a probe never fills the owner's macOS Trash
         do { if Self.probing { try FileManager.default.removeItem(at: url) } else { try FileManager.default.trashItem(at: url, resultingItemURL: nil) } } catch {
@@ -959,7 +1043,8 @@ final class NotesStore: ObservableObject {
     private func syncReminder(_ n: inout Note) -> String? {
         guard !Self.remindersOff else { return nil }
         // a reminder the phone rings has no Apple Reminders item here; an old one is removed like a cleared reminder
-        guard n.remindAt != nil, n.remindOn != "phone" else {
+        // while Switchboard itself is running and can ring, it rings the reminder; a second item in Reminders would notify twice
+        guard n.remindAt != nil, n.remindOn != "phone", !ReminderRinger.shared.canRing else {
             guard let id = n.reminderID else { return nil }
             // Keep the id when removal fails, so the reminder can still be found later.
             if let why = reminders.remove(id) { return "the reminder could not be removed: \(why)" }

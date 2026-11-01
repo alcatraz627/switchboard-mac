@@ -155,6 +155,7 @@ struct SettingsTabView: View {
             if (folder || timerSettings || dotSettings) && on("desk") {
                 group("Notes", note: "One markdown file per note, every save kept; GitHub carries the folder to the phone.", rows: [notesFolderRow, notesRemoteRow, notesCaptureRow])
                 NoteDotsEditor()
+                TagColorsEditor()
                 VStack(alignment: .leading, spacing: 5) {
                     GroupHeader(name: "Timers")
                     note("What a timer does when it goes off.")

@@ -25,6 +25,7 @@ enum NotesFixture {
         guard let phone = s.add(title: "Pick up the parcel on the way home", body: "from the phone, in the queue"),
               var agent = s.add(title: "Agent finding: the deploy log is clean", body: "nothing to do") else { return }
         agent.agent = "claude-1"; s.update(agent)
+        if var missed = s.add(title: "Call the dentist", body: "rang while nobody was at the desk") { missed.remindAt = Date().addingTimeInterval(-7200); s.update(missed) }
         let link = SavedStore.shared.add(url: "https://example.com/shared-from-the-phone", title: "A page shared from the phone")
         NotesInbox.shared.ingest(ids: [phone.id, ".saved/" + (link?.id ?? ""), agent.id], dir: NotesStore.dir, author: { _ in "the phone" })
     }
