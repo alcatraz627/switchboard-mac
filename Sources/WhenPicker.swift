@@ -140,6 +140,8 @@ struct WhenPanel: View {
     let presets: [WhenPreset]
     var choices: [String] = []
     var extra: [(String, () -> Void)] = []
+    /// The timer templates every device shares, as a time from now: "10 min Pasta" sets the time ten minutes ahead.
+    var templates: [WhenTemplate] = []
     var initial: Date? = nil
     var initialChoice = 0
     let onPick: (Date, Int) -> Void
@@ -175,6 +177,24 @@ struct WhenPanel: View {
                     }
                     .buttonStyle(.plain)
                     .help(WhenText.describe(p.date()))
+                }
+            }
+            if !templates.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Templates").font(.sb(10.5)).foregroundStyle(.tertiary)
+                    FlowLayout(spacing: 5) {
+                        ForEach(templates) { t in
+                            Button { pick(t.date()) } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "bookmark").font(.sbIcon(9))
+                                    Text(t.title).font(.sb(10.5)).lineLimit(1).truncationMode(.tail)
+                                }
+                                .padding(.horizontal, 7).padding(.vertical, 3)
+                                .background(Capsule().fill(Color.primary.opacity(0.07)))
+                            }
+                            .buttonStyle(.plain).help(WhenText.describe(t.date()))
+                        }
+                    }
                 }
             }
             HStack(spacing: 6) {
@@ -228,12 +248,29 @@ struct WhenPanel: View {
     }
 }
 
+/// One shared timer template offered as a time: its label and minutes, as the phone's list shows them.
+struct WhenTemplate: Identifiable {
+    let id: String
+    let title: String
+    let minutes: Int
+    func date(from now: Date = Date()) -> Date { now.addingTimeInterval(Double(minutes) * 60) }
+
+    /// The templates in `.reminders/templates`, newest first, with their length in the title ("10 min Pasta").
+    static func shared(_ list: [RunTemplate]) -> [WhenTemplate] {
+        list.map { WhenTemplate(id: $0.id, title: words($0.minutes) + " " + $0.label, minutes: $0.minutes) }
+    }
+    static func words(_ minutes: Int) -> String {
+        minutes >= 60 && minutes % 60 == 0 ? "\(minutes / 60) h" : "\(minutes) min"
+    }
+}
+
 /// A small icon or label that opens the WhenPanel in a popover.
 struct WhenButton<Label: View>: View {
     let title: String
     let presets: [WhenPreset]
     var choices: [String] = []
     var extra: [(String, () -> Void)] = []
+    var templates: [WhenTemplate] = []
     var initial: Date? = nil
     /// Which of `choices` is picked when it opens, such as a reminder's current repeat.
     var initialChoice = 0
@@ -248,7 +285,7 @@ struct WhenButton<Label: View>: View {
         Button { shown.wrappedValue.toggle() } label: { label() }
             .buttonStyle(.plain)
             .popover(isPresented: shown, arrowEdge: .bottom) {
-                WhenPanel(title: title, presets: presets, choices: choices, extra: extra, initial: initial,
+                WhenPanel(title: title, presets: presets, choices: choices, extra: extra, templates: templates, initial: initial,
                           initialChoice: initialChoice, onPick: onPick, dismiss: { shown.wrappedValue = false })
             }
     }

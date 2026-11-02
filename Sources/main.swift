@@ -88,7 +88,7 @@ if args.contains("--probe-notes") {
         exit(2)
     }
     let report = probeNotes()
-    let sync = probeSpecFixtures() + probeCapture() + probeLineEdit() + probeReminders() + probeSaved() + probeNotesMore() + probeNotesSync() + probeMarkdown() + probeFormat()
+    let sync = probeSpecFixtures() + probeCapture() + probeLineEdit() + probeListEdit() + probeFinish() + probeReminders() + probeSaved() + probeNotesMore() + probeNotesSync() + probeMarkdown() + probeFormat()
     print(report)
     print(sync.joined(separator: "\n"))
     exit(report.hasSuffix("all passed") && !sync.contains { $0.hasPrefix("FAIL") } ? 0 : 1)
@@ -129,8 +129,12 @@ func snapshotPanel<V: View>(_ v: V, to out: String, dark: Bool) -> Bool {
     return (try? rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: out))) != nil
 }
 if let out = argAfter("--snapshot-when") {
+    // --with-templates adds the shared timer templates a reminder's picker offers
+    let shared = args.contains("--with-templates")
+        ? [WhenTemplate(id: "t-1", title: "10 min Pasta", minutes: 10), WhenTemplate(id: "t-2", title: "2 h Oven roast with a rather long label", minutes: 120),
+           WhenTemplate(id: "t-3", title: "45 min Laundry", minutes: 45)] : []
     let v = WhenPanel(title: "Switch later, keeping Allow until then", presets: WhenPreset.short,
-                      choices: ["To Ask", "To Block"], extra: [("Cancel the timed change", {})], onPick: { _, _ in })
+                      choices: ["To Ask", "To Block"], extra: [("Cancel the timed change", {})], templates: shared, onPick: { _, _ in })
     let ok = snapshotPanel(v, to: out, dark: !args.contains("--light"))
     print(ok ? "wrote \(out)" : "snapshot failed")
     exit(ok ? 0 : 1)

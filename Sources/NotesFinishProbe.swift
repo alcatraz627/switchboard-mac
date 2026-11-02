@@ -1,0 +1,287 @@
+// NotesFinishProbe.swift
+// Headless checks for the last round on the notes surface: the inbox for a big merge and for Done on an arrival the list
+// has not read, the one-time move of older pins, a tag rename being one commit, a phone's reminder handle, the chord
+// being held by another app, the editor's keys acting on their own text view, the tag and title limits, and the shared
+// timer templates in a reminder's picker. Scratch folder with its own repository; nothing here touches the owner's notes.
+
+import AppKit
+import Carbon.HIToolbox
+import Foundation
+
+func probeFinish() -> [String] {
+    var lines: [String] = []
+    func check(_ name: String, _ ok: Bool, _ got: String = "") {
+        lines.append("\(ok ? "ok  " : "FAIL") \(name)\(ok || got.isEmpty ? "" : " (got: \(got))")")
+    }
+    let fm = FileManager.default
+    let root = NSTemporaryDirectory() + "sb-finish-\(getpid())"
+    try? fm.removeItem(atPath: root)
+    try? fm.createDirectory(atPath: root + "/notes", withIntermediateDirectories: true)
+    defer { try? fm.removeItem(atPath: root) }
+    let defaults = NotesStore.defaults
+    let oldFolder = defaults.string(forKey: NotesStore.folderKey)
+    defaults.set(root + "/notes", forKey: NotesStore.folderKey)
+    defaults.removeObject(forKey: NotesSync.remoteKey)
+    defaults.removeObject(forKey: SavedStore.migratedKey)
+    defer {
+        if let f = oldFolder { defaults.set(f, forKey: NotesStore.folderKey) } else { defaults.removeObject(forKey: NotesStore.folderKey) }
+        defaults.removeObject(forKey: SavedStore.migratedKey)
+    }
+    @discardableResult func g(_ a: String...) -> GitResult { NotesSync.runGit(a, cwd: root + "/notes") }
+    func read(_ f: String) -> String { (try? String(contentsOfFile: root + "/notes/" + f, encoding: .utf8)) ?? "" }
+    func put(_ f: String, _ t: String) {
+        try? fm.createDirectory(atPath: (root + "/notes/" + f as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try? t.write(toFile: root + "/notes/" + f, atomically: true, encoding: .utf8)
+    }
+    func commits() -> Int { Int(g("rev-list", "--count", "HEAD").out.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0 }
+    func waitForSync(_ sync: NotesSync) {
+        let until = Date().addingTimeInterval(10)
+        while sync.syncing, Date() < until { RunLoop.current.run(until: Date().addingTimeInterval(0.02)) }
+    }
+
+    NotesStore.remindersOff = true
+    let sync = NotesSync.shared
+    _ = sync.ensureRepo()
+    g("config", "user.name", "T"); g("config", "user.email", "t@t")
+    let oldDeliver = NotesInbox.deliver
+    var told = 0
+    NotesInbox.deliver = { _, _, _ in told += 1 }
+    defer { NotesInbox.deliver = oldDeliver }
+
+    // S16: Done on an arrival before the list has read it still writes the note away
+    try? fm.removeItem(atPath: NotesInbox.path)
+    let inbox = NotesInbox()
+    inbox.reload()
+    put("20261101-120000-aaaa.md", "---\ntitle: \"Phone note\"\n---\nwords from the phone\n")
+    sync.commitNow("save")
+    inbox.ingest(ids: ["20261101-120000-aaaa"], dir: root + "/notes")
+    let cold = NotesStore()
+    inbox.done("20261101-120000-aaaa", notes: cold)
+    check("Done on an arrival the list has not read yet still puts the note away, and keeps its words",
+          read("20261101-120000-aaaa.md").contains("expires:") && read("20261101-120000-aaaa.md").contains("words from the phone") && inbox.waiting().isEmpty,
+          read("20261101-120000-aaaa.md"))
+
+    // S17: a big merge leaves one line on the Notes tab and agents' notes stay in their lane
+    try? fm.removeItem(atPath: NotesInbox.path)
+    let big = NotesInbox()
+    big.reload()
+    var ids: [String] = []
+    for i in 0..<35 {
+        let id = String(format: "20261101-13%02d00-bbbb", i)
+        put(id + ".md", "---\ntitle: \"Arrived \(i)\"\n---\nbody \(i)\n"); ids.append(id)
+    }
+    for i in 0..<2 {
+        let id = String(format: "20261101-14%02d00-cccc", i)
+        put(id + ".md", "---\ntitle: \"Agent \(i)\"\nagent: \"claude\"\n---\nfrom an agent\n"); ids.append(id)
+    }
+    told = 0
+    big.ingest(ids: ids, dir: root + "/notes")
+    check("a merge of 35 notes leaves one line in the inbox saying how many came", big.waiting().count == 1 && big.waiting().first?.isBulk == true
+          && big.waiting().first?.count == 35 && big.waiting().first?.title == "35 notes arrived at once", "\(big.waiting().map(\.title))")
+    check("the agents' two notes in that merge still go to the lane, not the owner's list", big.lane().count == 2 && big.agentLaneIDs.count == 2, "\(big.lane().map(\.id))")
+    check("the owner is told once, with the count", told == 1, "\(told)")
+    let badge = NotesWaiting.badges(inbox: big, notes: [], ringer: ReminderRinger()).first { $0.id == "notes-inbox" }
+    check("the waiting badge counts the notes, not the one line", badge?.text == "35 in the inbox", badge?.text ?? "none")
+    big.prune(dir: root + "/notes")
+    check("the line is not taken for a note whose file is gone", big.waiting().count == 1)
+    let before = read(ids[0] + ".md")
+    if let line = big.waiting().first { big.done(line.id) }
+    check("clearing the line touches no note", big.waiting().isEmpty && read(ids[0] + ".md") == before && big.lane().count == 2)
+    let small = NotesInbox()
+    try? fm.removeItem(atPath: NotesInbox.path)
+    small.reload()
+    small.ingest(ids: Array(ids.prefix(5)), dir: root + "/notes")
+    check("a few arrivals are still listed one by one", small.waiting().count == 5 && !small.waiting().contains { $0.isBulk })
+
+    // S19 and S20: the one-time move leaves a reminder where it rings, shows no false deletion, and keeps its own commit
+    for f in ((try? fm.contentsOfDirectory(atPath: root + "/notes")) ?? []) where f.hasSuffix(".md") { try? fm.removeItem(atPath: root + "/notes/" + f) }
+    sync.commitNow("save")
+    defaults.removeObject(forKey: SavedStore.migratedKey)
+    put("pinr.md", "---\ntitle: \"Ring pin\"\nurl: \"https://example.com/ring\"\nremind_at: 2027-12-01T09:00:00Z\n---\n")
+    // written loosely, so the move rewrites nearly every line and git reads it as a deletion plus a new file
+    put("tiny.md", "---\ntitle:   A\nurl:   https://example.com/tiny\ntags: [pin]\n---\n")
+    put("typing.md", "---\ntitle: \"Typing\"\n---\nwords still waiting for their commit\n")
+    sync.commitNow("save")
+    put("typing.md", "---\ntitle: \"Typing\"\n---\nwords still waiting for their commit, edited\n")
+    sync.commit("typing")
+    let moved = SavedStore().migrateOldPinsIfNeeded()
+    check("a pin with a reminder stays a note, so it still rings", moved == 1 && fm.fileExists(atPath: root + "/notes/pinr.md") && !fm.fileExists(atPath: root + "/notes/tiny.md"), "\(moved)")
+    let subjects = g("log", "-3", "--format=%s").out.split(separator: "\n").map(String.init)
+    check("the move is one commit under its own name, after the typing that was waiting", subjects.prefix(2) == ["saved: move 1 older pin", "typing"], "\(subjects)")
+    let sawDelete = g("log", "-1", "--diff-filter=D", "--name-only", "--format=").out.contains("tiny.md")
+    let hist = NotesStore.deletedInHistory()
+    check("a moved pin that git reads as a deletion is not listed under Recently deleted", sawDelete && !hist.contains { $0.note.id == "tiny" },
+          "git read a deletion: \(sawDelete); \(hist.map(\.note.id))")
+
+    // commitAlone keeps its own name even when a sync round starts while it writes
+    put("racer.md", "---\ntitle: \"Racer\"\n---\nx\n")
+    sync.commitNow("save")
+    sync.commitAlone("moved on its own") {
+        try? "---\ntitle: \"Racer\"\n---\nchanged under the move\n".write(toFile: root + "/notes/racer.md", atomically: true, encoding: .utf8)
+        sync.sync(force: false)
+    }
+    waitForSync(sync)
+    check("a change committed on its own keeps its name although a sync round began during the write", g("log", "--format=%s", "--", "racer.md").out.hasPrefix("moved on its own"),
+          g("log", "--format=%s", "-3").out)
+
+    // S21: renaming a tag is one commit, even with sync rounds running
+    let s = NotesStore()
+    s.load()
+    for i in 0..<150 { var n = s.add(title: "Tagged \(i)", body: "b\(i)")!; n.tags = ["oldtag"]; s.update(n) }
+    sync.commitNow("save")
+    let c0 = commits()
+    // a sync tick that keeps committing whatever it finds, as the timer does, while the rename runs
+    let racing = NSLock()
+    var running = true
+    let racer = DispatchQueue(label: "probe.racer")
+    racer.async {
+        while true {
+            racing.lock(); let go = running; racing.unlock()
+            if !go { return }
+            sync.commitNow("race")
+        }
+    }
+    let changed = TagRename.run("oldtag", to: "newtag", notes: s, saved: SavedStore())
+    racing.lock(); running = false; racing.unlock()
+    racer.sync {}
+    sync.commitNow("save")
+    check("a rename of 150 notes lands as one commit although a sync tick keeps committing", changed == 150 && commits() - c0 == 1, "changed \(changed), commits +\(commits() - c0)")
+    check("every note carries the new tag in that commit", g("diff", "--name-only", "HEAD~1", "HEAD").out.split(separator: "\n").count == 150, g("diff", "--name-only", "HEAD~1", "HEAD").out)
+
+    // S22: a reminder the phone owns keeps the phone's own handle when the Mac edits the note
+    NotesStore.remindersOff = false
+    let rs = NotesStore()
+    var removed: [String] = []
+    rs.reminders = ReminderBackend(status: { .fullAccess }, requestAccess: { $0(true) }, save: { _ in "mac-1" },
+                                   remove: { removed.append($0); return nil }, owns: { $0 == "mac-1" })
+    var phoneNote = rs.add(title: "Phone rings", body: "x")!
+    phoneNote.remindAt = Date().addingTimeInterval(3600); phoneNote.remindOn = "phone"; phoneNote.reminderID = "phone-handle"
+    rs.update(phoneNote)
+    check("the Mac editing a phone-owned reminder leaves the phone's handle in the note", rs.notes.first { $0.id == phoneNote.id }?.reminderID == "phone-handle"
+          && read(phoneNote.id + ".md").contains("phone-handle"), rs.notes.first { $0.id == phoneNote.id }?.reminderID ?? "nil")
+    var handedOver = rs.add(title: "Was the Mac's", body: "y")!
+    handedOver.remindAt = Date().addingTimeInterval(3600); handedOver.remindOn = "phone"; handedOver.reminderID = "mac-1"
+    rs.update(handedOver)
+    check("an item this Mac made is let go when the reminder moves to the phone", rs.notes.first { $0.id == handedOver.id }?.reminderID == nil && removed.contains("mac-1"), "\(removed)")
+    NotesStore.remindersOff = true
+
+    // S23: the cursor at the end of a body counts the way the text view does
+    check("a body with emoji puts the cursor at its true end", PolicyStatusController.endCaret(of: "hi 👍🏽 ok") == ("hi 👍🏽 ok" as NSString).length, "\(PolicyStatusController.endCaret(of: "hi 👍🏽 ok"))")
+
+    // S24: a chord another app already holds is reported, not just logged
+    var other: EventHotKeyRef?
+    let held = RegisterEventHotKey(UInt32(kVK_ANSI_N), UInt32(optionKey | shiftKey), EventHotKeyID(signature: OSType(0x4F544852), id: 77), GetApplicationEventTarget(), 0, &other)
+    if held != noErr {
+        lines.append("skip chord clash: ⌥⇧N could not be taken for the test (\(held)), so it is already held")
+    } else {
+        let keep = AppDefaults.store.object(forKey: HotKeys.captureKey)
+        AppDefaults.store.set(true, forKey: HotKeys.captureKey)
+        HotKeys.shared.reloadChords()
+        check("a chord macOS refuses is listed by name", HotKeys.shared.failed == ["⌥⇧N"], "\(HotKeys.shared.failed)")
+        check("and Settings says it is not working instead of on", HotKeys.captureNote(on: true, failed: HotKeys.shared.failed) == "not working: another app holds ⌥⇧N")
+        if let o = other { UnregisterEventHotKey(o) }
+        HotKeys.shared.reloadChords()
+        check("once the other app lets go, it works and the note says on", HotKeys.shared.failed.isEmpty && HotKeys.captureNote(on: true, failed: HotKeys.shared.failed).hasPrefix("on"), "\(HotKeys.shared.failed)")
+        AppDefaults.store.set(false, forKey: HotKeys.captureKey)
+        HotKeys.shared.reloadChords()
+        if let k = keep { AppDefaults.store.set(k, forKey: HotKeys.captureKey) } else { AppDefaults.store.removeObject(forKey: HotKeys.captureKey) }
+        HotKeys.shared.reloadChords()
+    }
+
+    // the editor's keys act on their own text view, with no window, no key window and no front app
+    func key(_ code: Int, _ chars: String, _ mods: NSEvent.ModifierFlags) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: mods, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0,
+                         context: nil, characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: UInt16(code))!
+    }
+    func editor(_ text: String, _ sel: NSRange) -> EditorTextView {
+        let tv = EditorTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 100))
+        tv.isRichText = false
+        tv.isEditable = true
+        tv.string = text
+        tv.setSelectedRange(sel)
+        return tv
+    }
+    let b = editor("from one and two", NSRange(location: 5, length: 3))
+    b.keyDown(with: key(kVK_ANSI_B, "b", .command))
+    check("⌘B wraps the word in bold in the view the key came to, with no window at all", b.string == "from **one** and two" && b.selectedRange() == NSRange(location: 7, length: 3), b.string)
+    let nf = editor("x", NSRange(location: 0, length: 1))
+    nf.keyDown(with: key(kVK_ANSI_I, "i", .command))
+    check("⌘I and the other formats work the same", nf.string == "_x_")
+    let sx = editor("old", NSRange(location: 0, length: 3))
+    sx.keyDown(with: key(kVK_ANSI_X, "x", [.command, .shift]))
+    check("⌘⇧X strikes through", sx.string == "~~old~~", sx.string)
+    let hh = editor("title", NSRange(location: 0, length: 0))
+    hh.keyDown(with: key(kVK_ANSI_H, "h", [.command, .shift])); hh.keyDown(with: key(kVK_ANSI_H, "h", [.command, .shift]))
+    check("⌘⇧H adds a heading level each press", hh.string == "## title", hh.string)
+    let kk = editor("see docs", NSRange(location: 4, length: 4))
+    kk.keyDown(with: key(kVK_ANSI_K, "k", .command))
+    check("⌘K makes a link around the selection", kk.string.hasPrefix("see [docs](") && kk.string.hasSuffix(")"), kk.string)
+    let qq = editor("a\nb", NSRange(location: 0, length: 3))
+    qq.keyDown(with: key(kVK_ANSI_Period, ">", [.command, .shift]))
+    check("⌘⇧. quotes the lines", qq.string == "> a\n> b", qq.string)
+    let ol = editor("a\nb", NSRange(location: 0, length: 3))
+    ol.keyDown(with: key(kVK_ANSI_7, "&", [.command, .shift]))
+    check("⌘⇧7 numbers the lines", ol.string == "1. a\n2. b", ol.string)
+    var saved = 0, stepped = 0, deleted = 0
+    let hooks = editor("x", NSRange(location: 1, length: 0))
+    hooks.onSave = { saved += 1 }; hooks.onStep = { stepped += $0 }; hooks.onDelete = { deleted += 1 }
+    hooks.keyDown(with: key(kVK_ANSI_S, "s", .command))
+    hooks.keyDown(with: key(kVK_UpArrow, "\u{F700}", [.command, .option]))
+    hooks.keyDown(with: key(kVK_DownArrow, "\u{F701}", [.command, .option])); hooks.keyDown(with: key(kVK_DownArrow, "\u{F701}", [.command, .option]))
+    hooks.keyDown(with: key(kVK_Delete, "\u{7F}", [.command, .shift]))
+    check("⌘S saves, ⌥⌘↑ and ⌥⌘↓ step to the neighbouring note, ⌘⇧⌫ deletes", saved == 1 && stepped == 1 && deleted == 1, "\(saved) \(stepped) \(deleted)")
+    let tab = editor("a\nb", NSRange(location: 0, length: 3))
+    tab.keyDown(with: key(kVK_Tab, "\t", []))
+    check("Tab indents the selected lines", tab.string == "  a\n  b", tab.string)
+    tab.keyDown(with: key(kVK_Tab, "\t", .shift))
+    check("Shift-Tab takes it back", tab.string == "a\nb", tab.string)
+    let ret = editor("- milk", NSRange(location: 6, length: 0))
+    ret.keyDown(with: key(kVK_Return, "\r", []))
+    check("Return at the end of a list item starts the next", ret.string == "- milk\n- " && ret.selectedRange().location == 9, ret.string)
+    ret.insertText("- ", replacementRange: NSRange(location: NSNotFound, length: 0))
+    check("a marker typed over the one Return put is folded into it", ret.string == "- milk\n- ", ret.string)
+    let title = EditorTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 20))
+    title.isFieldEditor = true; title.isEditable = true; title.string = "t"; title.setSelectedRange(NSRange(location: 0, length: 1))
+    title.keyDown(with: key(kVK_ANSI_B, "b", .command))
+    check("the title line takes none of the body's formatting keys", title.string == "t", title.string)
+
+    // the tag and title limits the extension and the phone keep
+    check("a comma ends a tag, spaces stay inside one, repeats and empties are dropped",
+          InputRules.addTags(typed: "work,  big  plan , ,work", to: ["x"]).tags == ["x", "work", "big plan"])
+    check("a pin tag is refused with a reason and nothing is added", InputRules.addTags(typed: "ok, Pin", to: []).tags.isEmpty && InputRules.addTags(typed: "pin", to: []).problem?.contains("pin") == true)
+    check("a tag over 32 characters is refused", InputRules.addTags(typed: String(repeating: "a", count: 33), to: []).problem == "A tag is at most 32 characters"
+          && InputRules.addTags(typed: String(repeating: "a", count: 32), to: []).problem == nil)
+    let twelve = (1...12).map { "t\($0)" }
+    check("a thirteenth tag is refused", InputRules.addTags(typed: "more", to: twelve).problem == "A note keeps at most 12 tags" && InputRules.addTags(typed: "t1", to: twelve).problem == nil)
+    check("a title is one line of at most 200 characters", InputRules.cleanTitle("a\n  b \n") == "a b" && InputRules.cleanTitle(String(repeating: "x", count: 300)).count == 200)
+
+    // another program changing a note's words while words typed in the editor are unsaved
+    let baseNote = Note(id: "n", title: "T", body: "base", tags: [], created: Date())
+    var typedHere = baseNote; typedHere.body = "base and mine"
+    var typedThere = baseNote; typedThere.body = "base and theirs"
+    var retagged = baseNote; retagged.tags = ["x"]
+    check("their words and unsaved words here are a clash to settle", NoteMerge.wordsClash(base: baseNote, draft: typedHere, theirs: typedThere))
+    check("nothing typed here, or nothing changed there, or the same words on both sides, is not",
+          !NoteMerge.wordsClash(base: baseNote, draft: baseNote, theirs: typedThere) && !NoteMerge.wordsClash(base: baseNote, draft: typedHere, theirs: retagged)
+          && !NoteMerge.wordsClash(base: baseNote, draft: typedHere, theirs: typedHere))
+
+    // the shared timer templates, as the phone writes them, offered in a reminder's picker
+    let realKey = TimerStore.key
+    TimerStore.key = "switchboard.timers.countdowns.probe-finish"
+    defer { AppDefaults.store.removeObject(forKey: TimerStore.key); TimerStore.key = realKey }
+    let ts = TimerStore()
+    ts.chimeAloud = false
+    defer { ts.stop() }
+    let runs = Runs(timers: ts, writes: false)
+    put(".reminders/templates/t-pasta.json", "{\"id\":\"t-pasta\",\"kind\":\"timer\",\"label\":\"Pasta\",\"minutes\":10,\"color\":\"orange\",\"created\":2}")
+    put(".reminders/templates/t-oven.json", "{\"id\":\"t-oven\",\"kind\":\"timer\",\"label\":\"Oven\",\"minutes\":120,\"color\":\"red\",\"created\":1}")
+    runs.reload()
+    let offered = WhenTemplate.shared(runs.templates)
+    check("a reminder's picker offers the templates in .reminders/templates, newest first", offered.map(\.title) == ["10 min Pasta", "2 h Oven"], "\(offered.map(\.title))")
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    check("a template sets the time that many minutes ahead", offered.first?.date(from: now) == now.addingTimeInterval(600))
+    // the later probes start from an empty inbox
+    try? fm.removeItem(atPath: NotesInbox.path)
+    try? fm.removeItem(atPath: NotesInbox.seenPath)
+    return lines
+}

@@ -66,13 +66,18 @@ enum TagRename {
         // saves are read from the folder first, whether or not the Saved tab was ever opened this run, and each file is
         // changed as it is on disk now, only in its tags
         saved.load()
-        for n in notes.notes where n.tags.contains(old) {
-            if notes.patch(n.id, reason: "tag renamed", { $0.tags = swapped($0.tags) }) { changed += 1 }
+        // all the files change while the folder's lock is held, so a sync round cannot commit half of a rename;
+        // one commit then takes the whole of it
+        NotesSync.shared.locked {
+            for n in notes.notes where n.tags.contains(old) {
+                if notes.patch(n.id, commit: false, { $0.tags = swapped($0.tags) }) { changed += 1 }
+            }
+            for s in saved.items where s.tags.contains(old) {
+                if saved.patch(s.id, commit: false, { $0.tags = swapped($0.tags) }) { changed += 1 }
+            }
+            if let c = TagColors.read()[old] { TagColors.set(new, to: TagColors.read()[new] ?? c); TagColors.set(old, to: nil) }
         }
-        for s in saved.items where s.tags.contains(old) {
-            if saved.patch(s.id, { $0.tags = swapped($0.tags) }) { changed += 1 }
-        }
-        if let c = TagColors.read()[old] { TagColors.set(new, to: TagColors.read()[new] ?? c); TagColors.set(old, to: nil) }
+        if changed > 0 { NotesSync.shared.commitAlone("tag renamed") {} }
         return changed
     }
 }

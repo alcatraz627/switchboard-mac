@@ -15,6 +15,11 @@
 - Tags on a note row are small chips in their colour from the tag colours page, and in the inbox the keyboard works: I steps in, K keeps, D puts away, L brings it back tomorrow morning, Return opens.
 - A reminder now rings the first time the app can however late it is, a repeating one rings at each of its times, and Reminders.app keeps a fallback item with its alarm two minutes after the due time that goes when you dismiss.
 - New note ids use the spec's form, `YYYYMMDD-HHMMSS-xxxx`, and hidden files are never read as notes.
+- **The note editor matches the extension's.** Strikethrough (⌘⇧X), heading levels (⌘⇧H), link (⌘K), quote (⌘⇧.), numbered list (⌘⇧7) and a table to fill in, each also on the formatting line, which now shows in the panel as well as in the Notes tab. Tab and Shift-Tab indent lines, Return carries a list on and ends it on an empty item, ⌘S saves, ⌥⌘↑ and ⌥⌘↓ step to the next or previous note, ⌘⇧⌫ deletes. A tag is refused with a reason when it is "pin", over 32 characters or a 13th. A title is one line of at most 200 characters. The link row has Open and Copy. When another app changes a note while you have unsaved words in it, the editor asks: load theirs or keep mine (leaving keeps theirs as a note of its own).
+- **A reminder's time picker offers the shared timer templates** from `.reminders/templates`, the same list the phone and the Timers tab use.
+- The formatting keys and buttons act on the text view they belong to, so they work whichever app is in front.
+- A merge of more than 30 notes shows one line in the inbox with the count instead of nothing, and an agent's note in it still goes to the agents lane.
+- Smaller fixes: Done on an arrival the list has not yet read; the one-time move of older pins runs off the main thread, leaves a pin with a reminder as a note and never shows as deleted notes; a tag rename is one commit; editing a note the phone rings keeps the phone's reminder handle; a chord another app holds is said so in Settings.
 
 ## 0.4.0 (2026-10-02)
 

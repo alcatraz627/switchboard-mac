@@ -22,7 +22,7 @@ enum NotesWaiting {
             out.append(StatusBadge(id: "notes-missed", icon: "bell.slash", text: "\(missed) missed \(plural(missed, "reminder", "reminders"))",
                                    kind: .waiting, help: "A reminder's time passed and nobody dismissed it", tab: "notes"))
         }
-        let mine = inbox.waiting(now: now).count, agents = inbox.lane(now: now).count
+        let mine = inbox.waiting(now: now).reduce(0) { $0 + ($1.count ?? 1) }, agents = inbox.lane(now: now).count
         if mine > 0 {
             out.append(StatusBadge(id: "notes-inbox", icon: "tray.and.arrow.down", text: "\(mine) in the inbox",
                                    kind: .waiting, help: "Notes and saves that arrived from another device", tab: "notes"))
@@ -49,7 +49,10 @@ final class NotesInbox: ObservableObject {
         var agent: String?
         /// Who brought it: the commit author that added it, as git names them.
         var from: String?
+        /// For a line that stands for many arrivals at once: how many.
+        var count: Int?
         var isSave: Bool { kind == "save" }
+        var isBulk: Bool { kind == "bulk" }
     }
 
     /// What the views read; always assigned on the main thread.
@@ -100,33 +103,43 @@ final class NotesInbox: ObservableObject {
     }
 
     /// Adds what a merge brought in. `read` gives a file's text; `author` who added it. Returns the new items.
+    /// More than `bulkLimit` of the owner's own arrivals are a first sync or a bulk import: one line says how many came
+    /// instead of a row each, but an agent's note in the same merge still goes to the agents lane on its own.
     @discardableResult
     func ingest(ids: [String], dir: String, author: (String) -> String? = { _ in nil }, now: Date = Date()) -> [Item] {
         guard !ids.isEmpty else { return [] }
-        guard ids.count <= Self.bulkLimit else {
-            dlog("notes inbox: \(ids.count) files arrived at once, so none were listed one by one")
-            return []
-        }
         lock.lock(); let known = Set(backing.map(\.id)); lock.unlock()
-        var added: [Item] = []
+        var found: [Item] = []
         for id in ids where !known.contains(id) {
             guard let text = try? String(contentsOfFile: dir + "/" + id + ".md", encoding: .utf8) else { continue }
             let r = NoteSpec.read(text, name: id.hasPrefix(".saved/") ? String(id.dropFirst(7)) : id)
             let title = r.title.isEmpty ? (r.url ?? id) : r.title
-            added.append(Item(id: id, kind: id.hasPrefix(".saved/") ? "save" : "note", title: title, at: now, later: nil,
+            found.append(Item(id: id, kind: id.hasPrefix(".saved/") ? "save" : "note", title: title, at: now, later: nil,
                               agent: r.agent, from: author(id)))
         }
-        guard !added.isEmpty else { return [] }
+        guard !found.isEmpty else { return [] }
+        var added = found
+        let own = found.filter { $0.agent == nil }
+        if own.count > Self.bulkLimit {
+            let saves = own.filter(\.isSave).count, notes = own.count - saves
+            let what = saves == 0 ? "\(notes) notes" : notes == 0 ? "\(saves) saves" : "\(notes) notes and \(saves) saves"
+            let stamp = NotesStore.isoString(now)
+            added = found.filter { $0.agent != nil }
+                + [Item(id: "bulk/" + stamp, kind: "bulk", title: what + " arrived at once", at: now, later: nil, agent: nil,
+                        from: own.compactMap(\.from).first, count: own.count)]
+            dlog("notes inbox: \(own.count) files arrived at once, listed as one line")
+        }
         change { $0 += added }
         // an arrival is a note this Mac has now seen, so a later read does not take it for a new local one
-        lock.lock(); if var s = seen { s.formUnion(added.filter { !$0.isSave }.map(\.id)); seen = s; persistSeen(s) }; lock.unlock()
+        lock.lock(); if var s = seen { s.formUnion(found.filter { !$0.isSave }.map(\.id)); seen = s; persistSeen(s) }; lock.unlock()
         // an agent's note is told apart quietly; the owner is told about their own
         let mine = added.filter { $0.agent == nil }
         if !mine.isEmpty {
             let first = mine[0]
             let kind = first.isSave ? "save" : "note"
-            let title = mine.count == 1 ? "New \(kind) from \(first.from ?? "another device")" : "\(mine.count) new notes and saves"
-            let body = mine.count == 1 ? first.title : mine.prefix(3).map(\.title).joined(separator: ", ")
+            let n = mine.reduce(0) { $0 + ($1.count ?? 1) }
+            let title = n == 1 ? "New \(kind) from \(first.from ?? "another device")" : "\(n) new notes and saves"
+            let body = n == 1 || first.isBulk ? first.title : mine.prefix(3).map(\.title).joined(separator: ", ")
             Self.deliver(title, body, first.id)
         }
         return added
@@ -173,6 +186,7 @@ final class NotesInbox: ObservableObject {
     /// Done: it leaves the inbox and is put away. A note expires now, so it shows under Expired and is never deleted;
     /// a save is removed, and its history stays in git.
     func done(_ id: String, notes: NotesStore = .shared, saved: SavedStore = .shared) {
+        if id.hasPrefix("bulk/") { drop(id); return }
         if id.hasPrefix(".saved/") { saved.remove(key: String(id.dropFirst(7))) }
         else {
             // on the file as it is now, changing only `expires`, so words another app wrote a moment ago are kept
@@ -193,7 +207,7 @@ final class NotesInbox: ObservableObject {
 
     /// Items whose file is gone (deleted here or on another device) leave on their own.
     func prune(dir: String) {
-        change { $0.removeAll { !FileManager.default.fileExists(atPath: dir + "/" + $0.id + ".md") } }
+        change { $0.removeAll { !$0.isBulk && !FileManager.default.fileExists(atPath: dir + "/" + $0.id + ".md") } }
     }
 
     // ── Storage ─────────────────────────────────────────────────────────────

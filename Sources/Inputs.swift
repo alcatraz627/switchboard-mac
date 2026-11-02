@@ -32,6 +32,26 @@ enum InputRules {
         (!body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !title.trimmingCharacters(in: .whitespaces).isEmpty)
     }
 
+    /// What the tag box adds: one tag per comma, spaces inside a tag kept as one, no repeats, nothing empty. A "pin"
+    /// tag would turn the note into a pin, a tag is at most 32 characters and a note keeps at most 12, the limits the
+    /// phone and the extension keep too; a refusal adds nothing and says why.
+    static func addTags(typed: String, to tags: [String]) -> (tags: [String], problem: String?) {
+        var seen = Set<String>()
+        let words = typed.split(separator: ",").map { $0.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+        let fresh = words.filter { !tags.contains($0) }
+        if words.contains(where: { $0.lowercased() == "pin" }) { return (tags, "\u{201C}pin\u{201D} is kept for pins; pin the note instead") }
+        if words.contains(where: { $0.count > 32 }) { return (tags, "A tag is at most 32 characters") }
+        if tags.count + fresh.count > 12 { return (tags, "A note keeps at most 12 tags") }
+        return (tags + fresh, nil)
+    }
+
+    /// A title as a single line of at most 200 characters, the way the extension keeps it.
+    static func cleanTitle(_ t: String) -> String {
+        let one = t.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " ")
+        return String(one.prefix(200))
+    }
+
     /// Whether opening a tab should hand its "new" input the keyboard: not
     /// while something on the tab is being edited.
     static func focusNewInput(editing: String?) -> Bool { editing == nil }
@@ -83,24 +103,89 @@ final class EditorTextView: NSTextView {
     var onFocus: ((Bool) -> Void)?
     /// A click on text that is open only to read: the owner means to edit it.
     var onClickReadOnly: (() -> Void)?
-    /// ⌘B, ⌘I, ⌘E: the formatting line's bold, italic and code, from the keys.
-    var onFormat: ((NoteFormat.Kind) -> Void)?
     /// A picture pasted into the text; the owner of the view saves it and links it.
-    var onImage: ((Data) -> Void)?
+    var onImage: ((Data, EditorTextView) -> Void)?
+    /// ⌘S, ⌥⌘↑ ⌥⌘↓ (the note before or after this one) and ⌘⇧⌫: acted on by whoever owns the note.
+    var onSave: (() -> Void)?
+    var onStep: ((Int) -> Void)?
+    var onDelete: (() -> Void)?
+    /// The marker Return just put on a new list line, watched so a marker typed over it is folded in.
+    private var autoMarker: ListEdit.AutoMarker?
 
-    /// ⌘B, ⌘I, ⌘E, whether they arrive as a key equivalent or as a plain key down.
-    private func formatKey(_ e: NSEvent) -> Bool {
-        guard let onFormat, isEditable, e.modifierFlags.intersection([.command, .shift, .option, .control]) == .command else { return false }
-        switch e.charactersIgnoringModifiers {
-        case "b": onFormat(.bold)
-        case "i": onFormat(.italic)
-        case "e": onFormat(.code)
-        default: return false
-        }
+    /// Applies a formatting edit to this text view's own text and selection, as one undoable change. The edit
+    /// is made on the view the key or button belongs to, so it does not depend on which app or window is in front.
+    @discardableResult
+    func applyFormat(_ k: NoteFormat.Kind) -> Bool {
+        guard isEditable, !isFieldEditor, let e = NoteFormat.edit(k, string, selectedRange(), clipboard: NSPasteboard.general.string(forType: .string)) else { return false }
+        let all = NSRange(location: 0, length: (string as NSString).length)
+        guard shouldChangeText(in: all, replacementString: e.text) else { return true }
+        replaceCharacters(in: all, with: e.text)
+        didChangeText()
+        setSelectedRange(e.selection)
         return true
     }
+
+    /// The keys of the body editor, whether they arrive as a key equivalent or as a plain key down.
+    private func editKey(_ e: NSEvent) -> Bool {
+        guard isEditable, !isFieldEditor else { return false }
+        let mods = e.modifierFlags.intersection([.command, .shift, .option, .control])
+        let ch = e.charactersIgnoringModifiers?.lowercased() ?? ""
+        switch mods {
+        case .command:
+            switch ch {
+            case "b": return applyFormat(.bold)
+            case "i": return applyFormat(.italic)
+            case "e": return applyFormat(.code)
+            case "k": return applyFormat(.link)
+            case "s": if let onSave { onSave(); return true }
+            default: break
+            }
+        case [.command, .shift]:
+            switch Int(e.keyCode) {
+            case 7: return applyFormat(.strike)      // X
+            case 4: return applyFormat(.heading)     // H
+            case 47: return applyFormat(.quote)      // .
+            case 26: return applyFormat(.olist)      // 7
+            case 51: if let onDelete { onDelete(); return true }
+            default: break
+            }
+        case [.command, .option]:
+            if e.keyCode == 126 || e.keyCode == 125, let onStep { onStep(e.keyCode == 126 ? -1 : 1); return true }
+        default: break
+        }
+        return false
+    }
     override func performKeyEquivalent(with e: NSEvent) -> Bool {
-        formatKey(e) || super.performKeyEquivalent(with: e)
+        editKey(e) || super.performKeyEquivalent(with: e)
+    }
+    /// Tab indents the lines the selection touches (Shift-Tab takes it back); Return carries a list on.
+    private func typingKey(_ e: NSEvent) -> Bool {
+        guard isEditable, !isFieldEditor, !hasMarkedText() else { return false }
+        let mods = e.modifierFlags.intersection([.command, .shift, .option, .control])
+        if e.keyCode == 48, mods.isDisjoint(with: [.command, .option, .control]) {
+            LineEdit.apply(ListEdit.indent(string, selectedRange(), outdent: mods.contains(.shift)), to: self)
+            return true
+        }
+        if e.keyCode == 36 || e.keyCode == 76, mods.isDisjoint(with: [.command, .shift, .control]),
+           let edit = ListEdit.continueList(string, selectedRange()) {
+            LineEdit.apply(edit, to: self)
+            autoMarker = ListEdit.autoMarker(string, caret: edit.selection.location)
+            return true
+        }
+        return false
+    }
+    override func didChangeText() {
+        super.didChangeText()
+        guard let a = autoMarker else { return }
+        let sel = selectedRange()
+        if sel.length == 0, let fix = ListEdit.absorbTyped(string, caret: sel.location, auto: a) {
+            autoMarker = nil
+            LineEdit.apply(fix, to: self)
+            return
+        }
+        let ns = string as NSString, end = a.lineStart + (a.prefix as NSString).length
+        guard ns.length >= end, sel.location >= end, ns.substring(with: NSRange(location: a.lineStart, length: end - a.lineStart)) == a.prefix else { autoMarker = nil; return }
+        if ns.substring(with: NSRange(location: end, length: sel.location - end)).range(of: "^[-*+0-9.)\\[\\] xX]*$", options: .regularExpression) == nil { autoMarker = nil }
     }
     /// ⌥↑ ⌥↓ move the lines the selection touches; ⌥⇧↑ ⌥⇧↓ copy them above or below, as in VS Code.
     private func lineKey(_ e: NSEvent) -> Bool {
@@ -113,20 +198,20 @@ final class EditorTextView: NSTextView {
         return true
     }
     override func keyDown(with e: NSEvent) {
-        if formatKey(e) || lineKey(e) { return }
+        if editKey(e) || lineKey(e) || typingKey(e) { return }
         super.keyDown(with: e)
     }
     // A picture file dropped on the text is attached, like a pasted one; other drops insert as before.
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        if let onImage, isEditable, let d = Self.pastedImageFile(sender.draggingPasteboard) { onImage(d); return true }
+        if let onImage, isEditable, let d = Self.pastedImageFile(sender.draggingPasteboard) { onImage(d, self); return true }
         return super.performDragOperation(sender)
     }
     override func paste(_ sender: Any?) {
         let pb = NSPasteboard.general
         // A copied picture file (a screenshot's thumbnail, a Finder copy) also carries its path as
         // text; it is the picture that is meant, so it goes in as one, not as the path.
-        if let onImage, let d = Self.pastedImageFile(pb) { onImage(d); return }
-        if let onImage, pb.string(forType: .string) == nil, let d = pb.data(forType: .png) ?? pb.data(forType: .tiff) { onImage(d); return }
+        if let onImage, let d = Self.pastedImageFile(pb) { onImage(d, self); return }
+        if let onImage, pb.string(forType: .string) == nil, let d = pb.data(forType: .png) ?? pb.data(forType: .tiff) { onImage(d, self); return }
         super.paste(sender)
     }
     /// The first picture file on the clipboard, read as data; nil when it holds no picture file.
@@ -170,8 +255,10 @@ struct EditorText: NSViewRepresentable {
     /// Where the cursor goes when the keyboard is handed over from outside, if not the default.
     var caret: Int? = nil
     var onClickReadOnly: (() -> Void)? = nil
-    var onFormat: ((NoteFormat.Kind) -> Void)? = nil
-    var onImage: ((Data) -> Void)? = nil
+    var onSave: (() -> Void)? = nil
+    var onStep: ((Int) -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
+    var onImage: ((Data, EditorTextView) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -196,7 +283,7 @@ struct EditorText: NSViewRepresentable {
         tv.isEditable = editable
         tv.delegate = context.coordinator
         tv.onFocus = { [weak coord = context.coordinator] on in coord?.focusChanged(on) }
-        tv.onFormat = onFormat
+        tv.onSave = onSave; tv.onStep = onStep; tv.onDelete = onDelete
         tv.onImage = onImage
         let sv = NSScrollView()
         sv.documentView = tv
@@ -221,7 +308,7 @@ struct EditorText: NSViewRepresentable {
             }
         }
         tv.onClickReadOnly = onClickReadOnly
-        tv.onFormat = onFormat
+        tv.onSave = onSave; tv.onStep = onStep; tv.onDelete = onDelete
         tv.onImage = onImage
         let has = tv.window?.firstResponder === tv
         let coord = context.coordinator
@@ -313,8 +400,10 @@ struct NoteSheet: View {
     /// A click on a block that is open to read.
     var onClickReadOnly: ((Field) -> Void)? = nil
     /// The body's formatting keys and pasted pictures, handled by whoever owns the sheet.
-    var onFormat: ((NoteFormat.Kind) -> Void)? = nil
-    var onImage: ((Data) -> Void)? = nil
+    var onSave: (() -> Void)? = nil
+    var onStep: ((Int) -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
+    var onImage: ((Data, EditorTextView) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -331,7 +420,7 @@ struct NoteSheet: View {
             placeholder(bodyPrompt, empty: text.isEmpty, size: 12, weight: .regular) {
                 EditorText(text: $text, focused: bind(.body), font: .systemFont(ofSize: 12 * UIScale.text), maxHeight: bodyMax,
                            caretAtStart: true, editable: editable, caret: caret, onClickReadOnly: { onClickReadOnly?(.body) },
-                           onFormat: onFormat, onImage: onImage)
+                           onSave: onSave, onStep: onStep, onDelete: onDelete, onImage: onImage)
                     .frame(minHeight: 54, alignment: .top)
             }
             .padding(.horizontal, 8).padding(.vertical, 6)

@@ -1609,7 +1609,7 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         // Notes: the folder moves to ~/Notes once, becomes a repository, and syncs with the Pi on a timer.
         NotesStore.migrateIfNeeded()
         NotesSync.shared.ensureRepo()
-        SavedStore.shared.migrateOldPinsIfNeeded()   // older notes with a link become saves, once
+        SavedStore.shared.migrateOldPinsInBackground()   // older notes with a link become saves, once
         NotesSync.shared.commit("start")   // whatever arrived while the app was closed becomes a version too
         NotesSync.shared.start()
         NotesSync.shared.sync()
@@ -1760,10 +1760,13 @@ final class PolicyStatusController: NSObject, NSPopoverDelegate {
         capturing = true
         nav.picker = nil
         let target = Self.captureTarget(last: last, notes: NotesStore.shared.notes)
-        if case .open(let id, _, _) = target, let n = NotesStore.shared.notes.first(where: { $0.id == id }) { nav.caret = n.body.utf16.count }
+        if case .open(let id, _, _) = target, let n = NotesStore.shared.notes.first(where: { $0.id == id }) { nav.caret = Self.endCaret(of: n.body) }
         else { nav.composeField = .title }
         nav.focus = target
     }
+
+    /// The cursor position at the end of a body, counted the way the text view counts (UTF-16), so emoji do not leave it short.
+    static func endCaret(of body: String) -> Int { body.utf16.count }
 
     /// Where a capture chord puts the keyboard: the new-note box, or the body of the note edited last
     /// (the new-note box again when there are no notes).

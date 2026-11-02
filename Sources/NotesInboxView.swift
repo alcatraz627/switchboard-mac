@@ -73,7 +73,7 @@ private struct InboxRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: item.agent != nil ? "cpu" : item.isSave ? "link" : "note.text").font(.sbIcon(11))
+            Image(systemName: item.agent != nil ? "cpu" : item.isBulk ? "tray.full" : item.isSave ? "link" : "note.text").font(.sbIcon(11))
                 .foregroundStyle(.secondary).frame(width: si(16))
             Button(action: open) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -82,13 +82,15 @@ private struct InboxRow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).help(item.isSave ? "Open the link" : "Open the note")
+            .buttonStyle(.plain).help(item.isBulk ? "They are in your list, newest first" : item.isSave ? "Open the link" : "Open the note")
             Button { inbox.keep(item.id) } label: { Image(systemName: "checkmark").font(.sbIcon(11)) }
                 .buttonStyle(.borderless).foregroundStyle(.secondary)
-                .help(item.isSave ? "Keep it in Saved" : "Keep it in your notes")
-            Button { inbox.done(item.id) } label: { Image(systemName: "archivebox").font(.sbIcon(11)) }
-                .buttonStyle(.borderless).foregroundStyle(.secondary)
-                .help(item.isSave ? "Done: remove this save (its history stays)" : "Done: put it away under Expired")
+                .help(item.isBulk ? "Got it: clear this line" : item.isSave ? "Keep it in Saved" : "Keep it in your notes")
+            if !item.isBulk {
+                Button { inbox.done(item.id) } label: { Image(systemName: "archivebox").font(.sbIcon(11)) }
+                    .buttonStyle(.borderless).foregroundStyle(.secondary)
+                    .help(item.isSave ? "Done: remove this save (its history stays)" : "Done: put it away under Expired")
+            }
             Menu {
                 ForEach(InboxLater.choices(), id: \.title) { c in Button(c.title) { inbox.later(item.id, until: c.date) } }
             } label: { Image(systemName: "clock").font(.sbIcon(11)) }
@@ -104,11 +106,13 @@ private struct InboxRow: View {
     private var subtitle: String {
         var parts: [String] = []
         if let a = item.agent { parts.append("the \(a) agent") } else if let f = item.from { parts.append("from " + f) }
+        if item.isBulk { parts.append("too many to list one by one") }
         parts.append(age(item.at))
         return parts.joined(separator: " · ")
     }
 
     private func open() {
+        if item.isBulk { return }
         if item.isSave {
             if let n = SavedStore.shared.items.first(where: { $0.id == String(item.id.dropFirst(7)) }) ?? SavedStore.readAll().first(where: { $0.id == String(item.id.dropFirst(7)) }) {
                 SavedStore.shared.open(n)

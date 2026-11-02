@@ -184,14 +184,22 @@ final class NotesSync: ObservableObject {
     /// Writes and commits a change on its own, at once: other devices ignore "move" commits for edit
     /// times, so typing still waiting is committed first under its own reason.
     func commitAlone(_ reason: String, write: () -> Void) {
+        commitAlone({ reason }, write: write)
+    }
+
+    /// The same, with the reason read after the write has run (for a change whose size is known only then). The
+    /// write and the commit run together on the sync queue, so a sync round cannot commit the change as plain "save".
+    func commitAlone(_ reason: () -> String, write: () -> Void) {
         if let w = commitWork, let r = pendingReason {
             w.cancel()
             commitWork = nil
             pendingReason = nil
             queue.sync { _ = commitNow(r) }
         }
-        locked { write() }
-        queue.sync { _ = commitNow(reason) }
+        queue.sync {
+            locked { write() }
+            _ = commitNow(reason())
+        }
     }
 
     /// Stages and commits only the notes folder, never anything else in the clone. Returns why it failed, or nil.

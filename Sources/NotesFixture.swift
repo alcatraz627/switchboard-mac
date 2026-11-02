@@ -14,6 +14,7 @@ enum NotesFixture {
         s.add(url: "file:///Users/alcatraz627/Code/", title: "Code", tags: ["work"])
         s.add(url: "file:///Users/alcatraz627/Notes/feedback.md", title: "", tags: ["work", "notes"])
         s.add(url: "", title: "Ask about the csync deploy", tags: [])
+        s.add(url: "https://example.com/unbroken", title: "Unbroken_" + String(repeating: "abcdefghij", count: 14), tags: ["read-later"])
         s.add(url: "https://github.com/alcatraz627/mnt-sync", title: "A repository title long enough to need cutting in the middle of the row, which is what the owner asked for", tags: [])
         TagColors.set("read-later", to: "teal"); TagColors.set("work", to: "#f97316"); TagColors.set("unix", to: "purple")
         s.load()
@@ -22,9 +23,14 @@ enum NotesFixture {
     /// What arrived from elsewhere: a note and a save from the phone, and one note an agent wrote, with no notification.
     static func seedInbox(_ s: NotesStore) {
         NotesInbox.deliver = { _, _, _ in }
-        guard let phone = s.add(title: "Pick up the parcel on the way home", body: "from the phone, in the queue"),
+        guard let phone = s.add(title: "Pick up the parcel on the way home and then a long, long title that does not fit the inbox row at all", body: "from the phone, in the queue"),
               var agent = s.add(title: "Agent finding: the deploy log is clean", body: "nothing to do") else { return }
         agent.agent = "claude-1"; s.update(agent)
+        // --demo-bulk: a first sync that brings more notes than are listed one by one
+        if CommandLine.arguments.contains("--demo-bulk") {
+            let many = (0..<32).compactMap { s.add(title: "Imported note \($0)", body: "from the first sync")?.id }
+            NotesInbox.shared.ingest(ids: many, dir: NotesStore.dir, author: { _ in "the phone" })
+        }
         if var missed = s.add(title: "Call the dentist", body: "rang while nobody was at the desk") { missed.remindAt = Date().addingTimeInterval(-7200); s.update(missed) }
         let link = SavedStore.shared.add(url: "https://example.com/shared-from-the-phone", title: "A page shared from the phone")
         NotesInbox.shared.ingest(ids: [phone.id, ".saved/" + (link?.id ?? ""), agent.id], dir: NotesStore.dir, author: { _ in "the phone" })
@@ -49,6 +55,9 @@ enum NotesFixture {
         put("Unix pipeline explainer", "", tags: ["pin", "reading"], source: "csync", url: "https://example.com/pipes")
         put("Café ☕ 中文 — a title long enough to test how the row and the open note treat a line that will not fit",
             "Short body.", color: "purple", tags: ["long", "unicode", "wrapping", "many", "tags", "here", "seven"], pinned: true, remind: 3600)
+        // titles that give a row no place to break: one unbroken run, and one of the 200 characters a title may hold
+        put("Unbroken_" + String(repeating: "abcdefghij", count: 14), "no spaces in that title to wrap at", tags: ["unbroken"])
+        put(String(repeating: "A title that keeps going and going ", count: 6), "a title cut at 200 characters", color: "orange")
         put("Groceries and the Pi",
             """
             # Before Sunday

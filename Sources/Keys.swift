@@ -637,7 +637,7 @@ enum KeyRouter {
                 let inbox = NotesInbox.shared
                 if case .inboxOpen = fx {
                     if id.hasPrefix(".saved/") { if let n = SavedStore.readAll().first(where: { $0.id == String(id.dropFirst(7)) }) { SavedStore.shared.open(n) } }
-                    else { nav.focus = .open(id, nil, typing: false) }
+                    else if !id.hasPrefix("bulk/") { nav.focus = .open(id, nil, typing: false) }
                     break
                 }
                 if case .inboxKeep = fx { inbox.keep(id) }

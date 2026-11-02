@@ -207,6 +207,23 @@ final class KeyDrive {
             self.showSecondWindow()
         }
 
+        // The capture chord's path (⌥⇧L) as it runs in the panel: the cursor is placed, then the note edited last is
+        // opened for typing in its body, on a list that had no note open. The keyboard must land in it every time.
+        for round in 1...5 {
+            step("capture \(round): the list shows with no note open") { self.nav.focus = .none }
+            step("capture \(round): the note edited last opens for typing, the cursor at its end") {
+                guard let n = self.store.live.first(where: { $0.title == "Alpha more" }) else {
+                    self.check(false, "no note titled \"Alpha more\""); return
+                }
+                self.nav.caret = PolicyStatusController.endCaret(of: n.body)
+                self.nav.focus = .open(n.id, .body, typing: true)
+            }
+            step("capture \(round): the keyboard is in its body") {
+                self.check(self.editing != nil, "responder \(String(describing: self.responder)); focus \(self.nav.focus)")
+                self.nav.caret = nil
+            }
+        }
+
         // The same note open in two windows, as the panel and a pinned Notes tab are.
         step("the same note is open for typing in both windows") {
             guard let n = self.store.live.first(where: { $0.title == "Alpha more" }) else {

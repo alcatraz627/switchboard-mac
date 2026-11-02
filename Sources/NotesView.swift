@@ -492,6 +492,10 @@ struct NoteRow: View {
     @State private var showComments = false
     /// The note's saved versions, read when it opens and again when the list is asked for.
     @State private var versions: [NoteVersion] = []
+    /// The note as another program wrote it while words typed here were still unsaved. Saving waits for a choice.
+    @State private var theirs: Note?
+    /// A snapshot run with --other-app draws the open note with that choice up.
+    static var startClash = CommandLine.arguments.contains("--other-app")
     /// Snapshots open the first note's editor so its look can be checked.
     static var startOpen = false
     /// Snapshots draw the open note laid out for reading rather than being typed in.
@@ -536,7 +540,7 @@ struct NoteRow: View {
     var body: some View {
         rows
             .onChange(of: open) { o in
-                if o { begin() } else { save() }
+                if o { begin() } else { leave() }
                 if o { EditingState.shared.note = note.id } else if EditingState.shared.note == note.id { EditingState.shared.note = nil }
             }
             .onChange(of: nav.focus) { _ in syncFields() }
@@ -560,7 +564,7 @@ struct NoteRow: View {
             // unless something typed here is not saved yet, so two windows never save over each other
             .onChange(of: note) { n in adopt(n) }
             // the row leaves the tree when the list comes back; what was typed in the last moment is kept
-            .onDisappear { if open { save() } }
+            .onDisappear { if open { leave() } }
             .onAppear {
                 // the note ⌘↩ just saved is drawn already open, so nothing above fires for it
                 guard open, draft == nil else { return }
@@ -653,7 +657,7 @@ struct NoteRow: View {
 
     /// ← or Esc: the list, with the ring on this note.
     private var backToList: some View {
-        Button { save(); withAnimation(Motion.slow) { nav.focus = .row(note.id) } } label: {
+        Button { leave(); withAnimation(Motion.slow) { nav.focus = .row(note.id) } } label: {
             HStack(spacing: 4) {
                 Image(systemName: "chevron.left").font(.sbIcon(10, weight: .semibold))
                 Text("All notes").font(PT.caption).lineLimit(1).fixedSize()
@@ -827,6 +831,7 @@ struct NoteRow: View {
         if Self.startOpen, notes.live.first?.id == note.id {
             _snapshotOpen = State(initialValue: true)
             _draft = State(initialValue: note)
+            if Self.startClash { _theirs = State(initialValue: note) }
             if Self.startTitleEdit { _editingTitle = State(initialValue: true); _titleDraft = State(initialValue: note.title) }
         }
     }
@@ -860,6 +865,7 @@ struct NoteRow: View {
     private func adopt(_ n: Note) {
         guard draft != nil else { return }
         if draft == base || draft == n { draft = n }
+        else if let d = draft, NoteMerge.wordsClash(base: base, draft: d, theirs: n) { theirs = n }
         else if let b = base, b.remindAt != n.remindAt || b.remindRepeat != n.remindRepeat || b.remindOn != n.remindOn || b.remindPersist != n.remindPersist {
             // words typed here and not saved yet stay, but a reminder changed elsewhere (dismissed from its notification,
             // or on the phone) must not come back with this note's next save
@@ -934,15 +940,32 @@ struct NoteRow: View {
                     }
                 }
             }
+            // another program wrote this note while words typed here were unsaved: neither side is dropped silently
+            if let other = theirs {
+                let say = HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.sbIcon(10.5)).foregroundStyle(.orange)
+                    Text("Another app changed this note").font(PT.caption).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                }
+                let choose = HStack(spacing: 6) {
+                    Button { draft = other; theirs = nil } label: { Label("Load theirs", systemImage: "arrow.down.doc").lineLimit(1).fixedSize() }
+                        .sbControlSize(.small).help("Drop the words typed here and take the note as the other app left it")
+                    Button { theirs = nil; save() } label: { Label("Keep mine", systemImage: "pencil").lineLimit(1).fixedSize() }
+                        .sbControlSize(.small).help("Save the words typed here over the other app's; its version stays in the note's history")
+                }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) { say; Spacer(minLength: 4); choose }
+                    VStack(alignment: .leading, spacing: 5) { say; choose }
+                }
+            }
             // title and body are one sheet, like a note app, not two boxed fields
             VStack(alignment: .leading, spacing: 0) {
                 if reading {
                     readView(d)
                 } else {
-                    if takeover { formatRow }
+                    formatRow
                     NoteSheet(title: d.title, text: d.body, focus: $focus, bodyMax: takeover ? 460 : 220, editable: openState?.typing ?? true, caret: nav.caret,
                               onClickReadOnly: { f in nav.focus = .open(note.id, f == .title ? .title : .body, typing: true) },
-                              onFormat: { format($0) }, onImage: { pasteImage($0) })
+                              onSave: { save() }, onStep: { step($0) }, onDelete: { confirmDelete() }, onImage: { d, tv in pasteImage(d, in: tv) })
                         .frame(minHeight: takeover ? 220 : 0, alignment: .top)
                 }
                 // tags as chips; the box after them takes the next one (comma or Return), ⌫ on an empty box drops the last
@@ -967,6 +990,12 @@ struct NoteRow: View {
                     TextField("link", text: Binding(get: { d.wrappedValue.url ?? "" },
                                                     set: { d.wrappedValue.url = $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }))
                         .textFieldStyle(.plain).font(PT.caption)
+                    if let u = d.wrappedValue.url, !u.isEmpty {
+                        Button { if let url = URL(string: u) { NSWorkspace.shared.open(url) } } label: { Image(systemName: "arrow.up.right.square").font(.sbIcon(10)) }
+                            .buttonStyle(.borderless).foregroundStyle(.secondary).help("Open \(u)")
+                        Button { copy(u); hint("Link copied") } label: { Image(systemName: "doc.on.doc").font(.sbIcon(10)) }
+                            .buttonStyle(.borderless).foregroundStyle(.secondary).help("Copy the link")
+                    }
                 }
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .padding(.bottom, 4)
@@ -1044,18 +1073,22 @@ struct NoteRow: View {
     private static let tools: [(icon: String, text: String, help: String, kind: NoteFormat.Kind)] = [
         ("bold", "Bold", "⌘B", .bold), ("italic", "Italic", "⌘I", .italic),
         ("chevron.left.forwardslash.chevron.right", "Code", "⌘E", .code),
+        ("strikethrough", "Strike", "⌘⇧X", .strike),
+        ("textformat.size", "Heading", "each press adds a level up to ###, then clears (⌘⇧H)", .heading),
+        ("text.quote", "Quote", "⌘⇧.", .quote),
         ("list.bullet", "List", "a dash on each line of the selection; again takes it off", .list),
+        ("list.number", "Numbers", "⌘⇧7", .olist),
         ("checklist", "Task", "a box on each line of the selection; again takes it off", .task),
-        ("link", "Link", "the clipboard's address around the selection", .link),
+        ("link", "Link", "the clipboard's address around the selection (⌘K)", .link),
+        ("tablecells", "Table", "a table to fill in", .table),
         ("photo", "Picture", "the clipboard's picture, saved under attachments and shown in Read; pasting one does the same", .image),
     ]
 
     /// Every edit is also a key; the line is where they are found. Icons with words when the width allows.
     private var formatRow: some View {
         HStack(spacing: 4) {
-            // B, I and code are their own glyphs; the rest carry their word while the width allows
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 4) { ForEach(Self.tools, id: \.text) { t in tool(t, words: t.kind != .bold && t.kind != .italic && t.kind != .code) } }
+                HStack(spacing: 4) { ForEach(Self.tools, id: \.text) { t in tool(t, words: Self.wordy.contains(t.kind)) } }
                 HStack(spacing: 4) { ForEach(Self.tools, id: \.text) { t in tool(t, words: false) } }
             }
             Spacer(minLength: 4)
@@ -1063,6 +1096,8 @@ struct NoteRow: View {
         }
         .padding(.horizontal, 8).padding(.top, 7)
     }
+    /// The tools that carry their word while there is room; the rest are glyphs.
+    private static let wordy: Set<NoteFormat.Kind> = [.task, .link, .image]
     private func tool(_ t: (icon: String, text: String, help: String, kind: NoteFormat.Kind), words: Bool) -> some View {
         Button { format(t.kind) } label: {
             HStack(spacing: 4) {
@@ -1075,34 +1110,30 @@ struct NoteRow: View {
         .buttonStyle(.plain).foregroundStyle(.secondary).help("\(t.text): \(t.help)")
     }
 
-    /// The body's text view, while it is being typed in.
+    /// The body's text view, while it is being typed in. It is found from the windows, not from which app is in
+    /// front, so a button press still lands when the app is not active.
     private var bodyView: EditorTextView? {
-        guard let tv = NSApp.keyWindow?.firstResponder as? EditorTextView, !tv.isFieldEditor, tv.isEditable else { return nil }
-        return tv
+        for w in [NSApp.keyWindow].compactMap({ $0 }) + NSApp.windows {
+            if let tv = w.firstResponder as? EditorTextView, !tv.isFieldEditor, tv.isEditable { return tv }
+        }
+        return nil
     }
 
+    /// A format button: the text edits are made by the text view itself (the same code its keys run); the picture
+    /// is fetched here because the note has to store it.
     private func format(_ k: NoteFormat.Kind) {
         guard let tv = bodyView else { nav.focus = .open(note.id, .body, typing: true); hint("Click into the text, then again"); return }
-        let r = tv.selectedRange()
-        switch k {
-        case .bold: apply(NoteFormat.wrap(tv.string, r, "**"), to: tv)
-        case .italic: apply(NoteFormat.wrap(tv.string, r, "_"), to: tv)
-        case .code: apply(NoteFormat.wrap(tv.string, r, "`"), to: tv)
-        case .list: apply(NoteFormat.prefixLines(tv.string, r, "- "), to: tv)
-        case .task: apply(NoteFormat.prefixLines(tv.string, r, "- [ ] "), to: tv)
-        case .link: apply(NoteFormat.link(tv.string, r, clipboard: NSPasteboard.general.string(forType: .string)), to: tv)
-        case .image:
-            // the clipboard's picture when it holds one, else a picture chosen from disk
-            let pb = NSPasteboard.general
-            if let d = EditorTextView.pastedImageFile(pb) ?? pb.data(forType: .png) ?? pb.data(forType: .tiff) { pasteImage(d); return }
-            let panel = NSOpenPanel()
-            panel.allowedContentTypes = [.image]
-            panel.allowsMultipleSelection = false
-            panel.message = "Choose a picture for this note"
-            NSApp.activate(ignoringOtherApps: true)
-            guard panel.runModal() == .OK, let url = panel.url, let d = try? Data(contentsOf: url) else { return }
-            pasteImage(d)
-        }
+        if k != .image { tv.applyFormat(k); return }
+        // the clipboard's picture when it holds one, else a picture chosen from disk
+        let pb = NSPasteboard.general
+        if let d = EditorTextView.pastedImageFile(pb) ?? pb.data(forType: .png) ?? pb.data(forType: .tiff) { pasteImage(d, in: tv); return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a picture for this note"
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url, let d = try? Data(contentsOf: url) else { return }
+        pasteImage(d, in: tv)
     }
 
     /// One replacement of the whole text, so undo takes it back in one step.
@@ -1114,11 +1145,18 @@ struct NoteRow: View {
         tv.setSelectedRange(e.selection)
     }
 
-    private func pasteImage(_ d: Data) {
-        guard let tv = bodyView else { return }
+    private func pasteImage(_ d: Data, in tv: EditorTextView) {
         guard let rel = NoteFormat.savePNG(d, noteID: note.id, dir: NotesStore.dir) else { hint("The picture could not be saved"); return }
         apply(NoteFormat.image(tv.string, tv.selectedRange(), path: rel, name: "picture"), to: tv)
         NotesSync.shared.commit("picture")
+    }
+
+    /// ⌥⌘↑ and ⌥⌘↓: the note before or after this one in the list, opened for typing.
+    private func step(_ by: Int) {
+        let list = nav.visible(notes.live)
+        guard let i = list.firstIndex(where: { $0.id == note.id }), list.indices.contains(i + by) else { return }
+        leave()
+        nav.focus = .open(list[i + by].id, .body, typing: true)
     }
 
     @State private var hintText: String?
@@ -1140,17 +1178,29 @@ struct NoteRow: View {
 
     /// What is in the tag box becomes chips: one per comma, no repeats, nothing empty.
     private func commitTag(_ d: Binding<Note>) {
-        let new = tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        for t in new where !d.wrappedValue.tags.contains(t) { d.wrappedValue.tags.append(t) }
+        let r = InputRules.addTags(typed: tagsText, to: d.wrappedValue.tags)
+        if let why = r.problem { hint(why); return }
+        d.wrappedValue.tags = r.tags
         tagsText = ""
+    }
+
+    /// Leaving the note with the other app's change still unanswered: its version is kept as a note of its own, so
+    /// neither side's words are lost, and what was typed here is saved.
+    private func leave() {
+        if let o = theirs {
+            _ = notes.add(title: (o.title.isEmpty ? "Untitled" : o.title) + " (other app's version)", body: o.body)
+            theirs = nil
+        }
+        save()
     }
 
     private func save() {
         if !tagsText.isEmpty, draft != nil { commitTag(Binding(get: { draft ?? note }, set: { draft = $0 })) }
+        guard theirs == nil else { return }
         guard var n = draft, n != note else { refused = false; return }
         // a note with neither title nor text is refused, not saved; Delete is how a note goes
         guard InputRules.canSave(title: n.title, body: n.body, url: n.url ?? "") else { refused = true; return }
-        n.title = n.title.trimmingCharacters(in: .whitespaces)
+        n.title = InputRules.cleanTitle(n.title)
         n.url = n.url.map { $0.trimmingCharacters(in: .whitespaces) }.flatMap { $0.isEmpty ? nil : $0 }
         refused = false
         notes.update(n)
@@ -1175,6 +1225,7 @@ struct NoteRow: View {
         WhenButton(title: "Remind me", presets: WhenPreset.long,
                    choices: ["Once", "Every day", "Every week", "Every month"],
                    extra: d.wrappedValue.remindAt == nil ? [] : [("No reminder", { d.wrappedValue.remindAt = nil; expireWithReminder = false })],
+                   templates: WhenTemplate.shared(Runs.shared.templates),
                    initial: d.wrappedValue.remindAt,
                    initialChoice: [.never, .daily, .weekly, .monthly].firstIndex(of: d.wrappedValue.remindRepeat) ?? 0,
                    onPick: { t, i in

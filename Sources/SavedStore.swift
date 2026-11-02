@@ -70,10 +70,10 @@ final class SavedStore: ObservableObject {
 
     /// Changes a few keys of a save's file as it is on disk now, under the lock; the in-memory copy then follows the file.
     @discardableResult
-    func patch(_ id: String, _ change: (inout NoteSpec.Record) -> Void) -> Bool {
+    func patch(_ id: String, commit: Bool = true, _ change: (inout NoteSpec.Record) -> Void) -> Bool {
         guard let text = NotesStore.patchFile(at: path(id), name: id, change), let n = NotesStore.parse(id: id, text) else { return false }
         if let i = items.firstIndex(where: { $0.id == id }) { items[i] = n } else { items.insert(n, at: 0) }
-        NotesSync.shared.commit("save")
+        if commit { NotesSync.shared.commit("save") }
         return true
     }
 
@@ -132,47 +132,59 @@ final class SavedStore: ObservableObject {
 
     /// Older notes at the top level with a `url:` line, or the tag `pin`, become saves: moved into `.saved/` in one
     /// commit, named by the link's hash (their own id when they have no link), the `pin` tag dropped, and a Mac file
-    /// link marked as opening on the Mac. Returns how many moved. Runs once per Mac, then sets the migration key.
+    /// link marked as opening on the Mac. A note with a reminder stays a note, since only notes ring. Returns how
+    /// many moved. Runs once per Mac, then sets the migration key.
     @discardableResult
     func migrateOldPinsIfNeeded() -> Int {
         let d = NotesStore.defaults
         guard d.object(forKey: Self.migratedKey) == nil, NotesStore.missingFolder == nil else { return 0 }
         let fm = FileManager.default
         let top = NotesStore.dir
-        guard let names = try? fm.contentsOfDirectory(atPath: top) else { return 0 }
-        var moves: [(from: String, to: String, text: String)] = []
-        var taken = Set<String>(((try? fm.contentsOfDirectory(atPath: Self.dir)) ?? []).map { String($0.dropLast(3)) })
-        for f in names.sorted() where f.hasSuffix(".md") && !f.hasPrefix(".") {
-            let id = String(f.dropLast(3))
-            guard let text = try? String(contentsOfFile: top + "/" + f, encoding: .utf8), !NotesSync.conflicted(text),
-                  var n = NotesStore.parse(id: id, text) else { continue }
-            let hasLink = !(n.url ?? "").isEmpty
-            let pinTag = n.tags.contains { $0.lowercased() == "pin" }
-            guard hasLink || pinTag else { continue }
-            n.tags.removeAll { $0.lowercased() == "pin" }
-            if let u = n.url, u.lowercased().hasPrefix("file://"), n.device == nil { n.device = "mac" }
-            var target = hasLink ? NoteSpec.saveKey(n.url ?? "") : id
-            // a second note for a link already saved keeps its own id, so no words are lost
-            if taken.contains(target) { target = id }
-            if taken.contains(target) { continue }
-            taken.insert(target)
-            n = Note(id: target, title: n.title, body: n.body, tags: n.tags, created: n.created, expires: n.expires, remindAt: n.remindAt,
-                     remindRepeat: n.remindRepeat, remindOn: n.remindOn, reminderID: n.reminderID, pinned: n.pinned, color: n.color,
-                     agent: n.agent, source: n.source, url: n.url, remindPersist: n.remindPersist, device: n.device, pos: nil, extra: n.extra)
-            moves.append((f, target, NotesStore.render(n)))
-        }
-        if !moves.isEmpty {
-            NotesSync.shared.commitAlone("saved: move \(moves.count) older pin\(moves.count == 1 ? "" : "s")") {
-                try? fm.createDirectory(atPath: Self.dir, withIntermediateDirectories: true)
-                for m in moves {
-                    guard (try? m.text.write(toFile: Self.dir + "/" + m.to + ".md", atomically: true, encoding: .utf8)) != nil else { continue }
-                    try? fm.removeItem(atPath: top + "/" + m.from)
-                }
+        guard (try? fm.contentsOfDirectory(atPath: top)) != nil else { return 0 }
+        var moved = 0
+        // The files are read inside the lock, so a note edited a moment before is moved as it is then, never as it was.
+        NotesSync.shared.commitAlone({ moved == 0 ? "save" : "saved: move \(moved) older pin\(moved == 1 ? "" : "s")" }) {
+            guard let names = try? fm.contentsOfDirectory(atPath: top) else { return }
+            var moves: [(from: String, to: String, text: String)] = []
+            var taken = Set<String>(((try? fm.contentsOfDirectory(atPath: Self.dir)) ?? []).map { String($0.dropLast(3)) })
+            for f in names.sorted() where f.hasSuffix(".md") && !f.hasPrefix(".") {
+                let id = String(f.dropLast(3))
+                guard let text = try? String(contentsOfFile: top + "/" + f, encoding: .utf8), !NotesSync.conflicted(text),
+                      var n = NotesStore.parse(id: id, text) else { continue }
+                let hasLink = !(n.url ?? "").isEmpty
+                let pinTag = n.tags.contains { $0.lowercased() == "pin" }
+                guard hasLink || pinTag, n.remindAt == nil else { continue }
+                n.tags.removeAll { $0.lowercased() == "pin" }
+                if let u = n.url, u.lowercased().hasPrefix("file://"), n.device == nil { n.device = "mac" }
+                var target = hasLink ? NoteSpec.saveKey(n.url ?? "") : id
+                // a second note for a link already saved keeps its own id, so no words are lost
+                if taken.contains(target) { target = id }
+                if taken.contains(target) { continue }
+                taken.insert(target)
+                n = Note(id: target, title: n.title, body: n.body, tags: n.tags, created: n.created, expires: n.expires, remindAt: n.remindAt,
+                         remindRepeat: n.remindRepeat, remindOn: n.remindOn, reminderID: n.reminderID, pinned: n.pinned, color: n.color,
+                         agent: n.agent, source: n.source, url: n.url, remindPersist: n.remindPersist, device: n.device, pos: nil, extra: n.extra)
+                moves.append((f, target, NotesStore.render(n)))
+            }
+            guard !moves.isEmpty else { return }
+            try? fm.createDirectory(atPath: Self.dir, withIntermediateDirectories: true)
+            for m in moves {
+                guard (try? m.text.write(toFile: Self.dir + "/" + m.to + ".md", atomically: true, encoding: .utf8)) != nil else { continue }
+                try? fm.removeItem(atPath: top + "/" + m.from)
+                moved += 1
             }
         }
         d.set(ISO8601DateFormatter().string(from: Date()), forKey: Self.migratedKey)
-        dlog("saved: \(moves.count) older pins moved into .saved")
-        return moves.count
+        dlog("saved: \(moved) older pins moved into .saved")
+        return moved
+    }
+
+    /// The same move, off the main thread: it waits for the sync queue, which can take as long as a network round.
+    func migrateOldPinsInBackground() {
+        DispatchQueue.global(qos: .utility).async { [self] in
+            let n = migrateOldPinsIfNeeded()
+            if n > 0 { DispatchQueue.main.async { self.load(); NotesStore.shared.loadInBackground() } }
+        }
     }
 
     // ── Opening ─────────────────────────────────────────────────────────────

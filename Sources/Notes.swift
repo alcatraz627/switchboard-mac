@@ -739,7 +739,7 @@ final class NotesStore: ObservableObject {
     /// but not both; the same note twice is saved once.
     @discardableResult
     func add(title rawTitle: String, body rawBody: String, color: String? = nil, url rawURL: String = "") -> Note? {
-        let title = rawTitle.trimmingCharacters(in: .whitespaces)
+        let title = InputRules.cleanTitle(rawTitle)
         let body = rawBody.trimmingCharacters(in: .whitespacesAndNewlines)
         let url = rawURL.trimmingCharacters(in: .whitespaces)
         guard InputRules.canSave(title: title, body: body, url: url) else { return nil }
@@ -836,10 +836,10 @@ final class NotesStore: ObservableObject {
 
     /// `patchFile` for the note `id`, then the in-memory copy is replaced by what the file now says and the change commits.
     @discardableResult
-    func patch(_ id: String, reason: String = "save", _ change: (inout NoteSpec.Record) -> Void) -> Bool {
+    func patch(_ id: String, reason: String = "save", commit: Bool = true, _ change: (inout NoteSpec.Record) -> Void) -> Bool {
         guard let text = Self.patchFile(at: Self.dir + "/" + id + ".md", name: id, change), let n = Self.parse(id: id, text) else { return false }
         if let i = notes.firstIndex(where: { $0.id == id }) { var m = n; m.pos = n.pos; notes[i] = m; resort() }
-        NotesSync.shared.commit(reason)
+        if commit { NotesSync.shared.commit(reason) }
         return true
     }
 
@@ -1005,17 +1005,21 @@ final class NotesStore: ObservableObject {
     static func deletedInHistory(limit: Int = 300) -> [Trashed] {
         guard Self.missingFolder == nil, NotesSync.shared.repo() != nil else { return [] }
         let sync = NotesSync.shared
-        let log = sync.git(["log", "--diff-filter=D", "--relative", "--name-only", "--format=@%H\t%ct", "-n", "\(limit)", "--", "."]).out
+        let log = sync.git(["log", "--diff-filter=D", "--relative", "--name-only", "--format=@%H\t%ct\t%s", "-n", "\(limit)", "--", "."]).out
         var out: [Trashed] = []
         var seen = Set<String>()
         var sha = "", when = Date()
+        // the one-time move of older pins into `.saved` shows as deletions where git sees a rewrite, not a rename; nothing was deleted
+        var isMove = false
         for raw in log.split(separator: "\n", omittingEmptySubsequences: true) {
             let line = String(raw)
             if line.hasPrefix("@") {
-                let p = line.dropFirst().split(separator: "\t")
+                let p = line.dropFirst().split(separator: "\t", omittingEmptySubsequences: false)
                 sha = String(p.first ?? ""); when = Date(timeIntervalSince1970: Double(p.dropFirst().first ?? "0") ?? 0)
+                isMove = (p.dropFirst(2).first ?? "").hasPrefix("saved: move ")
                 continue
             }
+            if isMove { continue }
             let isSave = line.hasPrefix(".saved/") && !line.dropFirst(7).contains("/")
             guard line.hasSuffix(".md"), isSave || (!line.contains("/") && !line.hasPrefix(".")), !sha.isEmpty else { continue }
             let id = String(line.dropLast(3).dropFirst(isSave ? 7 : 0))
@@ -1208,9 +1212,11 @@ final class NotesStore: ObservableObject {
         // time and the item goes when the reminder is dismissed, so a running app that rings it does not notify twice
         guard n.remindAt != nil, n.remindOn != "phone" else {
             guard let id = n.reminderID else { return nil }
+            // the phone's own handle on a reminder it rings is its to keep; only an item this Mac made is let go
+            let mine = reminders.owns(id)
             // Keep the id when removal fails, so the reminder can still be found later.
             if let why = reminders.remove(id) { return "the reminder could not be removed: \(why)" }
-            n.reminderID = nil
+            if mine || n.remindOn != "phone" { n.reminderID = nil }
             return nil
         }
         switch reminders.status() {
@@ -1251,6 +1257,8 @@ struct ReminderBackend {
     var save: (Note) throws -> String
     /// Removes a reminder; returns why it could not, or nil (a reminder already gone counts as removed).
     var remove: (String) -> String?
+    /// Whether this Mac made the item with that identifier; another device's handle on a reminder is not this Mac's to clear.
+    var owns: (String) -> Bool = { _ in true }
 
     /// How long after the due time the Reminders.app alarm goes off: long enough for a running Switchboard to ring,
     /// and for the owner to dismiss it there, which removes the item before its alarm.
@@ -1280,6 +1288,7 @@ struct ReminderBackend {
             remove: { id in
                 guard let r = existing(id) else { return nil }
                 do { try events.remove(r, commit: true); return nil } catch { return error.localizedDescription }
-            })
+            },
+            owns: { existing($0) != nil })
     }
 }

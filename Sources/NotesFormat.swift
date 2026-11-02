@@ -7,7 +7,7 @@ import AppKit
 import Foundation
 
 enum NoteFormat {
-    enum Kind { case bold, italic, code, list, task, link, image }
+    enum Kind { case bold, italic, code, strike, heading, quote, olist, list, task, link, table, image }
 
     struct Edit: Equatable {
         let text: String
@@ -40,6 +40,66 @@ enum NoteFormat {
         return Edit(text: s.replacingCharacters(in: lines, with: out), selection: NSRange(location: lines.location, length: kept))
     }
 
+    /// The edit a formatting key or button makes to the text; nil for a picture, which needs the note to store it.
+    static func edit(_ k: Kind, _ text: String, _ r: NSRange, clipboard: String?) -> Edit? {
+        switch k {
+        case .bold: return wrap(text, r, "**")
+        case .italic: return wrap(text, r, "_")
+        case .code: return wrap(text, r, "`")
+        case .strike: return wrap(text, r, "~~")
+        case .heading: return heading(text, r)
+        case .quote: return prefixLines(text, r, "> ")
+        case .olist: return orderedList(text, r)
+        case .list: return prefixLines(text, r, "- ")
+        case .task: return prefixLines(text, r, "- [ ] ")
+        case .link: return link(text, r, clipboard: clipboard)
+        case .table: return table(text, r)
+        case .image: return nil
+        }
+    }
+
+    /// Each press adds a level to the line the cursor is on (#, ##, ###), then takes the heading off again.
+    static func heading(_ text: String, _ r: NSRange) -> Edit {
+        let s = text as NSString
+        let line = s.lineRange(for: NSRange(location: r.location, length: 0))
+        var body = s.substring(with: line)
+        if body.hasSuffix("\n") { body = String(body.dropLast()) }
+        let level = body.prefix(while: { $0 == "#" }).count
+        let marked = level >= 1 && level <= 6 && body.dropFirst(level).hasPrefix(" ")
+        let bare = marked ? String(body.dropFirst(level + 1)) : body
+        let now = marked ? level : 0
+        let next = now >= 3 ? bare : String(repeating: "#", count: now + 1) + " " + bare
+        return Edit(text: s.replacingCharacters(in: NSRange(location: line.location, length: (body as NSString).length), with: next),
+                    selection: NSRange(location: line.location + (next as NSString).length, length: 0))
+    }
+
+    /// Numbers each line the selection touches; lines that are all numbered already lose their numbers.
+    static func orderedList(_ text: String, _ r: NSRange) -> Edit {
+        let s = text as NSString
+        let lines = s.lineRange(for: r)
+        let block = s.substring(with: lines)
+        let trailing = block.hasSuffix("\n")
+        let parts = (trailing ? String(block.dropLast()) : block).components(separatedBy: "\n")
+        let numbered = try? NSRegularExpression(pattern: "^\\d+\\. ")
+        func strip(_ l: String) -> String? {
+            guard let m = numbered?.firstMatch(in: l, range: NSRange(location: 0, length: (l as NSString).length)) else { return nil }
+            return (l as NSString).substring(from: m.range.length)
+        }
+        let all = parts.allSatisfy { strip($0) != nil }
+        let out = parts.enumerated().map { all ? strip($1) ?? $1 : "\($0 + 1). " + $1 }.joined(separator: "\n") + (trailing ? "\n" : "")
+        let kept = (out as NSString).length - (trailing ? 1 : 0)
+        return Edit(text: s.replacingCharacters(in: lines, with: out), selection: NSRange(location: lines.location, length: kept))
+    }
+
+    /// A two-by-two table starting on a line of its own, with its first heading selected to type over.
+    static func table(_ text: String, _ r: NSRange) -> Edit {
+        let s = text as NSString
+        let midLine = r.location > 0 && s.character(at: r.location - 1) != 10
+        let piece = (midLine ? "\n" : "") + "| Column 1 | Column 2 |\n| --- | --- |\n|   |   |\n|   |   |\n"
+        return Edit(text: s.replacingCharacters(in: r, with: piece),
+                    selection: NSRange(location: r.location + (midLine ? 1 : 0) + 2, length: 8))
+    }
+
     /// `[selection](url)`: the clipboard's link when it holds one, else "url" left selected to type over.
     static func link(_ text: String, _ r: NSRange, clipboard: String?) -> Edit {
         let s = text as NSString
@@ -69,6 +129,17 @@ enum NoteFormat {
         try? FileManager.default.createDirectory(atPath: dir + "/attachments", withIntermediateDirectories: true)
         guard (try? png.write(to: URL(fileURLWithPath: dir + "/" + rel))) != nil else { return nil }
         return rel
+    }
+}
+
+enum NoteMerge {
+    /// Whether another program changed a note's words while words typed in the editor are still unsaved, so that
+    /// taking either side would drop the other's. `base` is the note as the editor last took it in.
+    static func wordsClash(base: Note?, draft: Note, theirs: Note) -> Bool {
+        guard let b = base else { return false }
+        let theirsChanged = theirs.title != b.title || theirs.body != b.body
+        let mineChanged = draft.title != b.title || draft.body != b.body
+        return theirsChanged && mineChanged && (theirs.title != draft.title || theirs.body != draft.body)
     }
 }
 

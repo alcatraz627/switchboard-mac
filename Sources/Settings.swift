@@ -199,6 +199,10 @@ struct SettingsTabView: View {
         ("Approvals", [("Return", "Open a request"), ("⌘↩", "Allow"), ("⌫", "Deny")]),
         ("Notes", [("→  → ", "Open, then edit"), ("Tab", "The note's parts"), ("/", "Search"), ("⌘↩", "Save"),
                    ("P  C", "Pin, copy"), ("1 – 8", "Colour")]),
+        ("Writing", [("⌘B  ⌘I  ⌘E", "Bold, italic, code"), ("⌘⇧X  ⌘⇧H", "Strikethrough, heading level"),
+                     ("⌘K  ⌘⇧.", "Link, quote"), ("⌘⇧7", "Numbered list"), ("⇥  ⇧⇥", "Indent, outdent the lines"),
+                     ("⌥↑  ⌥↓", "Move lines; with ⇧ copy them"), ("↩", "Carry a list on; on an empty item, end it"),
+                     ("⌘S", "Save"), ("⌘⌥↑  ⌘⌥↓", "Previous, next note"), ("⌘⇧⌫", "Delete the note")]),
     ]
 
     private var keyTable: some View {
