@@ -494,6 +494,8 @@ struct NoteRow: View {
     @State private var versions: [NoteVersion] = []
     /// The note as another program wrote it while words typed here were still unsaved. Saving waits for a choice.
     @State private var theirs: Note?
+    /// The copy of the words typed here that is kept while the other app's change waits for an answer.
+    @State private var recoveryID: String?
     @State private var showCompare = CommandLine.arguments.contains("--compare")
     /// A snapshot run with --other-app draws the open note with that choice up.
     static var startClash = CommandLine.arguments.contains("--other-app")
@@ -556,7 +558,7 @@ struct NoteRow: View {
                 guard on, open, part != .tags else { return }
                 if clickedNow() { nav.focus = .open(note.id, .tags, typing: true) } else { tagsFocused = false }
             }
-            .onChange(of: nav.saveTick) { _ in if open { save() } }
+            .onChange(of: nav.saveTick) { _ in if open { save(asked: true) } }
             // a colour or pin set by a key while the note is open goes into the open copy,
             // or its next save would put the old value back
             .onChange(of: note.color) { c in if draft != nil { draft?.color = c } }
@@ -871,7 +873,11 @@ struct NoteRow: View {
     private func adopt(_ n: Note) {
         guard draft != nil else { return }
         if draft == base || draft == n { draft = n }
-        else if let d = draft, NoteMerge.wordsClash(base: base, draft: d, theirs: n) { theirs = n }
+        else if let d = draft, NoteMerge.wordsClash(base: base, draft: d, theirs: n) {
+            // the words are the owner's to choose; what the other app changed besides them (reminder, tags, link, colour, expiry) is carried in now
+            draft = NoteMerge.carryFields(draft: d, base: base, theirs: n)
+            theirs = n
+        }
         else if let b = base, b.remindAt != n.remindAt || b.remindRepeat != n.remindRepeat || b.remindOn != n.remindOn || b.remindPersist != n.remindPersist {
             // words typed here and not saved yet stay, but a reminder changed elsewhere (dismissed from its notification,
             // or on the phone) must not come back with this note's next save
@@ -950,13 +956,16 @@ struct NoteRow: View {
             if let other = theirs {
                 let say = HStack(spacing: 6) {
                     Image(systemName: "arrow.triangle.2.circlepath").font(.sbIcon(10.5)).foregroundStyle(.orange)
-                    Text("Another app changed this note").font(PT.caption).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Another app changed this note").font(PT.caption).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                        Text("Your words are kept as a copy meanwhile").font(.sb(10)).foregroundStyle(.tertiary).lineLimit(1).fixedSize()
+                    }
                 }
                 let choose = HStack(spacing: 6) {
-                    Button { draft = other; theirs = nil } label: { Label("Load theirs", systemImage: "arrow.down.doc").lineLimit(1).fixedSize() }
-                        .sbControlSize(.small).help("Drop the words typed here and take the note as the other app left it")
-                    Button { theirs = nil; save() } label: { Label("Keep mine", systemImage: "pencil").lineLimit(1).fixedSize() }
-                        .sbControlSize(.small).help("Save the words typed here over the other app's; its version stays in the note's history")
+                    Button { loadTheirs(other) } label: { Label("Load theirs", systemImage: "arrow.down.doc").lineLimit(1).fixedSize() }
+                        .sbControlSize(.small).help("Take the note as the other app left it; the words typed here stay as a note of their own")
+                    Button { keepMine(other) } label: { Label("Keep mine", systemImage: "pencil").lineLimit(1).fixedSize() }
+                        .sbControlSize(.small).help("Save the words typed here over the other app's; its version is saved to the note's history first")
                     Button { withAnimation(Motion.slow) { showCompare.toggle() } } label: { Label("Compare", systemImage: "rectangle.split.2x1").lineLimit(1).fixedSize() }
                         .sbControlSize(.small).help("Show the lines that differ between the other app's version and the words typed here")
                 }
@@ -974,7 +983,7 @@ struct NoteRow: View {
                     formatRow
                     NoteSheet(title: d.title, text: d.body, focus: $focus, bodyMax: takeover ? 460 : 220, editable: openState?.typing ?? true, caret: nav.caret,
                               onClickReadOnly: { f in nav.focus = .open(note.id, f == .title ? .title : .body, typing: true) },
-                              onSave: { save() }, onStep: { step($0) }, onDelete: { confirmDelete() }, onImage: { d, tv in pasteImage(d, in: tv) })
+                              onSave: { save(asked: true) }, onStep: { step($0) }, onDelete: { confirmDelete() }, onImage: { d, tv in pasteImage(d, in: tv) })
                         .frame(minHeight: takeover ? 220 : 0, alignment: .top)
                 }
                 // tags as chips; the box after them takes the next one (comma or Return), ⌫ on an empty box drops the last
@@ -1231,20 +1240,57 @@ struct NoteRow: View {
         if let o = theirs {
             _ = notes.add(title: (o.title.isEmpty ? "Untitled" : o.title) + " (other app's version)", body: o.body)
             theirs = nil
+            dropRecovery()
         }
         save()
     }
 
-    private func save() {
+    /// Take the other app's version. The words typed here are kept as a note of their own, so nothing is lost.
+    private func loadTheirs(_ other: Note) {
+        if let d = draft, d.title != other.title || d.body != other.body {
+            recoveryID = notes.keepCopy(id: recoveryID, title: d.title, body: d.body, label: "typed here")
+        }
+        recoveryID = nil
+        draft = other
+        theirs = nil
+    }
+
+    /// Keep the words typed here. The other app's version is committed from disk first, so it is in the note's history.
+    private func keepMine(_ other: Note) {
+        theirs = nil
+        save(keepingOther: true)
+        dropRecovery()
+    }
+
+    /// The copy of the typed words is no longer needed once they are saved in the note itself.
+    private func dropRecovery() {
+        if let id = recoveryID, let n = notes.notes.first(where: { $0.id == id }) { notes.delete(n) }
+        recoveryID = nil
+    }
+
+    /// `asked` is true for ⌘S and ⌘↩: while the other app's change waits for an answer they say so.
+    private func save(asked: Bool = false, keepingOther: Bool = false) {
         if !tagsText.isEmpty, draft != nil { commitTag(Binding(get: { draft ?? note }, set: { draft = $0 })) }
-        guard theirs == nil else { return }
+        if theirs != nil {
+            // the note itself waits for the choice; what is typed here goes on being saved, as a copy
+            if let d = draft, d.title != note.title || d.body != note.body {
+                recoveryID = notes.keepCopy(id: recoveryID, title: d.title, body: d.body, label: "typed here")
+            }
+            if asked { hint("Choose Load theirs or Keep mine first; your words are kept as a copy") }
+            return
+        }
         guard var n = draft, n != note else { refused = false; return }
         // a note with neither title nor text is refused, not saved; Delete is how a note goes
         guard InputRules.canSave(title: n.title, body: n.body, url: n.url ?? "") else { refused = true; return }
-        n.title = InputRules.cleanTitle(n.title)
+        // a title the owner did not touch stays as it is; one typed or pasted over 200 characters sends the rest to the body
+        if n.title != note.title {
+            let t = InputRules.settleTitle(old: note.title, new: n.title, body: n.body)
+            n.title = t.title; n.body = t.body
+            draft?.title = t.title; draft?.body = t.body
+        }
         n.url = n.url.map { $0.trimmingCharacters(in: .whitespaces) }.flatMap { $0.isEmpty ? nil : $0 }
         refused = false
-        notes.update(n)
+        notes.update(n, keepingOtherVersion: keepingOther)
         savedAt = Date()
     }
 

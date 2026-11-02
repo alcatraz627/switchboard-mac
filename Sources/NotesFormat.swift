@@ -94,10 +94,13 @@ enum NoteFormat {
     /// A two-by-two table starting on a line of its own, with its first heading selected to type over.
     static func table(_ text: String, _ r: NSRange) -> Edit {
         let s = text as NSString
-        let midLine = r.location > 0 && s.character(at: r.location - 1) != 10
+        // after the selection, never over it: selected words stay, and stay selected
+        let at = NSRange(location: r.upperBound, length: 0)
+        let midLine = at.location > 0 && s.character(at: at.location - 1) != 10
         let piece = (midLine ? "\n" : "") + "| Column 1 | Column 2 |\n| --- | --- |\n|   |   |\n|   |   |\n"
-        return Edit(text: s.replacingCharacters(in: r, with: piece),
-                    selection: NSRange(location: r.location + (midLine ? 1 : 0) + 2, length: 8))
+        let out = s.replacingCharacters(in: at, with: piece)
+        if r.length > 0 { return Edit(text: out, selection: r) }
+        return Edit(text: out, selection: NSRange(location: at.location + (midLine ? 1 : 0) + 2, length: 8))
     }
 
     /// `[selection](url)`: the clipboard's link when it holds one, else "url" left selected to type over.
@@ -142,6 +145,35 @@ enum NoteMerge {
 
     /// The words of a note as lines: its title, then its body.
     static func lines(of n: Note) -> [String] { ([n.title] + n.body.components(separatedBy: "\n")) }
+
+    /// The draft with what the other app changed besides words carried in: reminder, tags, link, colour, expiry. A field
+    /// changed only there is taken from there; changed only here, kept; changed on both sides, the reminder that rings
+    /// later wins, tags are joined, and the others keep the draft's. `base` is the note as the editor last took it in.
+    static func carryFields(draft: Note, base: Note?, theirs: Note) -> Note {
+        guard let b = base else { return draft }
+        var d = draft
+        func rem(_ n: Note) -> [AnyHashable] { [n.remindAt as AnyHashable, n.remindRepeat as AnyHashable, n.remindOn as AnyHashable, n.remindPersist as AnyHashable] }
+        let theirRem = rem(theirs) != rem(b), myRem = rem(draft) != rem(b)
+        if theirRem {
+            var takeTheirs = true
+            if myRem {
+                switch (draft.remindAt, theirs.remindAt) {
+                case let (a?, t?): takeTheirs = t > a
+                case (_?, nil): takeTheirs = false
+                default: takeTheirs = true
+                }
+            }
+            if takeTheirs {
+                d.remindAt = theirs.remindAt; d.remindRepeat = theirs.remindRepeat; d.remindOn = theirs.remindOn
+                d.remindPersist = theirs.remindPersist; d.reminderID = theirs.reminderID
+            }
+        }
+        if theirs.tags != b.tags { d.tags = draft.tags != b.tags ? draft.tags + theirs.tags.filter { !draft.tags.contains($0) } : theirs.tags }
+        if theirs.url != b.url, draft.url == b.url { d.url = theirs.url }
+        if theirs.color != b.color, draft.color == b.color { d.color = theirs.color }
+        if theirs.expires != b.expires, draft.expires == b.expires { d.expires = theirs.expires }
+        return d
+    }
 
     /// A line-by-line comparison of two versions of a note's words, the other app's against the one typed here.
     /// Only the changed lines and `context` lines around each are kept; a skipped stretch becomes one gap row.

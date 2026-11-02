@@ -94,6 +94,14 @@ enum ListEdit {
         guard caret >= end, ns.length >= end, ns.substring(with: NSRange(location: auto.lineStart, length: end - auto.lineStart)) == auto.prefix else { return nil }
         let typed = ns.substring(with: NSRange(location: end, length: caret - end))
         guard let m = typedMarker.firstMatch(in: typed, range: whole(typed)) else { return nil }
+        // only a marker of the same kind is a repeat: a dash over a dash, a number over a number no wider than the
+        // automatic one. "2020. " typed after a dash is the start of a sentence, not a doubled marker.
+        let typedMark = group(m, 1, in: typed) ?? ""
+        let autoMark = auto.prefix.trimmingCharacters(in: .whitespaces).split(separator: " ").first.map(String.init) ?? ""
+        let typedDigits = typedMark.prefix(while: \.isNumber), autoDigits = autoMark.prefix(while: \.isNumber)
+        if typedDigits.isEmpty != autoDigits.isEmpty { return nil }
+        if typedDigits.isEmpty { if typedMark != autoMark { return nil } }
+        else if typedDigits.count > autoDigits.count || typedMark.last != autoMark.last { return nil }
         let rest = (typed as NSString).substring(from: m.range.length)
         let typedBox = group(m, 2, in: typed) != nil
         let autoBox = auto.prefix.range(of: "\\[[ xX]\\]\\s$", options: .regularExpression) != nil

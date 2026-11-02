@@ -80,7 +80,8 @@ enum TagRename {
             }
             if let c = TagColors.read()[old] { TagColors.set(new, to: TagColors.read()[new] ?? c); TagColors.set(old, to: nil) }
         }
-        if changed > 0 { NotesSync.shared.commitAlone("tag renamed") {} }
+        // queued, not waited for: the batch is finished, so no commit that lands now can split it, and the main thread never stalls behind a sync round
+        if changed > 0 { NotesSync.shared.commit("tag renamed") }
         return changed
     }
 }

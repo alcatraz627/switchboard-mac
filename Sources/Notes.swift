@@ -735,12 +735,27 @@ final class NotesStore: ObservableObject {
         return add(title: lines[0], body: lines.dropFirst().joined(separator: "\n"))
     }
 
+    /// A copy of words that would otherwise be lost, kept as a note of its own: "<title> (<label>)". Called again with the
+    /// id it returned, it updates that same note instead of making another. Returns the copy's id.
+    @discardableResult
+    func keepCopy(id: String?, title: String, body: String, label: String) -> String? {
+        let name = (title.isEmpty ? "Untitled" : title) + " (\(label))"
+        if let id, var n = notes.first(where: { $0.id == id }) {
+            let t = InputRules.settleTitle(old: "", new: name, body: body)
+            n.title = t.title; n.body = t.body
+            update(n)
+            return id
+        }
+        return add(title: name, body: body)?.id
+    }
+
     /// Saves a new note from a title and a body, either of which may be empty
     /// but not both; the same note twice is saved once.
     @discardableResult
     func add(title rawTitle: String, body rawBody: String, color: String? = nil, url rawURL: String = "") -> Note? {
-        let title = InputRules.cleanTitle(rawTitle)
-        let body = rawBody.trimmingCharacters(in: .whitespacesAndNewlines)
+        let settled = InputRules.settleTitle(old: "", new: rawTitle, body: rawBody.trimmingCharacters(in: .whitespacesAndNewlines))
+        let title = settled.title
+        let body = settled.body
         let url = rawURL.trimmingCharacters(in: .whitespaces)
         guard InputRules.canSave(title: title, body: body, url: url) else { return nil }
         // Enter on a note already saved does not make a second copy.
@@ -788,7 +803,9 @@ final class NotesStore: ObservableObject {
 
     /// Save a changed note; its reminder follows only a change to when, how
     /// often or what it says, so typing in the body does not touch Reminders.
-    func update(_ n: Note) {
+    func update(_ n: Note, keepingOtherVersion: Bool = false) {
+        // the file as another program left it goes into the history first, so overwriting it loses nothing
+        if keepingOtherVersion { NotesSync.shared.commitNow("other app's version") }
         var n = n
         let old = notes.first { $0.id == n.id }
         // an editor holding an older copy must not undo a move that arrived since

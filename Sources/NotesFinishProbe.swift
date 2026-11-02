@@ -141,6 +141,7 @@ func probeFinish() -> [String] {
     }
     let changed = TagRename.run("oldtag", to: "newtag", notes: s, saved: SavedStore())
     TagRename.afterPatch = nil
+    check("the rename queues its commit and does not make it on the caller's thread, so the panel never waits behind a sync round", commits() == c0, "commits +\(commits() - c0)")
     sync.commitNow("save")
     check("a rename of 6 notes lands as one commit although a sync round tried to commit after the first", fired && changed == 6 && commits() - c0 == 1, "changed \(changed), commits +\(commits() - c0)")
     check("every note carries the new tag in that commit", g("diff", "--name-only", "HEAD~1", "HEAD").out.split(separator: "\n").count == 6, g("diff", "--name-only", "HEAD~1", "HEAD").out)
@@ -275,7 +276,82 @@ func probeFinish() -> [String] {
           && InputRules.addTags(typed: String(repeating: "a", count: 32), to: []).problem == nil)
     let twelve = (1...12).map { "t\($0)" }
     check("a thirteenth tag is refused", InputRules.addTags(typed: "more", to: twelve).problem == "A note keeps at most 12 tags" && InputRules.addTags(typed: "t1", to: twelve).problem == nil)
-    check("a title is one line of at most 200 characters", InputRules.cleanTitle("a\n  b \n") == "a b" && InputRules.cleanTitle(String(repeating: "x", count: 300)).count == 200)
+    check("a title is one line", InputRules.cleanTitle("a\n  b \n") == "a b")
+
+    // F1: a long title loses no word; an untouched one is never cut
+    let words = (1...60).map { "word\($0)" }
+    let longTitle = words.joined(separator: " ")
+    let cut = InputRules.settleTitle(old: "", new: longTitle, body: "the body")
+    check("a title typed or pasted over 200 characters is cut at a word and the rest goes to the top of the body",
+          cut.title.count <= 200 && !cut.title.hasSuffix(" ") && cut.body.hasSuffix("\n\nthe body")
+          && (cut.title + " " + cut.body).split(whereSeparator: \.isWhitespace).map(String.init) == words + ["the", "body"], "\(cut.title.count): \(cut.title) | \(cut.body.prefix(40))")
+    let run = InputRules.settleTitle(old: "x", new: String(repeating: "q", count: 330), body: "")
+    check("an unbroken run is cut at 200 and the remainder is kept", run.title.count == 200 && run.body.count == 130)
+    check("a title the owner did not touch is left as it is, however long", InputRules.settleTitle(old: longTitle, new: longTitle, body: "b") == (longTitle, "b"))
+    let stored = NotesStore()
+    stored.load()
+    let added = stored.add(title: longTitle, body: "kept body")
+    check("a long title saved through the store keeps every word between title and body", added.map { ($0.title + " " + $0.body).split(whereSeparator: \.isWhitespace).count } == words.count + 2
+          && (added?.title.count ?? 999) <= 200, "\(added?.title.count ?? -1)")
+
+    // F2: Keep mine puts the other app's version in the history before overwriting it
+    var theirsNote = stored.add(title: "Shared", body: "base words")!
+    sync.commitNow("save")
+    try? "---\ntitle: \"Shared\"\n---\nwords the other app wrote\n".write(toFile: theirsNote.path, atomically: true, encoding: .utf8)
+    theirsNote.body = "words typed here"
+    stored.update(theirsNote, keepingOtherVersion: true)
+    check("the other app's version is committed before Keep mine overwrites it", g("log", "-p", "--format=%s", "--", theirsNote.id + ".md").out.contains("+words the other app wrote")
+          && read(theirsNote.id + ".md").contains("words typed here"), g("log", "--format=%s", "-4").out)
+
+    // F3: while a clash waits, the words typed here are kept as a copy, once, and it goes when they are saved
+    let copyID = stored.keepCopy(id: nil, title: "Shared", body: "typed 1", label: "typed here")
+    let again = stored.keepCopy(id: copyID, title: "Shared", body: "typed 1 and 2", label: "typed here")
+    check("a copy of the typed words is made once and then updated, not repeated",
+          copyID != nil && again == copyID && stored.notes.filter { $0.title == "Shared (typed here)" }.count == 1
+          && stored.notes.first { $0.id == copyID }?.body == "typed 1 and 2", "\(stored.notes.map(\.title))")
+
+    // F4: what the other app changed besides words is carried into the draft
+    var base4 = Note(id: "m", title: "T", body: "base", tags: ["a"], created: Date())
+    base4.remindAt = Date(timeIntervalSince1970: 1_800_000_000)
+    var mine4 = base4; mine4.body = "base mine"
+    var theirs4 = base4; theirs4.body = "base theirs"; theirs4.remindAt = Date(timeIntervalSince1970: 1_800_100_000); theirs4.tags = ["a", "b"]
+    theirs4.url = "https://example.com/x"; theirs4.color = "green"; theirs4.expires = Date(timeIntervalSince1970: 1_900_000_000)
+    let carried = NoteMerge.carryFields(draft: mine4, base: base4, theirs: theirs4)
+    check("a reminder, tags, link, colour and expiry changed by the other app come into the draft; the typed words stay",
+          carried.body == "base mine" && carried.remindAt == theirs4.remindAt && carried.tags == ["a", "b"] && carried.url == theirs4.url
+          && carried.color == "green" && carried.expires == theirs4.expires, "\(carried.remindAt as Any) \(carried.tags)")
+    var mine4b = mine4; mine4b.remindAt = Date(timeIntervalSince1970: 1_800_200_000)
+    check("a reminder moved on both sides: the later time wins",
+          NoteMerge.carryFields(draft: mine4b, base: base4, theirs: theirs4).remindAt == mine4b.remindAt
+          && NoteMerge.carryFields(draft: mine4b, base: base4, theirs: { var t = theirs4; t.remindAt = Date(timeIntervalSince1970: 1_700_000_000); return t }()).remindAt == mine4b.remindAt)
+    var mine4c = mine4; mine4c.remindAt = Date(timeIntervalSince1970: 1_800_050_000)
+    check("later still means theirs when theirs is the later one", NoteMerge.carryFields(draft: mine4c, base: base4, theirs: theirs4).remindAt == theirs4.remindAt)
+    var mine4d = mine4; mine4d.tags = ["a", "m"]
+    check("tags changed on both sides are joined", NoteMerge.carryFields(draft: mine4d, base: base4, theirs: theirs4).tags == ["a", "m", "b"])
+
+    // F5: a number typed after a dash is the sentence, not a doubled marker
+    let dashText = "- a\n- "
+    if let da = ListEdit.autoMarker(dashText, caret: (dashText as NSString).length) {
+        let typed = dashText + "2020. "
+        check("2020. typed after a dash item is kept", ListEdit.absorbTyped(typed, caret: (typed as NSString).length, auto: da) == nil)
+        let typed1 = dashText + "1. "
+        check("1. typed after a dash item is kept", ListEdit.absorbTyped(typed1, caret: (typed1 as NSString).length, auto: da) == nil)
+    } else { check("2020. typed after a dash item is kept", false, "no marker") }
+    let numText = "1. a\n2. "
+    if let na = ListEdit.autoMarker(numText, caret: (numText as NSString).length) {
+        let wide = numText + "20. "
+        check("a wider number than the automatic one is kept", ListEdit.absorbTyped(wide, caret: (wide as NSString).length, auto: na) == nil)
+        let same = numText + "2. "
+        let r5 = ListEdit.absorbTyped(same, caret: (same as NSString).length, auto: na)
+        check("the same number typed again is still folded in", r5 != nil && ((same as NSString).replacingCharacters(in: r5!.range, with: r5!.replacement)) == "1. a\n2. ")
+        let dashOver = numText + "- "
+        check("a dash typed after a number item is kept", ListEdit.absorbTyped(dashOver, caret: (dashOver as NSString).length, auto: na) == nil)
+    }
+
+    // F6: a table goes after the selection and the selected words stay
+    let tsel = NoteFormat.table("keep this sentence safe", NSRange(location: 5, length: 4))
+    check("a table inserted with words selected leaves them in place, selected", tsel.text.hasPrefix("keep this\n| Column 1") && tsel.text.hasSuffix(" sentence safe")
+          && tsel.selection == NSRange(location: 5, length: 4), tsel.text)
 
     // another program changing a note's words while words typed in the editor are unsaved
     let baseNote = Note(id: "n", title: "T", body: "base", tags: [], created: Date())

@@ -46,10 +46,25 @@ enum InputRules {
         return (tags + fresh, nil)
     }
 
-    /// A title as a single line of at most 200 characters, the way the extension keeps it.
+    /// A title as a single line: its lines joined by a space.
     static func cleanTitle(_ t: String) -> String {
-        let one = t.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " ")
-        return String(one.prefix(200))
+        t.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// The title and body to save when a title was typed or pasted. A title is one line of at most 200 characters, the
+    /// way the extension keeps it; what runs over is cut at a word and moved to the top of the body, so no word is
+    /// discarded. A title that was not touched (`new == old`) is left exactly as it is, whatever its length.
+    static func settleTitle(old: String, new: String, body: String) -> (title: String, body: String) {
+        if new == old { return (new, body) }
+        let one = cleanTitle(new)
+        guard one.count > 200 else { return (one, body) }
+        let cutAt = one.index(one.startIndex, offsetBy: 200)
+        var cut = cutAt
+        // inside a word: back up to the last space so the word goes whole to the body
+        if one[cutAt] != " ", let sp = one[..<cutAt].lastIndex(of: " ") { cut = sp }
+        let title = String(one[..<cut]).trimmingCharacters(in: .whitespaces)
+        let rest = String(one[cut...]).trimmingCharacters(in: .whitespaces)
+        return (title, body.isEmpty ? rest : rest + "\n\n" + body)
     }
 
     /// Whether opening a tab should hand its "new" input the keyboard: not
