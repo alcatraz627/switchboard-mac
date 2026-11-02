@@ -186,8 +186,8 @@ struct SettingsTabView: View {
     }
 
     /// The keys, one per line, grouped; replaces a paragraph nobody could read.
-    static let keyGroups: [(title: String, keys: [(String, String)])] = [
-        ("Anywhere", [("⌥Space  ⌘⌘", "Open; again for letters; again to close"),
+    static var keyGroups: [(title: String, keys: [(String, String)])] { [
+        ("Anywhere", [("⌥Space  ⌘⌘", HotKeys.leaderNote(failed: HotKeys.shared.failed)),
                       ("⌥⇧N", "A new note, cursor in it; Esc goes back"), ("⌥⇧L", "The note you edited last"),
                       ("⇧⌘P", "Find any action or place"), ("⌘J", "Go to a tab, note or timer")]),
         ("Panel", [("⌘1 – ⌘5", "Pick a space"), ("⌘⌥←  ⌘⌥→", "Tab before or after"),
@@ -203,7 +203,7 @@ struct SettingsTabView: View {
                      ("⌘K  ⌘⇧.", "Link, quote"), ("⌘⇧7", "Numbered list"), ("⇥  ⇧⇥", "Indent, outdent the lines"),
                      ("⌥↑  ⌥↓", "Move lines; with ⇧ copy them"), ("↩", "Carry a list on; on an empty item, end it"),
                      ("⌘S", "Save"), ("⌘⌥↑  ⌘⌥↓", "Previous, next note"), ("⌘⇧⌫", "Delete the note")]),
-    ]
+    ] }
 
     private var keyTable: some View {
         // one grid for every group, so the key column lines up down the whole table

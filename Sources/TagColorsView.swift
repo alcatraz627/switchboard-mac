@@ -56,6 +56,9 @@ struct TagChips: View {
 }
 
 enum TagRename {
+    /// Runs after each file of a rename has changed. A probe uses it to start a sync round at a chosen moment inside the batch.
+    static var afterPatch: (() -> Void)?
+
     /// Renames `old` to `new` on every note and save, and carries its colour over. Returns how many files changed.
     @discardableResult
     static func run(_ old: String, to rawNew: String, notes: NotesStore = .shared, saved: SavedStore = .shared) -> Int {
@@ -70,10 +73,10 @@ enum TagRename {
         // one commit then takes the whole of it
         NotesSync.shared.locked {
             for n in notes.notes where n.tags.contains(old) {
-                if notes.patch(n.id, commit: false, { $0.tags = swapped($0.tags) }) { changed += 1 }
+                if notes.patch(n.id, commit: false, { $0.tags = swapped($0.tags) }) { changed += 1; afterPatch?() }
             }
             for s in saved.items where s.tags.contains(old) {
-                if saved.patch(s.id, commit: false, { $0.tags = swapped($0.tags) }) { changed += 1 }
+                if saved.patch(s.id, commit: false, { $0.tags = swapped($0.tags) }) { changed += 1; afterPatch?() }
             }
             if let c = TagColors.read()[old] { TagColors.set(new, to: TagColors.read()[new] ?? c); TagColors.set(old, to: nil) }
         }

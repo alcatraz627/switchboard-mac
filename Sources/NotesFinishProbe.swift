@@ -124,29 +124,26 @@ func probeFinish() -> [String] {
     check("a change committed on its own keeps its name although a sync round began during the write", g("log", "--format=%s", "--", "racer.md").out.hasPrefix("moved on its own"),
           g("log", "--format=%s", "-3").out)
 
-    // S21: renaming a tag is one commit, even with sync rounds running
+    // S21: renaming a tag is one commit even when a sync round commits right after the first file changed
     let s = NotesStore()
     s.load()
-    for i in 0..<150 { var n = s.add(title: "Tagged \(i)", body: "b\(i)")!; n.tags = ["oldtag"]; s.update(n) }
+    for i in 0..<6 { var n = s.add(title: "Tagged \(i)", body: "b\(i)")!; n.tags = ["oldtag"]; s.update(n) }
     sync.commitNow("save")
     let c0 = commits()
-    // a sync tick that keeps committing whatever it finds, as the timer does, while the rename runs
-    let racing = NSLock()
-    var running = true
-    let racer = DispatchQueue(label: "probe.racer")
-    racer.async {
-        while true {
-            racing.lock(); let go = running; racing.unlock()
-            if !go { return }
-            sync.commitNow("race")
-        }
+    var fired = false
+    TagRename.afterPatch = {
+        guard !fired else { return }
+        fired = true
+        // the sync round's commit, started from another thread at this exact moment inside the batch
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async { sync.commitNow("race"); done.signal() }
+        done.wait()
     }
     let changed = TagRename.run("oldtag", to: "newtag", notes: s, saved: SavedStore())
-    racing.lock(); running = false; racing.unlock()
-    racer.sync {}
+    TagRename.afterPatch = nil
     sync.commitNow("save")
-    check("a rename of 150 notes lands as one commit although a sync tick keeps committing", changed == 150 && commits() - c0 == 1, "changed \(changed), commits +\(commits() - c0)")
-    check("every note carries the new tag in that commit", g("diff", "--name-only", "HEAD~1", "HEAD").out.split(separator: "\n").count == 150, g("diff", "--name-only", "HEAD~1", "HEAD").out)
+    check("a rename of 6 notes lands as one commit although a sync round tried to commit after the first", fired && changed == 6 && commits() - c0 == 1, "changed \(changed), commits +\(commits() - c0)")
+    check("every note carries the new tag in that commit", g("diff", "--name-only", "HEAD~1", "HEAD").out.split(separator: "\n").count == 6, g("diff", "--name-only", "HEAD~1", "HEAD").out)
 
     // S22: a reminder the phone owns keeps the phone's own handle when the Mac edits the note
     NotesStore.remindersOff = false
@@ -187,6 +184,31 @@ func probeFinish() -> [String] {
         if let k = keep { AppDefaults.store.set(k, forKey: HotKeys.captureKey) } else { AppDefaults.store.removeObject(forKey: HotKeys.captureKey) }
         HotKeys.shared.reloadChords()
     }
+
+    // the same for ⌥Space, the way in from anywhere
+    HotKeys.shared.releaseChords()
+    var otherLeader: EventHotKeyRef?
+    let heldLeader = RegisterEventHotKey(UInt32(kVK_Space), UInt32(optionKey), EventHotKeyID(signature: OSType(0x4F544852), id: 78), GetApplicationEventTarget(), 0, &otherLeader)
+    // either this probe holds ⌥Space, or something else on this Mac already does; either way macOS refuses the app
+    HotKeys.shared.reloadChords()
+    check("⌥Space refused by macOS is listed by name", HotKeys.shared.failed.contains("⌥Space"), "\(HotKeys.shared.failed)")
+    check("and the keyboard list in Settings says it is not working", HotKeys.leaderNote(failed: HotKeys.shared.failed).hasPrefix("not working: another app holds ⌥Space")
+          && SettingsTabView.keyGroups.first?.keys.first?.1.hasPrefix("not working") == true, SettingsTabView.keyGroups.first?.keys.first?.1 ?? "none")
+    if heldLeader == noErr, let o = otherLeader {
+        UnregisterEventHotKey(o)
+        HotKeys.shared.reloadChords()
+        check("once it is free the list reads as before", !HotKeys.shared.failed.contains("⌥Space") && SettingsTabView.keyGroups.first?.keys.first?.1 == "Open; again for letters; again to close")
+    } else {
+        lines.append("note leader: ⌥Space was already held by another program here (\(heldLeader)), so the refusal above is that program's; the release was not tried")
+    }
+
+    // comparing the other app's version with the words typed here
+    let cmp = NoteMerge.diff(mine: ["T", "one", "two mine", "three", "four", "five", "six", "seven"], theirs: ["T", "one", "two theirs", "three", "four", "five", "six", "seven", "added"], context: 1)
+    check("a comparison keeps the changed lines and one line around each, theirs before mine",
+          cmp == [.init(kind: .gap, text: "…"), .init(kind: .same, text: "one"), .init(kind: .theirs, text: "two theirs"), .init(kind: .mine, text: "two mine"), .init(kind: .same, text: "three"),
+                  .init(kind: .gap, text: "…"), .init(kind: .same, text: "seven"), .init(kind: .theirs, text: "added")], "\(cmp.map { "\($0.kind) \($0.text)" })")
+    check("two copies with the same lines compare as only a gap", NoteMerge.diff(mine: ["a", "b"], theirs: ["a", "b"]).allSatisfy { $0.kind == .gap })
+    check("an empty side is all of the other", NoteMerge.diff(mine: [], theirs: ["x"]) == [.init(kind: .theirs, text: "x")])
 
     // the editor's keys act on their own text view, with no window, no key window and no front app
     func key(_ code: Int, _ chars: String, _ mods: NSEvent.ModifierFlags) -> NSEvent {

@@ -133,6 +133,51 @@ enum NoteFormat {
 }
 
 enum NoteMerge {
+    /// One line of a comparison: shared by both sides, only in the other app's version, only in the one typed here, or a "…" for a skipped stretch.
+    struct DiffRow: Equatable {
+        enum Kind { case same, theirs, mine, gap }
+        var kind: Kind
+        var text: String
+    }
+
+    /// The words of a note as lines: its title, then its body.
+    static func lines(of n: Note) -> [String] { ([n.title] + n.body.components(separatedBy: "\n")) }
+
+    /// A line-by-line comparison of two versions of a note's words, the other app's against the one typed here.
+    /// Only the changed lines and `context` lines around each are kept; a skipped stretch becomes one gap row.
+    static func diff(mine: [String], theirs: [String], context: Int = 1) -> [DiffRow] {
+        let n = mine.count, m = theirs.count
+        var rows: [DiffRow] = []
+        if n * m > 4_000_000 {
+            rows = theirs.map { DiffRow(kind: .theirs, text: $0) } + mine.map { DiffRow(kind: .mine, text: $0) }
+        } else {
+            var t = [[Int]](repeating: [Int](repeating: 0, count: m + 1), count: n + 1)
+            for i in stride(from: n - 1, through: 0, by: -1) {
+                for j in stride(from: m - 1, through: 0, by: -1) {
+                    t[i][j] = mine[i] == theirs[j] ? t[i + 1][j + 1] + 1 : max(t[i + 1][j], t[i][j + 1])
+                }
+            }
+            var i = 0, j = 0
+            while i < n || j < m {
+                if i < n, j < m, mine[i] == theirs[j] { rows.append(DiffRow(kind: .same, text: mine[i])); i += 1; j += 1 }
+                else if j < m, i == n || t[i][j + 1] >= t[i + 1][j] { rows.append(DiffRow(kind: .theirs, text: theirs[j])); j += 1 }
+                else { rows.append(DiffRow(kind: .mine, text: mine[i])); i += 1 }
+            }
+        }
+        var keep = Set<Int>()
+        for (k, r) in rows.enumerated() where r.kind != .same {
+            for c in max(0, k - context)...min(rows.count - 1, k + context) { keep.insert(c) }
+        }
+        var out: [DiffRow] = []
+        var skipped = false
+        for (k, r) in rows.enumerated() {
+            if keep.contains(k) { if skipped { out.append(DiffRow(kind: .gap, text: "…")); skipped = false }; out.append(r) }
+            else { skipped = true }
+        }
+        if skipped { out.append(DiffRow(kind: .gap, text: "…")) }
+        return out
+    }
+
     /// Whether another program changed a note's words while words typed in the editor are still unsaved, so that
     /// taking either side would drop the other's. `base` is the note as the editor last took it in.
     static func wordsClash(base: Note?, draft: Note, theirs: Note) -> Bool {

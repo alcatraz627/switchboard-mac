@@ -766,10 +766,15 @@ final class HotKeys {
 
     /// Takes the capture chords up or lets them go, after Settings switches them.
     func reloadChords() {
+        releaseChords()
+        registerChords()
+    }
+
+    /// Lets every chord go, so the keys are free for whoever asks next.
+    func releaseChords() {
         for r in refs { if let r { UnregisterEventHotKey(r) } }
         refs = []
         failed = []
-        registerChords()
     }
 
     /// Whether ⌘⌘ can be heard while another app is in front.
@@ -814,6 +819,11 @@ final class HotKeys {
         let held = failed.filter { $0 == "⌥⇧N" || $0 == "⌥⇧L" }
         if on, !held.isEmpty { return "not working: another app holds " + held.joined(separator: " and ") }
         return on ? "on: from any app, Esc goes back" : "off"
+    }
+
+    /// What the keyboard list says beside ⌥Space: what it does, or that another app holds it so it does not work.
+    static func leaderNote(failed: [String]) -> String {
+        failed.contains("⌥Space") ? "not working: another app holds ⌥Space (⌘⌘ still opens it)" : "Open; again for letters; again to close"
     }
 
     /// Chords macOS refused at the last registration, by label, so Settings can say another app holds them.

@@ -494,6 +494,7 @@ struct NoteRow: View {
     @State private var versions: [NoteVersion] = []
     /// The note as another program wrote it while words typed here were still unsaved. Saving waits for a choice.
     @State private var theirs: Note?
+    @State private var showCompare = CommandLine.arguments.contains("--compare")
     /// A snapshot run with --other-app draws the open note with that choice up.
     static var startClash = CommandLine.arguments.contains("--other-app")
     /// Snapshots open the first note's editor so its look can be checked.
@@ -831,7 +832,12 @@ struct NoteRow: View {
         if Self.startOpen, notes.live.first?.id == note.id {
             _snapshotOpen = State(initialValue: true)
             _draft = State(initialValue: note)
-            if Self.startClash { _theirs = State(initialValue: note) }
+            if Self.startClash {
+                // the other app rewrote the first line of the body and added one under it
+                var other = note
+                other.body = "Rewritten by the other app\n" + note.body.components(separatedBy: "\n").dropFirst().joined(separator: "\n") + "\nAn added line"
+                _theirs = State(initialValue: other)
+            }
             if Self.startTitleEdit { _editingTitle = State(initialValue: true); _titleDraft = State(initialValue: note.title) }
         }
     }
@@ -951,11 +957,14 @@ struct NoteRow: View {
                         .sbControlSize(.small).help("Drop the words typed here and take the note as the other app left it")
                     Button { theirs = nil; save() } label: { Label("Keep mine", systemImage: "pencil").lineLimit(1).fixedSize() }
                         .sbControlSize(.small).help("Save the words typed here over the other app's; its version stays in the note's history")
+                    Button { withAnimation(Motion.slow) { showCompare.toggle() } } label: { Label("Compare", systemImage: "rectangle.split.2x1").lineLimit(1).fixedSize() }
+                        .sbControlSize(.small).help("Show the lines that differ between the other app's version and the words typed here")
                 }
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 6) { say; Spacer(minLength: 4); choose }
                     VStack(alignment: .leading, spacing: 5) { say; choose }
                 }
+                if showCompare { compareView(other, draft ?? note) }
             }
             // title and body are one sheet, like a note app, not two boxed fields
             VStack(alignment: .leading, spacing: 0) {
@@ -1182,6 +1191,38 @@ struct NoteRow: View {
         if let why = r.problem { hint(why); return }
         d.wrappedValue.tags = r.tags
         tagsText = ""
+    }
+
+    /// The lines that differ: the other app's version against the words typed here, with a line of context around each change.
+    private func compareView(_ other: Note, _ mine: Note) -> some View {
+        let rows = NoteMerge.diff(mine: NoteMerge.lines(of: mine), theirs: NoteMerge.lines(of: other))
+        return VStack(alignment: .leading, spacing: 0) {
+            if rows.allSatisfy({ $0.kind == .gap }) {
+                Text("The two copies have the same lines.").font(PT.caption).foregroundStyle(.secondary).padding(8)
+            } else {
+                HStack(spacing: 10) {
+                    Text("\u{2212} the other app").foregroundStyle(.red)
+                    Text("+ typed here").foregroundStyle(.green)
+                }
+                .font(.sb(10, weight: .semibold)).padding(.horizontal, 8).padding(.top, 6).padding(.bottom, 3)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
+                            HStack(alignment: .top, spacing: 6) {
+                                Text(r.kind == .theirs ? "\u{2212}" : r.kind == .mine ? "+" : " ").frame(width: 10)
+                                Text(r.text.isEmpty ? " " : r.text).frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(r.kind == .gap ? Color.secondary : Color.primary)
+                            .padding(.horizontal, 8).padding(.vertical, 1)
+                            .background(r.kind == .theirs ? Color.red.opacity(0.14) : r.kind == .mine ? Color.green.opacity(0.14) : Color.clear)
+                        }
+                    }
+                }
+                .frame(maxHeight: 150).padding(.bottom, 4)
+            }
+        }
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.05)))
     }
 
     /// Leaving the note with the other app's change still unanswered: its version is kept as a note of its own, so
