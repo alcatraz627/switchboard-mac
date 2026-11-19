@@ -384,7 +384,7 @@ struct DeskFrame<Content: View>: View {
                     let list = others()
                     if list.isEmpty { Text("Pin another page or tab to combine with it") }
                     ForEach(list, id: \.key) { o in Button("Combine with \(o.title)") { combine(o.key) } }
-                    if inStack { Divider(); Button("Take out into its own window", action: takeOut) }
+                    if inStack { Divider(); Button("Own window", action: takeOut) }
                 } label: {
                     Image(systemName: "rectangle.stack.badge.plus").font(.sbIcon(10))
                 }

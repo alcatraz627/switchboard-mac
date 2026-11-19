@@ -202,7 +202,7 @@ struct WhenPanel: View {
                     .textFieldStyle(.plain).font(.sb(11.5))
                     .focused($fieldFocused)
                     .inputBox(focused: fieldFocused)
-                    .help("Type a time: 90m, 3h, tomorrow 9am, fri 5pm")
+                    .help("A time: 90m, 3h, tomorrow 9am, fri 5pm")
                     .onSubmit { if let d = typedDate { pick(d) } }
                     // Escape lets go of the keyboard; a second Escape closes the picker
                     .onExitCommand { fieldFocused = false }

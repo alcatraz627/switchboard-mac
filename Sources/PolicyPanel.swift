@@ -268,7 +268,7 @@ struct PolicyPanel: View {
                     }
                     .buttonStyle(.borderless).foregroundStyle(.secondary)
                     .keyRing(keys.zone == .spaces && keys.spacePick == "hdr.pindesk", radius: 4)
-                    .help("Pin \(current.title) to the desktop as a panel that stays up (⌘D)")
+                    .help("Pin \(current.title) to the desktop (⌘D)")
                 }
                 // pinned open: a click outside no longer closes the panel (⌘P)
                 if !unbounded {
@@ -514,7 +514,7 @@ struct AgentsTabView: View {
             .font(PT.caption)
         }
         .buttonStyle(.borderless)
-        .help("Where a change applies: everywhere, or one repository's override")
+        .help("Everywhere, or one repository's override")
         .popover(isPresented: $showScopes, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(store.scopes, id: \.self) { s in ScopeRow(scope: s, selected: s == store.scope) {
@@ -1298,7 +1298,7 @@ struct PolicyRowView: View {
                     Image(systemName: "xmark.circle.fill").font(.sbIcon(10))
                 }
                 .buttonStyle(.borderless)
-                .help("Cancel the timed change and keep the current value")
+                .help("Cancel the timed change; keep the current value")
             }
             .font(PT.caption).foregroundStyle(snoozeTint)
         } else if store.scopeIsProject {
@@ -1404,7 +1404,7 @@ struct PolicyRowView: View {
                     .foregroundStyle(active ? AnyShapeStyle(snoozeTint) : AnyShapeStyle(.tertiary))
             }
             .fixedSize()
-            .help("Change this later, keeping the current value until then")
+            .help("Change later; current value holds until then")
         }
     }
 }

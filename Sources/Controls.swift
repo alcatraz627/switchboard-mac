@@ -342,7 +342,7 @@ struct ControlsTabView: View {
                         }))) {
                         if on && controls.ssid == nil && !controls.locationAllowed {
                             Button("Show name") { controls.askLocation() }.buttonStyle(.link).font(SBStyle.caption)
-                                .help("macOS shows the network name only to apps with Location access")
+                                .help("macOS needs Location access to show the network")
                         }
                         if controls.busy.contains("wifi") { PendingMark(since: controls.busySince["wifi"] ?? Date()) }
                         Toggle("", isOn: Binding(get: { on }, set: { new in

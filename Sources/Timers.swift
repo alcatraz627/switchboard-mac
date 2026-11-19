@@ -382,7 +382,7 @@ private struct TimersList: View {
             .background(Capsule().strokeBorder(Color.primary.opacity(0.2)))
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-        .help("Which device runs the next timer; a phone timer waits until the phone picks it up")
+        .help("Which device runs it; phones wait for pickup")
     }
 
     var body: some View {
@@ -415,7 +415,7 @@ private struct TimersList: View {
                             .padding(.horizontal, 10).padding(.vertical, 5)
                             .background(Capsule().fill(timerColor(color ?? "blue").opacity(0.25)))
                     }
-                    .help("Pick how long; the timer starts at once (Enter in the label opens this)")
+                    .help("Pick a length; it starts at once")
                 }
                 // the run-on choice, the templates every device shares, then the last few timers, to start again in one click
                 FlowLayout(spacing: 5) {

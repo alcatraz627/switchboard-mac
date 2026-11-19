@@ -132,7 +132,7 @@ struct CommentsBadge: View {
                 Text("\(n)").font(.sb(10, weight: .medium))
             }
             .foregroundStyle(Color.accentColor).fixedSize().layoutPriority(1)
-            .help("\(n) open comment thread\(n == 1 ? "" : "s"); open the note to read them")
+            .help("\(n) open thread\(n == 1 ? "" : "s"); open the note to read")
         }
     }
 }

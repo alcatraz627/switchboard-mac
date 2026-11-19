@@ -51,7 +51,7 @@ struct InboxSection: View {
                         .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain).padding(.leading, 4)
-                    .help("Notes agents wrote. They stay out of your own list until you keep one.")
+                    .help("Agent notes; a kept one joins your list")
                     if showLane {
                         Card {
                             ForEach(Array(agents.enumerated()), id: \.element.id) { i, item in
@@ -95,12 +95,12 @@ private struct InboxRow: View {
                 ForEach(InboxLater.choices(), id: \.title) { c in Button(c.title) { inbox.later(item.id, until: c.date) } }
             } label: { Image(systemName: "clock").font(.sbIcon(11)) }
                 .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().foregroundStyle(.secondary)
-                .help("Later: it comes back in the inbox at the time you pick")
+                .help("Back in the inbox when you pick")
         }
         .padding(.horizontal, PT.rowH - 4).padding(.vertical, 6)
         .keyRing(nav.focus == .inbox(item.id))
         .id("inbox-" + item.id)
-        .help("I enters the inbox from the list. K keeps, D puts away, L brings it back tomorrow morning, Return opens.")
+        .help("K keeps, D away, L tomorrow, Return opens")
     }
 
     private var subtitle: String {

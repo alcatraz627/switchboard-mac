@@ -407,7 +407,7 @@ struct RecentlyDeleted: View {
                 }
                 .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain).padding(.leading, 4).help("Deleted notes wait here until you bring them back or remove them for good")
+            .buttonStyle(.plain).padding(.leading, 4).help("Deleted notes, until restored or removed for good")
             if show {
                 Card {
                     ForEach(Array(notes.trashed.enumerated()), id: \.element.id) { i, t in
@@ -429,7 +429,7 @@ struct RecentlyDeleted: View {
             Button { notes.restore(t) } label: { Label("Restore", systemImage: "arrow.uturn.backward").lineLimit(1).fixedSize() }
                 .sbControlSize(.small).help("Put this note back in the list")
             Button { notes.purge(t) } label: { Label("Remove", systemImage: "trash").lineLimit(1).fixedSize() }
-                .sbControlSize(.small).help("Remove this note for good (it goes to the macOS Trash)")
+                .sbControlSize(.small).help("Remove for good, to the macOS Trash")
         }
         .padding(.horizontal, PT.rowH).padding(.vertical, PT.rowV + 2)
     }
@@ -639,7 +639,7 @@ struct NoteRow: View {
                 Button { openTo(.history) } label: { Label("Versions…", systemImage: "clock.arrow.circlepath") }
                 Divider()
                 Button { send() } label: { Label("Send…", systemImage: "square.and.arrow.up") }
-                Button { showOnPi() } label: { Label("Show on the Pi screen", systemImage: "tv") }
+                Button { showOnPi() } label: { Label("Show on Pi", systemImage: "tv") }
                 Divider()
                 if !note.title.isEmpty { Button { copy(note.title) } label: { Label("Copy title", systemImage: "textformat") } }
                 if !note.body.isEmpty { Button { copy(note.body) } label: { Label("Copy text", systemImage: "text.alignleft") } }
@@ -668,7 +668,7 @@ struct NoteRow: View {
             }
             .foregroundStyle(.secondary).fixedSize()
         }
-        .buttonStyle(.plain).help("Back to the list (Esc or ←); the note stays as you left it")
+        .buttonStyle(.plain).help("Back to the list (Esc or ←)")
     }
 
     /// Write is the text as typed; Read lays it out. Return starts writing, Esc goes back to reading.
@@ -679,7 +679,7 @@ struct NoteRow: View {
             switchButtons(typing: typing, words: true)
             switchButtons(typing: typing, words: false)
         }
-        .help("Write: the text as typed. Read: laid out. Return writes, Esc reads")
+        .help("Write as typed, or read laid out")
     }
     private func switchButtons(typing: Bool, words: Bool) -> some View {
         HStack(spacing: 0) {
@@ -754,7 +754,7 @@ struct NoteRow: View {
                         Text(note.heading).font(PT.label).lineLimit(1).truncationMode(.middle)
                             .strikethrough(note.expired).help(note.heading)
                         if note.conflicted {
-                            KeyPill(text: "both sides").help("Edited on two devices apart; both versions are in the body, marked")
+                            KeyPill(text: "both sides").help("Edited on two devices; both versions kept, marked")
                                 .layoutPriority(1).fixedSize()
                         }
                         if let a = note.agent {
@@ -915,7 +915,7 @@ struct NoteRow: View {
             }
             .foregroundStyle(.secondary)
         }
-        .buttonStyle(.plain).help("Every save of this note; pick one to bring it back")
+        .buttonStyle(.plain).help("Every save; pick one to bring back")
         .keyRing(ringed(.history), radius: 6)
         .onChange(of: nav.picker) { p in if p == .history { loadVersions() } }
         .popover(isPresented: pickerBinding(.history), arrowEdge: .bottom) {
@@ -963,11 +963,11 @@ struct NoteRow: View {
                 }
                 let choose = HStack(spacing: 6) {
                     Button { loadTheirs(other) } label: { Label("Load theirs", systemImage: "arrow.down.doc").lineLimit(1).fixedSize() }
-                        .sbControlSize(.small).help("Take the note as the other app left it; the words typed here stay as a note of their own")
+                        .sbControlSize(.small).help("Use theirs; your words become a new note")
                     Button { keepMine(other) } label: { Label("Keep mine", systemImage: "pencil").lineLimit(1).fixedSize() }
-                        .sbControlSize(.small).help("Save the words typed here over the other app's; its version is saved to the note's history first")
+                        .sbControlSize(.small).help("Keep yours; theirs goes to the note's history")
                     Button { withAnimation(Motion.slow) { showCompare.toggle() } } label: { Label("Compare", systemImage: "rectangle.split.2x1").lineLimit(1).fixedSize() }
-                        .sbControlSize(.small).help("Show the lines that differ between the other app's version and the words typed here")
+                        .sbControlSize(.small).help("Lines that differ between theirs and yours")
                 }
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 6) { say; Spacer(minLength: 4); choose }
@@ -1029,7 +1029,7 @@ struct NoteRow: View {
                 }
             }
             if d.wrappedValue.remindAt != nil, d.wrappedValue.remindRepeat == .never {
-                Toggle("Expire the note when it fires", isOn: Binding(get: { expireWithReminder }, set: { on in
+                Toggle("Expire after ringing", isOn: Binding(get: { expireWithReminder }, set: { on in
                     expireWithReminder = on
                     d.wrappedValue.expires = on ? d.wrappedValue.remindAt : nil
                 })).toggleStyle(.checkbox).font(PT.caption)
@@ -1337,7 +1337,7 @@ struct NoteRow: View {
                         d.wrappedValue.remindOn = fresh.remindOn; d.wrappedValue.remindPersist = fresh.remindPersist
                     }
                 } label: { chip(icon: "bell.slash", ringer.ringing.contains(note.id) ? "Dismiss" : "Missed: dismiss", set: true) }
-                .buttonStyle(.plain).help("Dismiss the reminder. A repeating one moves to its next time; the change syncs, so it clears on the other device too.")
+                .buttonStyle(.plain).help("Dismiss everywhere; repeats move to the next time")
             }
             clearButton("Remove the reminder") { d.wrappedValue.remindAt = nil; d.wrappedValue.remindOn = nil; d.wrappedValue.remindPersist = false; expireWithReminder = false }
         }
@@ -1403,7 +1403,7 @@ struct NoteRow: View {
             Image(systemName: "doc.on.doc").font(.sbIcon(11)).foregroundStyle(.secondary)
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-        .help("Copy the note, its title, its text or its path (C copies it all)")
+        .help("Copy title, text or path (C copies all)")
     }
 }
 

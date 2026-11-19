@@ -322,7 +322,7 @@ struct SessionsPage: View {
                         SessionActions.openHub { failed = $0 }
                     } label: { Label("Hub", systemImage: "rectangle.grid.2x2") }
                         .buttonStyle(.borderless).font(.sb(11.5))
-                        .help("Open the session hub's board: every session, past ones too, with search. Middle-click to open it in the browser.")
+                        .help("Every session, past ones too; middle-click for browser")
                         .onMiddleClick("shub", space: cardSpace) { failed = nil; SessionActions.openHub(inBrowser: true) { failed = $0 } }
                     Spacer()
                 }
@@ -369,7 +369,7 @@ struct SessionsPage: View {
             }
         }
         .font(.sb(11, weight: .medium))
-        .help("What the open sessions have cost so far: $\(String(format: "%.2f", spend))")
+        .help("Open sessions have cost $\(String(format: "%.2f", spend))")
     }
 }
 

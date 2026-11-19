@@ -474,7 +474,7 @@ struct QuickCard: View {
                     Image(systemName: "eye.slash").font(.sbIcon(12, weight: .medium))
                 }
                 .buttonStyle(.borderless).foregroundStyle(.secondary).headerRing("hide", $focus, state)
-                .help("Hide \(state.page.title) from the hover card. Bring it back in Settings, Hover card.")
+                .help("Hide \(state.page.title) ; Settings, Hover card restores it")
             }
             if let pin, !state.onDesk {
                 Button { pin(state.page) } label: {
@@ -482,7 +482,7 @@ struct QuickCard: View {
                     Image(systemName: "pip.enter").font(.sbIcon(12, weight: .medium))
                 }
                 .buttonStyle(.borderless).foregroundStyle(.secondary).headerRing("desk", $focus, state)
-                .help("Pin \(state.page.title) to the desktop as a panel that stays up")
+                .help("Pin \(state.page.title) to the desktop")
             }
             if let tab = state.page.tab {
                 Button { openTab(tab) } label: {
@@ -640,7 +640,7 @@ struct QuickCard: View {
                     Label("Hub", systemImage: "rectangle.grid.2x2")
                 }
                 .buttonStyle(.borderless).font(.sb(11.5))
-                .help("Open the session hub's board. Middle-click to open it in the browser.")
+                .help("The session board; middle-click for the browser")
                 .onMiddleClick("fhub", space: state.space) { hubFailed = nil; SessionActions.openHub(inBrowser: true) { hubFailed = $0 } }
                 if !rows.isEmpty {
                     Button { state.page = .approvals } label: {
@@ -759,7 +759,7 @@ struct QuickCard: View {
                     Button { timers.stopRinging(t.id) } label: { Label("Stop", systemImage: "bell.slash.fill") }
                         .buttonStyle(.borderedProminent).tint(timerColor(t.color)).sbControlSize(.small).help("Stop the ring")
                     Button { timers.extend(t, by: 60) } label: { Label("1 min", systemImage: "plus") }
-                        .sbControlSize(.small).help("Stop the ring and run it a minute more")
+                        .sbControlSize(.small).help("Stop ringing, run a minute more")
                 }
             }
             if running.isEmpty && ringing.isEmpty { empty("No timers running") }
@@ -774,7 +774,7 @@ struct QuickCard: View {
                     Button { timers.remove(t) } label: { Image(systemName: "xmark.circle").font(.sbIcon(11)) }
                         .buttonStyle(.borderless).foregroundStyle(.secondary).help("Stop it")
                 }
-                .help("Scroll to add or take away a minute. Middle-click to open it in Timers.")
+                .help("Scroll for ±1 minute; middle-click opens Timers")
                 // the wheel over a timer moves it a minute a notch; a middle click opens it in the tab
                 .scrollSteps("q-timer-" + t.id, card: state.space, stepper: .slider()) { st in timers.nudge(t, minutes: -st) }
                 .onMiddleClick("qtimer-" + t.id, space: state.space) { openReveal("timers", "timer-" + t.id) }

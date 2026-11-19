@@ -77,7 +77,7 @@ struct HistoryPanel: View {
                     Button("Use this version") { restore(s); dismiss() }
                         .sbControlSize(.small)
                         .keyboardShortcut(.return, modifiers: .command)
-                        .help("Puts this text back in the editor (⌘↩); the text it replaces stays in the list")
+                        .help("Restore into the editor (⌘↩); current text kept")
                 }
             }
         }

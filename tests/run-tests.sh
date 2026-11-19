@@ -25,6 +25,9 @@ section "syntax"
 for f in scripts/*.sh tests/*.sh tests/fixtures/*.sh; do check "$f parses" bash -n "$f"; done
 for f in Resources/lib/*.py hooks/*.py; do check "$f compiles" python3 -m py_compile "$f"; done
 
+section "words"
+check "every button is four words or fewer and every tooltip eight (tests/ui_words.py)" python3 tests/ui_words.py
+
 section "swift"
 SRCS=()
 while IFS= read -r f; do SRCS+=("$f"); done < <(find Sources -name '*.swift' | sort)
